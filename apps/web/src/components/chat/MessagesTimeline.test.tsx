@@ -201,6 +201,7 @@ function buildProps() {
     resolvedTheme: "light" as const,
     timestampFormat: "locale" as const,
     workspaceRoot: undefined,
+    ttsEnabled: false,
     anchorMessageId: null,
     onAnchorReady: () => {},
     contentInsetEndAdjustment: 0,

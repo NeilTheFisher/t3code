@@ -1506,6 +1506,7 @@ export default function ChatView(props: ChatViewProps) {
     (store) => store.setStickyModelSelection,
   );
   const timestampFormat = settings.timestampFormat;
+  const ttsEnabled = settings.tts.enabled;
   const navigate = useNavigate();
   const citationLocation = useLocation({
     select: (location) => ({
@@ -8288,6 +8289,8 @@ export default function ChatView(props: ChatViewProps) {
                     ? resolveProviderSkillsForCwd(activeProviderStatus, gitCwd)
                     : EMPTY_PROVIDER_SKILLS
                 }
+                skills={activeProviderStatus?.skills ?? EMPTY_PROVIDER_SKILLS}
+                ttsEnabled={ttsEnabled}
                 anchorMessageId={timelineAnchorMessageId}
                 onAnchorReady={onTimelineAnchorReady}
                 contentInsetEndAdjustment={composerTimelineInset}
