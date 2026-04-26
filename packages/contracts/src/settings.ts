@@ -175,6 +175,16 @@ export const BrowserRecordingFrameRate = Schema.Literals(BROWSER_RECORDING_FRAME
 export type BrowserRecordingFrameRate = typeof BrowserRecordingFrameRate.Type;
 export const DEFAULT_BROWSER_RECORDING_FRAME_RATE: BrowserRecordingFrameRate = 30;
 
+export const DEFAULT_TTS_SERVER_URL = "http://127.0.0.1:8880";
+export const DEFAULT_TTS_VOICE = "af_heart";
+
+export const TtsClientSettings = Schema.Struct({
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  serverUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_TTS_SERVER_URL))),
+  voice: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_TTS_VOICE))),
+});
+export type TtsClientSettings = typeof TtsClientSettings.Type;
+
 export const ClientSettingsSchema = Schema.Struct({
   appearanceContrast: AppearanceContrast.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_APPEARANCE_CONTRAST)),
@@ -294,6 +304,7 @@ export const ClientSettingsSchema = Schema.Struct({
   ),
   wordWrap: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   enableExternalFilePreview: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  tts: TtsClientSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
 });
 export type ClientSettings = typeof ClientSettingsSchema.Type;
 

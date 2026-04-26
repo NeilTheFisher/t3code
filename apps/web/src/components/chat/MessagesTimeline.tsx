@@ -98,11 +98,14 @@ import {
   keepTimelineEndVisibleAfterOverlayGrowth,
 } from "./timelineScrollAnchoring";
 import { MessageCopyButton } from "./MessageCopyButton";
+import { MessagePlayButton } from "./MessagePlayButton";
+import { stopPlayback as stopTtsPlayback } from "~/hooks/useTtsPlayer";
 import {
   computeStableMessagesTimelineRows,
   deriveMessagesTimelineRows,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
+  resolveAssistantMessagePlayState,
   resolveTimelineIsAtEnd,
   resolveTimelineMinimapHasPersistentGutter,
   resolveTimelineMinimapHeightStyle,
@@ -170,6 +173,7 @@ interface TimelineRowSharedState {
   workspaceRoot: string | undefined;
   skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   activeThreadEnvironmentId: EnvironmentId;
+  ttsEnabled: boolean;
   onRevertUserMessage: (messageId: MessageId) => void;
   onUseArtifactTemplate: (template: CodexArtifactTemplate) => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
@@ -263,6 +267,7 @@ interface MessagesTimelineProps {
   timestampFormat: TimestampFormat;
   workspaceRoot: string | undefined;
   skills?: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
+  ttsEnabled: boolean;
   anchorMessageId: MessageId | null;
   onAnchorReady: (messageId: MessageId, anchorIndex: number) => void;
   contentInsetEndAdjustment: number;
@@ -311,6 +316,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   timestampFormat,
   workspaceRoot,
   skills = EMPTY_TIMELINE_SKILLS,
+  ttsEnabled,
   anchorMessageId,
   onAnchorReady,
   contentInsetEndAdjustment,
@@ -414,6 +420,16 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     },
     [suspendEndScrollMaintenanceForDisclosure],
   );
+
+  // Audio is owned by a module-level singleton (see useTtsPlayer.ts) so it
+  // survives row unmounts during scroll. ChatView keys this timeline by the
+  // active thread id, so cleanup fires exactly when navigating to a different
+  // thread — which is when we want playback to stop.
+  useEffect(() => {
+    return () => {
+      stopTtsPlayback();
+    };
+  }, []);
 
   // An in-session interrupt leaves its turn expanded so the user keeps their
   // place; the next turn (or a reload, since this is local state) folds it.
@@ -564,6 +580,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       workspaceRoot,
       skills,
       activeThreadEnvironmentId,
+      ttsEnabled,
       onRevertUserMessage,
       onUseArtifactTemplate,
       onImageExpand,
@@ -583,6 +600,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       workspaceRoot,
       skills,
       activeThreadEnvironmentId,
+      ttsEnabled,
       onRevertUserMessage,
       onUseArtifactTemplate,
       onImageExpand,
