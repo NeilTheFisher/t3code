@@ -307,6 +307,15 @@ export const LoadBalancingWeights = Schema.Record(
 );
 
 export const DiffColorScheme = Schema.Literals(["red-green", "blue-orange"]);
+export const DEFAULT_TTS_SERVER_URL = "http://127.0.0.1:8880";
+export const DEFAULT_TTS_VOICE = "af_heart";
+
+export const TtsClientSettings = Schema.Struct({
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  serverUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_TTS_SERVER_URL))),
+  voice: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_TTS_VOICE))),
+});
+export type TtsClientSettings = typeof TtsClientSettings.Type;
 
 /** Maximum width of the chat timeline and composer on wide screens. */
 export const ChatWidth = Schema.Literals(["comfortable", "wide", "full"]);
@@ -514,6 +523,7 @@ export const ClientSettingsSchema = Schema.Struct({
   ),
   wordWrap: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   enableExternalFilePreview: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  tts: TtsClientSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
 });
 export type ClientSettings = typeof ClientSettingsSchema.Type;
 
@@ -1355,7 +1365,9 @@ export const ServerSettings = Schema.Struct({
   ),
   /** Exact model IDs, applied to past and future usage on this environment. */
   usagePriceOverrides: Schema.Record(TrimmedNonEmptyString, UsageModelPriceOverride).pipe(
-userscripts: Schema.Record(Schema.String, Schema.Array(Userscript)).pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
+  userscripts: Schema.Record(Schema.String, Schema.Array(Userscript)).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
 });
@@ -1642,7 +1654,7 @@ export const ServerSettingsPatch = Schema.Struct({
   usagePriceOverrides: Schema.optionalKey(
     Schema.Record(TrimmedNonEmptyString, Schema.NullOr(UsageModelPriceOverride)),
   ),
-// Per-device userscripts. The client sends only its own device's entry;
+  // Per-device userscripts. The client sends only its own device's entry;
   // deepMerge preserves scripts from other devices.
   userscripts: Schema.optionalKey(Schema.Record(Schema.String, Schema.Array(Userscript))),
 });
@@ -1737,5 +1749,6 @@ export const ClientSettingsPatch = Schema.Struct({
   showProviderUsageInContextPopover: Schema.optionalKey(Schema.Boolean),
   wordWrap: Schema.optionalKey(Schema.Boolean),
   enableExternalFilePreview: Schema.optionalKey(Schema.Boolean),
+  tts: Schema.optionalKey(TtsClientSettings),
 });
 export type ClientSettingsPatch = typeof ClientSettingsPatch.Type;
