@@ -460,6 +460,7 @@ describe("OrchestrationEngine", () => {
           getThreadDetailById: () => Effect.succeedNone,
           getThreadDetailSnapshot: () => Effect.succeedNone,
           searchThreads: () => Effect.succeed({ matches: [] }),
+          getThreadActivitiesPage: () => Effect.die("unused"),
         }),
       ),
       Layer.provide(

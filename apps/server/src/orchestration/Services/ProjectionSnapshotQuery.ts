@@ -12,6 +12,8 @@ import type {
   CheckpointRef,
   MessageId,
   OrchestrationCheckpointSummary,
+  OrchestrationGetThreadActivitiesInput,
+  OrchestrationGetThreadActivitiesResult,
   OrchestrationMessage,
   OrchestrationProject,
   OrchestrationProjectShell,
@@ -272,6 +274,8 @@ export interface ProjectionSnapshotQueryShape {
     Option.Option<{
       readonly message: OrchestrationMessage;
       readonly hasOtherUserMessages: boolean;
+      /** The thread's earlier messages are `${threadId}:fork:*` copies from a fork. */
+      readonly hasInheritedForkMessages: boolean;
     }>,
     ProjectionRepositoryError
   >;
@@ -304,6 +308,16 @@ export interface ProjectionSnapshotQueryShape {
     threadId: ThreadId,
     window?: OrchestrationThreadDetailWindow,
   ) => Effect.Effect<Option.Option<OrchestrationThreadDetailSnapshot>, ProjectionRepositoryError>;
+
+  /**
+   * Cursor-paginated load of a thread's older activities (lazy-load / infinite
+   * scroll). Returns the page of activities immediately older than the provided
+   * sequence or unsequenced activity cursor, ascending, plus whether older ones
+   * remain.
+   */
+  readonly getThreadActivitiesPage: (
+    input: OrchestrationGetThreadActivitiesInput,
+  ) => Effect.Effect<OrchestrationGetThreadActivitiesResult, ProjectionRepositoryError>;
 }
 
 /**
