@@ -35,6 +35,7 @@ export const ORCHESTRATION_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
   getWorkflowScript: "orchestration.getWorkflowScript",
   getTurnDiff: "orchestration.getTurnDiff",
+  getThreadActivities: "orchestration.getThreadActivities",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
   searchThreads: "orchestration.searchThreads",
   getArchivedShellSnapshot: "orchestration.getArchivedShellSnapshot",
@@ -749,6 +750,10 @@ export const OrchestrationThread = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
   activities: Schema.Array(OrchestrationThreadActivity),
+  // The detail snapshot windows `activities` to the most recent page; this is
+  // true when older activities exist beyond the window and can be lazy-loaded
+  // via the getThreadActivities RPC. Absent on lightweight (shell) threads.
+  hasMoreActivities: Schema.optional(Schema.Boolean),
   checkpoints: Schema.Array(OrchestrationCheckpointSummary),
   session: Schema.NullOr(OrchestrationSession),
 });
@@ -2091,6 +2096,37 @@ export type OrchestrationGetTurnDiffInput = typeof OrchestrationGetTurnDiffInput
 export const OrchestrationGetTurnDiffResult = ThreadTurnDiff;
 export type OrchestrationGetTurnDiffResult = typeof OrchestrationGetTurnDiffResult.Type;
 
+/**
+ * Cursor-paginated load of a thread's OLDER activities (lazy-load / infinite
+ * scroll). Sequenced activity uses `beforeSequence`, the `sequence` of the
+ * oldest activity the client currently holds. Legacy unsequenced activity uses
+ * the `(beforeCreatedAt, beforeActivityId)` pair from the oldest loaded
+ * activity. The server returns the page of activities immediately older than the
+ * cursor (chronological ascending) plus whether any remain beyond that.
+ */
+export const OrchestrationGetThreadActivitiesInput = Schema.Union([
+  Schema.Struct({
+    threadId: ThreadId,
+    beforeSequence: NonNegativeInt,
+    limit: Schema.optional(NonNegativeInt),
+  }),
+  Schema.Struct({
+    threadId: ThreadId,
+    beforeCreatedAt: IsoDateTime,
+    beforeActivityId: EventId,
+    limit: Schema.optional(NonNegativeInt),
+  }),
+]);
+export type OrchestrationGetThreadActivitiesInput =
+  typeof OrchestrationGetThreadActivitiesInput.Type;
+
+export const OrchestrationGetThreadActivitiesResult = Schema.Struct({
+  activities: Schema.Array(OrchestrationThreadActivity),
+  hasMore: Schema.Boolean,
+});
+export type OrchestrationGetThreadActivitiesResult =
+  typeof OrchestrationGetThreadActivitiesResult.Type;
+
 export const OrchestrationGetFullThreadDiffInput = Schema.Struct({
   threadId: ThreadId,
   toTurnCount: NonNegativeInt,
@@ -2187,6 +2223,10 @@ export const OrchestrationRpcSchemas = {
     input: OrchestrationGetTurnDiffInput,
     output: OrchestrationGetTurnDiffResult,
   },
+  getThreadActivities: {
+    input: OrchestrationGetThreadActivitiesInput,
+    output: OrchestrationGetThreadActivitiesResult,
+  },
   getFullThreadDiff: {
     input: OrchestrationGetFullThreadDiffInput,
     output: OrchestrationGetFullThreadDiffResult,
@@ -2228,6 +2268,14 @@ export class OrchestrationDispatchCommandError extends Schema.TaggedError<Orches
 
 export class OrchestrationGetTurnDiffError extends Schema.TaggedError<OrchestrationGetTurnDiffError>()(
   "OrchestrationGetTurnDiffError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
+
+export class OrchestrationGetThreadActivitiesError extends Schema.TaggedError<OrchestrationGetThreadActivitiesError>()(
+  "OrchestrationGetThreadActivitiesError",
   {
     message: TrimmedNonEmptyString,
     cause: Schema.optional(Schema.Defect()),
