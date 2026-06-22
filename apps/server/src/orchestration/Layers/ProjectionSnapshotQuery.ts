@@ -1,6 +1,7 @@
 import {
   ChatAttachment,
   CheckpointRef,
+  EventId,
   IsoDateTime,
   MessageId,
   NonNegativeInt,
@@ -79,6 +80,13 @@ const THREAD_DETAIL_ACTIVITY_LIMIT = 500;
 // Snapshot payloads are decoded and projected in small sequential batches so
 // one client read does not retain the raw payloads for the full activity window.
 const THREAD_DETAIL_ACTIVITY_PAYLOAD_BATCH_SIZE = 25;
+
+/**
+ * Maximum number of most-recent activities loaded into a thread-detail snapshot.
+ * Bounds peak memory when opening a long-lived thread; older activities are
+ * fetched on demand (lazy-load, planned) and live ones stream in via events.
+ */
+const THREAD_DETAIL_ACTIVITY_WINDOW = 500;
 const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
   Struct.assign({
     defaultModelSelection: Schema.NullOr(Schema.fromJsonString(ModelSelection)),
@@ -185,6 +193,18 @@ const ThreadTurnRangeLookupInput = Schema.Struct({
   minTurnKey: Schema.String,
   beforeAnchorAt: Schema.String,
   beforeTurnKey: Schema.String,
+});
+
+const ThreadActivitiesBeforeSequenceInput = Schema.Struct({
+  threadId: ThreadId,
+  beforeSequence: NonNegativeInt,
+  limit: NonNegativeInt,
+});
+const ThreadActivitiesBeforeActivityInput = Schema.Struct({
+  threadId: ThreadId,
+  beforeCreatedAt: IsoDateTime,
+  beforeActivityId: EventId,
+  limit: NonNegativeInt,
 });
 const ProjectionProjectLookupRowSchema = ProjectionProjectDbRowSchema;
 const ProjectionThreadIdLookupRowSchema = Schema.Struct({
@@ -1076,12 +1096,88 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             sequence DESC,
             created_at DESC,
             activity_id DESC
-          LIMIT ${THREAD_DETAIL_ACTIVITY_LIMIT}
+          -- One extra beyond the window so the caller can report hasMoreActivities.
+          LIMIT ${THREAD_DETAIL_ACTIVITY_WINDOW + 1}
         ) AS recent_activities
         ORDER BY
           sequence ASC,
           created_at ASC,
           activity_id ASC
+      `,
+  });
+
+  // Older-than-cursor page for lazy-load. Returns rows newest-first (DESC) so a
+  // simple LIMIT yields the page adjacent to the cursor; the caller reverses to
+  // ascending. `sequence IS NULL` (legacy unsequenced) rows sort last under
+  // `sequence DESC` (SQLite orders NULLs last in DESC) — the very oldest — so
+  // paging eventually reaches them. `beforeSequence` is a NonNegativeInt, so
+  // `(sequence < beforeSequence OR sequence IS NULL)` is equivalent to the old
+  // `COALESCE(sequence, -1) < beforeSequence` but lets the
+  // (thread_id, sequence, created_at, activity_id) index satisfy the ORDER BY
+  // directly instead of forcing a filesort over the whole thread.
+  const listThreadActivityRowsBeforeSequence = SqlSchema.findAll({
+    Request: ThreadActivitiesBeforeSequenceInput,
+    Result: ProjectionThreadActivityDbRowSchema,
+    execute: ({ threadId, beforeSequence, limit }) =>
+      sql`
+        SELECT
+          activity_id AS "activityId",
+          thread_id AS "threadId",
+          turn_id AS "turnId",
+          tone,
+          kind,
+          summary,
+          payload_json AS "payload",
+          sequence,
+          created_at AS "createdAt"
+        FROM projection_thread_activities
+        WHERE thread_id = \${threadId}
+          AND (sequence < \${beforeSequence} OR sequence IS NULL)
+        ORDER BY
+          sequence DESC,
+          created_at DESC,
+          activity_id DESC
+        LIMIT \${limit}
+      `,
+  });
+
+  // Legacy unsequenced (sequence NULL) rows are paged by a (created_at,
+  // activity_id) cursor. created_at is compared lexicographically as TEXT, which
+  // equals chronological order only because timestamps are canonical ISO-8601
+  // (always UTC `Z`, fixed millisecond precision) — the same invariant every
+  // `ORDER BY created_at` in this layer (including the detail window above)
+  // already relies on, so the cursor stays consistent with how rows are
+  // displayed. activity_id breaks created_at ties; its ordering is arbitrary but
+  // matches the window's `activity_id` tiebreak, so pages never skip or repeat.
+  const listUnsequencedThreadActivityRowsBeforeActivity = SqlSchema.findAll({
+    Request: ThreadActivitiesBeforeActivityInput,
+    Result: ProjectionThreadActivityDbRowSchema,
+    execute: ({ threadId, beforeCreatedAt, beforeActivityId, limit }) =>
+      sql`
+        SELECT
+          activity_id AS "activityId",
+          thread_id AS "threadId",
+          turn_id AS "turnId",
+          tone,
+          kind,
+          summary,
+          payload_json AS "payload",
+          sequence,
+          created_at AS "createdAt"
+        FROM projection_thread_activities
+        WHERE thread_id = \${threadId}
+          AND sequence IS NULL
+          AND (
+            created_at < \${beforeCreatedAt}
+            OR (
+              created_at = \${beforeCreatedAt}
+              AND activity_id < \${beforeActivityId}
+            )
+          )
+        ORDER BY
+          created_at DESC,
+          activity_id DESC
+        LIMIT \${limit}
       `,
   });
 
@@ -1097,7 +1193,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           sequence DESC,
           created_at DESC,
           activity_id DESC
-        LIMIT ${THREAD_DETAIL_ACTIVITY_LIMIT}
+        -- One extra beyond the window so the caller can report hasMoreActivities.
+        LIMIT ${THREAD_DETAIL_ACTIVITY_WINDOW + 1}
       `,
   });
 
@@ -2883,6 +2980,21 @@ pending_approval_requests AS (
         return Option.none<OrchestrationThread>();
       }
 
+      // hasMoreActivities for lazy-load: when the non-windowed detail exceeds the window, trim to window.
+      // Upstream's turn-window pagination handles message/turn windowing; this handles activity windowing.
+      const hasMoreActivities =
+        bounds === undefined && (activities as unknown as { length: number }).length > THREAD_DETAIL_ACTIVITY_WINDOW;
+      // If activities came from raw path as OrchestrationThreadActivity[], slice; if from client path (projected), also slice.
+      // The +1 row is sliced away; pinned activities are already merged so we must not slice pinned separately.
+      // For now, handle the common raw case where activities is array of OrchestrationThreadActivity.
+      // When hasMore, drop the oldest beyond window (activities are ASC, so drop from start? Actually window keeps most recent => slice tail)
+      // Fork's original kept most recent WINDOW: activityRows.slice(length-WINDOW). Mapped activities are ASC, so oldest are first; to keep most recent, slice from end.
+      const boundedActivities = hasMoreActivities
+        ? (activities as unknown as OrchestrationThreadActivity[]).slice(
+            (activities as unknown as OrchestrationThreadActivity[]).length - THREAD_DETAIL_ACTIVITY_WINDOW,
+          )
+        : (activities as OrchestrationThreadActivity[]);
+
       const thread = {
         id: threadRow.value.threadId,
         projectId: threadRow.value.projectId,
@@ -2924,7 +3036,8 @@ pending_approval_requests AS (
           return message;
         }),
         proposedPlans: proposedPlanRows.map(mapProposedPlanRow),
-        activities,
+        activities: boundedActivities,
+        hasMoreActivities,
         checkpoints: checkpointRows.map((row) => ({
           turnId: row.turnId,
           checkpointTurnCount: row.checkpointTurnCount,
@@ -3101,6 +3214,43 @@ pending_approval_requests AS (
         ),
       );
 
+  const getThreadActivitiesPage: ProjectionSnapshotQueryShape["getThreadActivitiesPage"] = (
+    input,
+  ) =>
+    Effect.gen(function* () {
+      const limit = Math.min(
+        Math.max(1, input.limit ?? THREAD_DETAIL_ACTIVITY_WINDOW),
+        THREAD_DETAIL_ACTIVITY_WINDOW,
+      );
+      // Fetch one extra to detect whether older activities remain.
+      const rowsEffect =
+        "beforeSequence" in input
+          ? listThreadActivityRowsBeforeSequence({
+              threadId: input.threadId,
+              beforeSequence: input.beforeSequence,
+              limit: limit + 1,
+            })
+          : listUnsequencedThreadActivityRowsBeforeActivity({
+              threadId: input.threadId,
+              beforeCreatedAt: input.beforeCreatedAt,
+              beforeActivityId: input.beforeActivityId,
+              limit: limit + 1,
+            });
+      const rows = yield* rowsEffect.pipe(
+        Effect.mapError(
+          toPersistenceSqlOrDecodeError(
+            "ProjectionSnapshotQuery.getThreadActivitiesPage:query",
+            "ProjectionSnapshotQuery.getThreadActivitiesPage:decodeRows",
+          ),
+        ),
+      );
+      const hasMore = rows.length > limit;
+      // Rows are newest-first; keep the page closest to the cursor, then reverse
+      // to ascending for display.
+      const page = (hasMore ? rows.slice(0, limit) : rows).map(mapThreadActivityRow).toReversed();
+      return { activities: page, hasMore };
+    });
+
   return {
     getCommandReadModel,
     getSnapshot,
@@ -3117,6 +3267,7 @@ pending_approval_requests AS (
     getThreadShellById,
     getThreadDetailById,
     getThreadDetailSnapshot,
+    getThreadActivitiesPage,
   } satisfies ProjectionSnapshotQueryShape;
 });
 
