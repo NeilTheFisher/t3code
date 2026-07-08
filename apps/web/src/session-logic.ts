@@ -140,6 +140,17 @@ export interface LatestProposedPlanState {
   implementationThreadId: ThreadId | null;
 }
 
+export interface ModelChangeNotice {
+  id: string;
+  createdAt: string;
+  fromInstanceId: string | null;
+  fromModel: string | null;
+  toInstanceId: string | null;
+  toModel: string | null;
+  isHandoff: boolean;
+  summary: string;
+}
+
 export type TimelineEntry =
   | {
       id: string;
@@ -155,15 +166,29 @@ export type TimelineEntry =
     }
   | {
       id: string;
+      kind: "turn-plan";
+      createdAt: string;
+      turnPlan: TurnPlanEntry;
+    }
+  | {
+      id: string;
       kind: "work";
       createdAt: string;
       entry: WorkLogEntry;
+    }
+  | {
+      id: string;
+      kind: "notice";
+      createdAt: string;
+      notice: ModelChangeNotice;
     };
 
 export interface TimelineEntriesProjection {
   readonly messages: ReadonlyArray<ChatMessage>;
   readonly proposedPlans: ReadonlyArray<ProposedPlan>;
   readonly workEntries: ReadonlyArray<WorkLogEntry>;
+  readonly turnPlans: ReadonlyArray<TurnPlanEntry>;
+  readonly notices: ReadonlyArray<ModelChangeNotice>;
   readonly entries: TimelineEntry[];
 }
 
@@ -493,6 +518,9 @@ export function deriveWorkLogEntries(
     if (activity.kind === "tool.progress") continue;
     if (activity.kind === "context-window.updated") continue;
     if (activity.kind === "turn.plan.updated") continue;
+    // Model-change notices render as their own inline timeline row, not as a
+    // tool-like work entry. See deriveModelChangeNotices.
+    if (activity.kind === "thread.model-changed") continue;
     if (activity.summary === "Checkpoint captured") continue;
     if (isNoContentRuntimeWarning(activity)) continue;
     if (isPlanBoundaryToolActivity(activity)) continue;
@@ -1461,14 +1489,34 @@ function compareTimelineEntriesByCreatedAt(left: TimelineEntry, right: TimelineE
   return left.createdAt.localeCompare(right.createdAt);
 }
 
+/**
+ * Model-change notices share their timestamp with the user message that
+ * triggered the switch; render the notice just above that message so it reads
+ * as a boundary ("switched to X" then the message sent to X).
+ */
+function compareTimelineEntriesByCreatedAtWithNotices(
+  left: TimelineEntry,
+  right: TimelineEntry,
+): number {
+  const byTime = left.createdAt.localeCompare(right.createdAt);
+  if (byTime !== 0) return byTime;
+  const leftNotice = left.kind === "notice" ? 0 : 1;
+  const rightNotice = right.kind === "notice" ? 0 : 1;
+  return leftNotice - rightNotice;
+}
+
 function timelineEntrySourceOrder(entry: TimelineEntry): number {
   switch (entry.kind) {
+    case "notice":
+      return -1;
     case "message":
       return 0;
     case "proposed-plan":
       return 1;
-    case "work":
+    case "turn-plan":
       return 2;
+    case "work":
+      return 3;
   }
 }
 
@@ -1656,17 +1704,25 @@ export function deriveTimelineEntriesWithState(
   messages: ReadonlyArray<ChatMessage>,
   proposedPlans: ReadonlyArray<ProposedPlan>,
   workEntries: ReadonlyArray<WorkLogEntry>,
+  turnPlans: ReadonlyArray<TurnPlanEntry> = [],
+  notices: ReadonlyArray<ModelChangeNotice> = [],
   previous: TimelineEntriesProjection | null = null,
 ): TimelineEntriesProjection {
   if (
     previous !== null &&
     previous.proposedPlans.length === proposedPlans.length &&
     previous.workEntries.length === workEntries.length &&
+    previous.turnPlans.length === turnPlans.length &&
+    previous.notices.length === notices.length &&
     hasExactArrayPrefix(previous.proposedPlans, proposedPlans) &&
-    hasExactArrayPrefix(previous.workEntries, workEntries)
+    hasExactArrayPrefix(previous.workEntries, workEntries) &&
+    hasExactArrayPrefix(previous.turnPlans, turnPlans) &&
+    hasExactArrayPrefix(previous.notices, notices)
   ) {
     const entries = replaceStreamingTimelineMessages(messages, previous);
-    if (entries !== null) return { messages, proposedPlans, workEntries, entries };
+    if (entries !== null) {
+      return { messages, proposedPlans, workEntries, turnPlans, notices, entries };
+    }
   }
   const foldedAnswerMessageIds = new Set(
     workEntries.flatMap((entry) =>
@@ -1680,7 +1736,9 @@ export function deriveTimelineEntriesWithState(
     !previous.entries.some((entry) => entry.kind === "message" && !showMessage(entry.message)) &&
     hasExactArrayPrefix(previous.messages, messages) &&
     hasExactArrayPrefix(previous.proposedPlans, proposedPlans) &&
-    hasExactArrayPrefix(previous.workEntries, workEntries);
+    hasExactArrayPrefix(previous.workEntries, workEntries) &&
+    hasExactArrayPrefix(previous.turnPlans, turnPlans) &&
+    hasExactArrayPrefix(previous.notices, notices);
 
   if (canAppend) {
     const messageRows = messages
@@ -1698,29 +1756,177 @@ export function deriveTimelineEntriesWithState(
       messages,
       proposedPlans,
       workEntries,
+      turnPlans,
+      notices,
       entries: mergeTimelineEntrySuffix(previous.entries, suffix),
     };
   }
 
-  const messageRows = messages.filter(showMessage).map(timelineEntryFromMessage);
-  const proposedPlanRows = proposedPlans.map(timelineEntryFromProposedPlan);
-  const workRows = workEntries.map(timelineEntryFromWork);
+  const rows: TimelineEntry[] = [
+    ...messages.filter(showMessage).map(timelineEntryFromMessage),
+    ...proposedPlans.map(timelineEntryFromProposedPlan),
+    ...turnPlans.map((turnPlan) => ({
+      id: turnPlan.id,
+      kind: "turn-plan" as const,
+      createdAt: turnPlan.createdAt,
+      turnPlan,
+    })),
+    ...workEntries.map(timelineEntryFromWork),
+    ...notices.map((notice) => ({
+      id: notice.id,
+      kind: "notice" as const,
+      createdAt: notice.createdAt,
+      notice,
+    })),
+  ];
   return {
     messages,
     proposedPlans,
     workEntries,
-    entries: [...messageRows, ...proposedPlanRows, ...workRows].toSorted(
-      compareTimelineEntriesByCreatedAt,
-    ),
+    turnPlans,
+    notices,
+    entries: rows.toSorted(compareTimelineEntriesByCreatedAtWithNotices),
   };
+}
+
+/**
+ * Extract Codex-style "model/provider changed" notices from the thread's
+ * activity log. These are appended by the server whenever the user swaps the
+ * model or provider on a started thread (see ProviderCommandReactor).
+ */
+export function deriveModelChangeNotices(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): ModelChangeNotice[] {
+  const notices: ModelChangeNotice[] = [];
+  for (const activity of activities) {
+    if (activity.kind !== "thread.model-changed") continue;
+    const payload =
+      activity.payload && typeof activity.payload === "object" && !Array.isArray(activity.payload)
+        ? (activity.payload as Record<string, unknown>)
+        : {};
+    const asString = (value: unknown): string | null =>
+      typeof value === "string" && value.length > 0 ? value : null;
+    notices.push({
+      id: activity.id,
+      createdAt: activity.createdAt,
+      fromInstanceId: asString(payload.fromInstanceId),
+      fromModel: asString(payload.fromModel),
+      toInstanceId: asString(payload.toInstanceId),
+      toModel: asString(payload.toModel),
+      isHandoff: payload.isHandoff === true,
+      summary: activity.summary,
+    });
+  }
+  return notices;
+}
+
+export interface TurnPlanEntry {
+  /** Stable per-turn row id (plans rewrite constantly; the row must not churn). */
+  id: string;
+  /** Anchor timestamp: the turn's FIRST plan activity, so the chip renders where planning began. */
+  createdAt: string;
+  turnId: TurnId | null;
+  plan: ActivePlanState;
+}
+
+/**
+ * One inline plan chip per turn that produced plan/todo steps: the latest
+ * snapshot for the turn, anchored at the first snapshot's timestamp. Turn-less
+ * plan activities collapse into a single chip keyed by thread order.
+ */
+export function deriveTurnPlans(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): TurnPlanEntry[] {
+  const ordered = [...activities].toSorted(compareActivitiesByOrder);
+  const byTurn = new Map<
+    string,
+    { activities: OrchestrationThreadActivity[]; entry: TurnPlanEntry }
+  >();
+  for (const activity of ordered) {
+    if (activity.kind !== "turn.plan.updated") {
+      continue;
+    }
+    const plan = planStateFromActivity(activity);
+    const key = activity.turnId ?? "no-turn";
+    if (!plan) {
+      byTurn.delete(key);
+      continue;
+    }
+    const existing = byTurn.get(key);
+    if (existing) {
+      existing.entry.plan = plan;
+      existing.activities.push(activity);
+    } else {
+      byTurn.set(key, {
+        activities: [activity],
+        entry: {
+          id: `turn-plan:${key}`,
+          createdAt: activity.createdAt,
+          turnId: activity.turnId,
+          plan,
+        },
+      });
+    }
+  }
+  return [...byTurn.values()].map(({ activities: planActivities, entry }) => ({
+    ...entry,
+    plan: addPlanStepDurations(entry.plan, planActivities),
+  }));
 }
 
 export function deriveTimelineEntries(
   messages: ReadonlyArray<ChatMessage>,
   proposedPlans: ReadonlyArray<ProposedPlan>,
   workEntries: ReadonlyArray<WorkLogEntry>,
+  turnPlans: ReadonlyArray<TurnPlanEntry> = [],
+  notices: ReadonlyArray<ModelChangeNotice> = [],
 ): TimelineEntry[] {
-  return deriveTimelineEntriesWithState(messages, proposedPlans, workEntries).entries;
+  const messageRows: TimelineEntry[] = messages.map((message) => ({
+    id: message.id,
+    kind: "message",
+    createdAt: message.createdAt,
+    message,
+  }));
+  const proposedPlanRows: TimelineEntry[] = proposedPlans.map((proposedPlan) => ({
+    id: proposedPlan.id,
+    kind: "proposed-plan",
+    createdAt: proposedPlan.createdAt,
+    proposedPlan,
+  }));
+  const workRows: TimelineEntry[] = workEntries.map((entry) => ({
+    id: entry.id,
+    kind: "work",
+    createdAt: entry.createdAt,
+    entry,
+  }));
+  const turnPlanRows: TimelineEntry[] = turnPlans.map((turnPlan) => ({
+    id: turnPlan.id,
+    kind: "turn-plan",
+    createdAt: turnPlan.createdAt,
+    turnPlan,
+  }));
+  const noticeRows: TimelineEntry[] = notices.map((notice) => ({
+    id: notice.id,
+    kind: "notice",
+    createdAt: notice.createdAt,
+    notice,
+  }));
+  return [
+    ...messageRows,
+    ...proposedPlanRows,
+    ...turnPlanRows,
+    ...workRows,
+    ...noticeRows,
+  ].toSorted((a, b) => {
+    const byTime = a.createdAt.localeCompare(b.createdAt);
+    if (byTime !== 0) return byTime;
+    // A model-change notice shares its timestamp with the user message that
+    // triggered the switch; render the notice just above that message so it
+    // reads as a boundary ("switched to X" then the message sent to X).
+    const aNotice = a.kind === "notice" ? 0 : 1;
+    const bNotice = b.kind === "notice" ? 0 : 1;
+    return aNotice - bNotice;
+  });
 }
 
 export function inferCheckpointTurnCountByTurnId(
