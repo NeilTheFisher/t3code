@@ -167,6 +167,17 @@ export interface LatestProposedPlanState {
   implementationThreadId: ThreadId | null;
 }
 
+export interface ModelChangeNotice {
+  id: string;
+  createdAt: string;
+  fromInstanceId: string | null;
+  fromModel: string | null;
+  toInstanceId: string | null;
+  toModel: string | null;
+  isHandoff: boolean;
+  summary: string;
+}
+
 export type TimelineEntry =
   | {
       id: string;
@@ -185,6 +196,12 @@ export type TimelineEntry =
       kind: "work";
       createdAt: string;
       entry: WorkLogEntry;
+    }
+  | {
+      id: string;
+      kind: "notice";
+      createdAt: string;
+      notice: ModelChangeNotice;
     };
 
 export function workLogEntryIsToolLike(entry: WorkLogEntry): boolean {
@@ -831,6 +848,9 @@ export function deriveWorkLogEntries(
     if (activity.kind === "tool.progress") continue;
     if (activity.kind === "context-window.updated") continue;
     if (activity.kind === "turn.plan.updated") continue;
+    // Model-change notices render as their own inline timeline row, not as a
+    // tool-like work entry. See deriveModelChangeNotices.
+    if (activity.kind === "thread.model-changed") continue;
     if (activity.summary === "Checkpoint captured") continue;
     if (isNoContentRuntimeWarning(activity)) continue;
     if (isPlanBoundaryToolActivity(activity)) continue;
@@ -1795,10 +1815,43 @@ function compareActivityLifecycleRank(kind: string): number {
   return 1;
 }
 
+/**
+ * Extract Codex-style "model/provider changed" notices from the thread's
+ * activity log. These are appended by the server whenever the user swaps the
+ * model or provider on a started thread (see ProviderCommandReactor).
+ */
+export function deriveModelChangeNotices(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): ModelChangeNotice[] {
+  const notices: ModelChangeNotice[] = [];
+  for (const activity of activities) {
+    if (activity.kind !== "thread.model-changed") continue;
+    const payload =
+      activity.payload && typeof activity.payload === "object" && !Array.isArray(activity.payload)
+        ? (activity.payload as Record<string, unknown>)
+        : {};
+    const asString = (value: unknown): string | null =>
+      typeof value === "string" && value.length > 0 ? value : null;
+    notices.push({
+      id: activity.id,
+      createdAt: activity.createdAt,
+      fromInstanceId: asString(payload.fromInstanceId),
+      fromModel: asString(payload.fromModel),
+      toInstanceId: asString(payload.toInstanceId),
+      toModel: asString(payload.toModel),
+      isHandoff: payload.isHandoff === true,
+      summary: activity.summary,
+    });
+  }
+  return notices;
+}
+
 export function deriveTimelineEntries(
   messages: ReadonlyArray<ChatMessage>,
   proposedPlans: ReadonlyArray<ProposedPlan>,
   workEntries: ReadonlyArray<WorkLogEntry>,
+  turnPlans: ReadonlyArray<TurnPlanEntry> = [],
+  notices: ReadonlyArray<ModelChangeNotice> = [],
 ): TimelineEntry[] {
   const messageRows: TimelineEntry[] = messages.map((message) => ({
     id: message.id,
@@ -1818,9 +1871,34 @@ export function deriveTimelineEntries(
     createdAt: entry.createdAt,
     entry,
   }));
-  return [...messageRows, ...proposedPlanRows, ...workRows].toSorted((a, b) =>
-    a.createdAt.localeCompare(b.createdAt),
-  );
+  const turnPlanRows: TimelineEntry[] = turnPlans.map((turnPlan) => ({
+    id: turnPlan.id,
+    kind: "turn-plan",
+    createdAt: turnPlan.createdAt,
+    turnPlan,
+  }));
+  const noticeRows: TimelineEntry[] = notices.map((notice) => ({
+    id: notice.id,
+    kind: "notice",
+    createdAt: notice.createdAt,
+    notice,
+  }));
+  return [
+    ...messageRows,
+    ...proposedPlanRows,
+    ...turnPlanRows,
+    ...workRows,
+    ...noticeRows,
+  ].toSorted((a, b) => {
+    const byTime = a.createdAt.localeCompare(b.createdAt);
+    if (byTime !== 0) return byTime;
+    // A model-change notice shares its timestamp with the user message that
+    // triggered the switch; render the notice just above that message so it
+    // reads as a boundary ("switched to X" then the message sent to X).
+    const aNotice = a.kind === "notice" ? 0 : 1;
+    const bNotice = b.kind === "notice" ? 0 : 1;
+    return aNotice - bNotice;
+  });
 }
 
 export function inferCheckpointTurnCountByTurnId(
