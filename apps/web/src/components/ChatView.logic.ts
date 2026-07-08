@@ -4,7 +4,6 @@ import {
   type AssetCreateUrlResult,
   type ChatFileAttachment,
   type EnvironmentId,
-  isProviderDriverKind,
   ProjectId,
   type MessageId,
   type ModelSelection,
@@ -874,6 +873,11 @@ export function deriveLockedProvider(input: {
   return narrowedThreadProvider ?? narrowedSelectedProvider ?? null;
 }
 
+// Blocks in-thread model changes for providers that cannot resume their own
+// thread with a different model (`requiresNewThreadForModelChange`). Selecting
+// a *different* provider instance is never blocked: the server treats that as
+// a handoff and starts a fresh provider session with the prior conversation
+// replayed as context.
 export function getStartedThreadModelChangeBlockReason(input: {
   providers: ReadonlyArray<Pick<ServerProvider, "instanceId" | "requiresNewThreadForModelChange">>;
   hasStartedSession: boolean;
@@ -888,22 +892,18 @@ export function getStartedThreadModelChangeBlockReason(input: {
     ...input.currentModelSelection,
     instanceId: input.currentProviderInstanceId ?? input.currentModelSelection.instanceId,
   };
-  if (
-    currentModelSelection.instanceId === input.nextModelSelection.instanceId &&
-    currentModelSelection.model === input.nextModelSelection.model
-  ) {
+  if (currentModelSelection.instanceId !== input.nextModelSelection.instanceId) {
+    // Cross-instance selection is a provider handoff, not an in-thread model
+    // change; the server starts a fresh provider session for it.
+    return null;
+  }
+  if (currentModelSelection.model === input.nextModelSelection.model) {
     return null;
   }
   const currentProvider = input.providers.find(
     (snapshot) => snapshot.instanceId === currentModelSelection.instanceId,
   );
-  const nextProvider = input.providers.find(
-    (snapshot) => snapshot.instanceId === input.nextModelSelection.instanceId,
-  );
-  if (
-    currentProvider?.requiresNewThreadForModelChange !== true &&
-    nextProvider?.requiresNewThreadForModelChange !== true
-  ) {
+  if (currentProvider?.requiresNewThreadForModelChange !== true) {
     return null;
   }
   return {

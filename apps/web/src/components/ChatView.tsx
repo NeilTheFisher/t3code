@@ -121,6 +121,7 @@ import {
   deriveActivePlanState,
   findLatestProposedPlan,
   deriveWorkLogEntries,
+  deriveModelChangeNotices,
   hasActionableProposedPlan,
   isLatestTurnSettled,
   selectHandoffImageResources,
@@ -843,8 +844,8 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
   const openTerminal = useAtomCommand(terminalEnvironment.open, "terminal open");
   const writeTerminal = useAtomCommand(terminalEnvironment.write, "terminal write");
   const closeTerminalMutation = useAtomCommand(terminalEnvironment.close, "terminal close");
+  const serverThread = useThread(threadRef);
   const draftThread = useComposerDraftStore((store) => store.getDraftThreadByRef(threadRef));
-  const serverThread = useThread(threadRef, { waitForShell: draftThread !== null });
   const projectRef = serverThread
     ? scopeProjectRef(serverThread.environmentId, serverThread.projectId)
     : draftThread
@@ -1225,8 +1226,8 @@ const PersistentThreadTerminalPanel = memo(function PersistentThreadTerminalPane
   newShortcutLabel,
   closeShortcutLabel,
 }: PersistentThreadTerminalPanelProps) {
+  const serverThread = useThread(threadRef);
   const draftThread = useComposerDraftStore((store) => store.getDraftThreadByRef(threadRef));
-  const serverThread = useThread(threadRef, { waitForShell: draftThread !== null });
   const projectRef = serverThread
     ? scopeProjectRef(serverThread.environmentId, serverThread.projectId)
     : draftThread
@@ -1470,7 +1471,7 @@ export default function ChatView(props: ChatViewProps) {
         : null,
   );
   const routeServerThreadShell = useThreadShell(routeKind === "server" ? routeThreadRef : null);
-  const serverThread = useThread(routeThreadRef, { waitForShell: draftThread !== null });
+  const serverThread = useThread(routeThreadRef);
   const loadingServerThread = useMemo(
     () =>
       threadDetailLoading && routeServerThreadShell
@@ -1567,6 +1568,13 @@ export default function ChatView(props: ChatViewProps) {
   const getDraftSession = useComposerDraftStore((store) => store.getDraftSession);
   const setLogicalProjectDraftThreadId = useComposerDraftStore(
     (store) => store.setLogicalProjectDraftThreadId,
+  );
+  const draftThread = useComposerDraftStore((store) =>
+    routeKind === "server"
+      ? store.getDraftSessionByRef(routeThreadRef)
+      : draftId
+        ? store.getDraftSession(draftId)
+        : null,
   );
   const promptRef = useRef("");
   const composerImagesRef = useRef<ComposerImageAttachment[]>([]);
@@ -2309,6 +2317,11 @@ export default function ChatView(props: ChatViewProps) {
     [openOrReuseProjectDraftThread],
   );
 
+  const selectedProviderByThreadId = composerActiveProvider ?? null;
+  const threadProvider =
+    activeThread?.modelSelection.instanceId ??
+    activeProject?.defaultModelSelection?.instanceId ??
+    null;
   // Once a thread selects an environment, never substitute the primary
   // environment's config while the selected environment is still loading.
   const serverConfig = activeThread
@@ -3214,27 +3227,38 @@ export default function ChatView(props: ChatViewProps) {
     optimisticUserMessages,
     projectHandoffMessagePreviews,
   ]);
-  const timelineProjectionRef = useRef<{
-    threadKey: string | null;
-    projection: TimelineEntriesProjection;
-  } | null>(null);
-  const timelineEntries = useMemo(() => {
-    const previous = timelineProjectionRef.current;
-    const projection = deriveTimelineEntriesWithState(
-      timelineMessages,
-      activeThread?.proposedPlans ?? [],
-      workLogEntries,
-      previous?.threadKey === activeThreadKey ? previous.projection : null,
-    );
-    timelineProjectionRef.current = { threadKey: activeThreadKey, projection };
-    return projection.entries;
-  }, [
-    timelineProjectionRef,
-    activeThreadKey,
-    activeThread?.proposedPlans,
-    timelineMessages,
-    workLogEntries,
-  ]);
+  const modelChangeNotices = useMemo(() => {
+    return deriveModelChangeNotices(threadActivities).map((notice) => {
+      const toLabel = resolveModelDisplayName(
+        providerStatuses,
+        notice.toInstanceId,
+        notice.toModel,
+      );
+      const fromLabel = resolveModelDisplayName(
+        providerStatuses,
+        notice.fromInstanceId,
+        notice.fromModel,
+      );
+      const summary =
+        fromLabel && toLabel && fromLabel !== toLabel
+          ? `Switched from ${fromLabel} to ${toLabel}`
+          : toLabel
+            ? `Switched to ${toLabel}`
+            : notice.summary;
+      return { ...notice, summary, toModel: toLabel || notice.toModel };
+    });
+  }, [threadActivities, providerStatuses]);
+  const timelineEntries = useMemo(
+    () =>
+      deriveTimelineEntries(
+        timelineMessages,
+        activeThread?.proposedPlans ?? [],
+        workLogEntries,
+        turnPlans,
+        modelChangeNotices,
+      ),
+    [activeThread?.proposedPlans, timelineMessages, turnPlans, workLogEntries, modelChangeNotices],
+  );
   const [dockedDraftHeroThreadKey, setDockedDraftHeroThreadKey] = useState<string | null>(null);
   const draftHeroDockRequested =
     activeThreadKey !== null && dockedDraftHeroThreadKey === activeThreadKey;
@@ -3280,11 +3304,7 @@ export default function ChatView(props: ChatViewProps) {
         providers: providerInstanceEntries,
         driverKind: selectedProvider,
         instanceId: activeProviderInstanceId,
-        lockedInstanceId: lockedProvider
-          ? (activeThread?.session?.providerInstanceId ??
-            activeThread?.modelSelection.instanceId ??
-            null)
-          : null,
+        lockedInstanceId: null,
       }),
     [
       activeProviderInstanceId,
@@ -7765,32 +7785,6 @@ export default function ChatView(props: ChatViewProps) {
   const onProviderModelSelect = useCallback(
     (instanceId: ProviderInstanceId, model: string) => {
       if (!activeThread) return;
-      // Look up the configured instance so model normalization and custom
-      // model lookup stay scoped to that exact instance. Unknown instance ids
-      // are rejected by returning early; the server remains authoritative too.
-      const entry = providerStatuses.find((snapshot) => snapshot.instanceId === instanceId);
-      const resolvedDriverKind = entry?.driver ?? null;
-      if (
-        lockedProvider !== null &&
-        resolvedDriverKind !== null &&
-        resolvedDriverKind !== lockedProvider
-      ) {
-        scheduleComposerFocus();
-        return;
-      }
-      if (lockedProvider !== null && activeThread.session?.providerInstanceId) {
-        const currentEntry = providerStatuses.find(
-          (snapshot) => snapshot.instanceId === activeThread.session?.providerInstanceId,
-        );
-        if (
-          currentEntry?.continuation?.groupKey &&
-          entry?.continuation?.groupKey &&
-          currentEntry.continuation.groupKey !== entry.continuation.groupKey
-        ) {
-          scheduleComposerFocus();
-          return;
-        }
-      }
       const resolvedModel = resolveAppModelSelectionForInstance(
         instanceId,
         settings,
@@ -7831,7 +7825,6 @@ export default function ChatView(props: ChatViewProps) {
     },
     [
       activeThread,
-      lockedProvider,
       scheduleComposerFocus,
       setComposerDraftModelSelection,
       setStickyComposerModelSelection,
@@ -8443,7 +8436,7 @@ export default function ChatView(props: ChatViewProps) {
                             threadSyncPhase={activeEnvironmentUnavailable ? null : threadSyncPhase}
                             runtimeMode={runtimeMode}
                             interactionMode={interactionMode}
-                            lockedProvider={lockedProvider}
+                            lockedProvider={null}
                             providerStatuses={providerStatuses as ServerProvider[]}
                             providerCatalogKnown={serverConfig !== null}
                             activeProjectDefaultModelSelection={activeProjectDefaultModelSelection}
