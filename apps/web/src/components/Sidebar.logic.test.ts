@@ -1,7 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import {
-  archiveSelectedThreadEntries,
-  buildMultiSelectThreadContextMenuItems,
   createThreadJumpHintVisibilityController,
   getSidebarThreadIdsToPrewarm,
   getVisibleSidebarThreadIds,
@@ -23,7 +21,7 @@ import {
   shouldClearThreadSelectionOnMouseDown,
   sortThreadsForSidebarV2,
   sortProjectsForSidebar,
-  sortScopedProjectsForSidebar,
+  threadNeedsAttention,
   THREAD_JUMP_HINT_SHOW_DELAY_MS,
 } from "./Sidebar.logic";
 import {
@@ -41,73 +39,6 @@ import {
 } from "../types";
 
 const localEnvironmentId = EnvironmentId.make("environment-local");
-
-describe("archiveSelectedThreadEntries", () => {
-  const entries = [{ threadKey: "one" }, { threadKey: "two" }, { threadKey: "three" }] as const;
-  const success = { _tag: "Success" } as const;
-  const failure = { _tag: "Failure" } as const;
-
-  it("records every entry after full success", async () => {
-    const outcome = await archiveSelectedThreadEntries({
-      entries,
-      archive: async (_entry, onArchived) => {
-        onArchived();
-        return success;
-      },
-    });
-
-    expect(outcome).toEqual({
-      archivedThreadKeys: ["one", "two", "three"],
-      mutationFailure: null,
-      followupFailures: [],
-    });
-  });
-
-  it("stops at a mutation failure and retains prior successes", async () => {
-    const archive = vi.fn(async (entry: (typeof entries)[number], onArchived: () => void) => {
-      if (entry.threadKey === "two") return failure;
-      onArchived();
-      return success;
-    });
-    const outcome = await archiveSelectedThreadEntries({ entries, archive });
-
-    expect(archive).toHaveBeenCalledTimes(2);
-    expect(outcome).toEqual({
-      archivedThreadKeys: ["one"],
-      mutationFailure: failure,
-      followupFailures: [],
-    });
-  });
-
-  it("continues after a post-archive failure", async () => {
-    const archive = vi.fn(async (entry: (typeof entries)[number], onArchived: () => void) => {
-      onArchived();
-      return entry.threadKey === "two" ? failure : success;
-    });
-    const outcome = await archiveSelectedThreadEntries({ entries, archive });
-
-    expect(archive).toHaveBeenCalledTimes(3);
-    expect(outcome).toEqual({
-      archivedThreadKeys: ["one", "two", "three"],
-      mutationFailure: null,
-      followupFailures: [failure],
-    });
-  });
-});
-
-describe("buildMultiSelectThreadContextMenuItems", () => {
-  it("offers bulk archive with the selected count", () => {
-    expect(
-      buildMultiSelectThreadContextMenuItems({ count: 3, hasRunningThread: false }),
-    ).toContainEqual({ id: "archive", label: "Archive (3)", disabled: false });
-  });
-
-  it("disables bulk archive when a selected thread is running", () => {
-    expect(
-      buildMultiSelectThreadContextMenuItems({ count: 2, hasRunningThread: true }),
-    ).toContainEqual({ id: "archive", label: "Archive (2)", disabled: true });
-  });
-});
 
 describe("resolveSidebarStageBadgeLabel", () => {
   it("returns Nightly for nightly primary server versions", () => {
@@ -908,46 +839,67 @@ describe("resolveProjectStatusIndicator", () => {
 });
 
 describe("getVisibleThreadsForProject", () => {
-  it("includes the active thread even when it falls below the folded preview", () => {
-    const threads = Array.from({ length: 8 }, (_, index) =>
-      makeThread({
-        id: ThreadId.make(`thread-${index + 1}`),
-        title: `Thread ${index + 1}`,
-      }),
-    );
+  // Fixture threads are stamped 2026-03-09T10:00Z; this "now" puts them all
+  // far outside the recency window unless a test overrides their timestamps.
+  const NOW_MS = Date.parse("2026-03-12T10:00:00.000Z");
 
-    const result = getVisibleThreadsForProject({
+  type FoldThread = {
+    id: string;
+    createdAt: string;
+    updatedAt: string;
+    latestUserMessageAt?: string | null;
+  };
+
+  const makeFoldThread = (id: string, overrides: Partial<FoldThread> = {}): FoldThread => ({
+    id,
+    createdAt: "2026-03-09T10:00:00.000Z",
+    updatedAt: "2026-03-09T10:00:00.000Z",
+    ...overrides,
+  });
+
+  const foldThreads = (
+    threads: readonly FoldThread[],
+    overrides: Partial<{
+      activeThreadKey: string;
+      isThreadListExpanded: boolean;
+      previewLimit: number;
+      needsAttention: (thread: FoldThread) => boolean;
+    }> = {},
+  ) =>
+    getVisibleThreadsForProject({
       threads,
-      activeThreadId: ThreadId.make("thread-8"),
-      isThreadListExpanded: false,
-      previewLimit: 6,
+      getThreadKey: (thread) => thread.id,
+      activeThreadKey: overrides.activeThreadKey,
+      isThreadListExpanded: overrides.isThreadListExpanded ?? false,
+      previewLimit: overrides.previewLimit ?? 6,
+      nowMs: NOW_MS,
+      needsAttention: overrides.needsAttention ?? (() => false),
     });
+
+  it("includes the active thread even when it falls below the folded preview", () => {
+    const threads = Array.from({ length: 8 }, (_, index) => makeFoldThread(`thread-${index + 1}`));
+
+    const result = foldThreads(threads, { activeThreadKey: "thread-8" });
 
     expect(result.hasHiddenThreads).toBe(true);
     expect(result.visibleThreads.map((thread) => thread.id)).toEqual([
-      ThreadId.make("thread-1"),
-      ThreadId.make("thread-2"),
-      ThreadId.make("thread-3"),
-      ThreadId.make("thread-4"),
-      ThreadId.make("thread-5"),
-      ThreadId.make("thread-6"),
-      ThreadId.make("thread-8"),
+      "thread-1",
+      "thread-2",
+      "thread-3",
+      "thread-4",
+      "thread-5",
+      "thread-6",
+      "thread-8",
     ]);
-    expect(result.hiddenThreads.map((thread) => thread.id)).toEqual([ThreadId.make("thread-7")]);
+    expect(result.hiddenThreads.map((thread) => thread.id)).toEqual(["thread-7"]);
   });
 
   it("returns all threads when the list is expanded", () => {
-    const threads = Array.from({ length: 8 }, (_, index) =>
-      makeThread({
-        id: ThreadId.make(`thread-${index + 1}`),
-      }),
-    );
+    const threads = Array.from({ length: 8 }, (_, index) => makeFoldThread(`thread-${index + 1}`));
 
-    const result = getVisibleThreadsForProject({
-      threads,
-      activeThreadId: ThreadId.make("thread-8"),
+    const result = foldThreads(threads, {
+      activeThreadKey: "thread-8",
       isThreadListExpanded: true,
-      previewLimit: 6,
     });
 
     expect(result.hasHiddenThreads).toBe(true);
@@ -955,6 +907,108 @@ describe("getVisibleThreadsForProject", () => {
       threads.map((thread) => thread.id),
     );
     expect(result.hiddenThreads).toEqual([]);
+  });
+
+  it("keeps threads that need attention visible below the folded preview", () => {
+    const threads = Array.from({ length: 9 }, (_, index) => makeFoldThread(`thread-${index + 1}`));
+
+    const result = foldThreads(threads, {
+      needsAttention: (thread) => thread.id === "thread-9",
+    });
+
+    expect(result.visibleThreads.map((thread) => thread.id)).toContain("thread-9");
+    expect(result.hiddenThreads.map((thread) => thread.id)).toEqual(["thread-7", "thread-8"]);
+  });
+
+  it("keeps threads with recent activity visible below the folded preview", () => {
+    const threads = [
+      ...Array.from({ length: 7 }, (_, index) => makeFoldThread(`thread-${index + 1}`)),
+      makeFoldThread("thread-recent", {
+        updatedAt: new Date(NOW_MS - 10 * 60 * 1000).toISOString(),
+      }),
+    ];
+
+    const result = foldThreads(threads);
+
+    expect(result.visibleThreads.map((thread) => thread.id)).toContain("thread-recent");
+    expect(result.hiddenThreads.map((thread) => thread.id)).toEqual(["thread-7"]);
+  });
+
+  it("treats a recent agent completion as activity even when the prompt is old", () => {
+    // `updated_at` sorting prefers the latest user message, so recency must
+    // also consider `updatedAt` for threads whose agent finished after an
+    // old prompt.
+    const threads = [
+      ...Array.from({ length: 6 }, (_, index) => makeFoldThread(`thread-${index + 1}`)),
+      makeFoldThread("thread-finished", {
+        latestUserMessageAt: "2026-03-09T10:00:00.000Z",
+        updatedAt: new Date(NOW_MS - 5 * 60 * 1000).toISOString(),
+      }),
+    ];
+
+    const result = foldThreads(threads);
+
+    expect(result.visibleThreads.map((thread) => thread.id)).toContain("thread-finished");
+  });
+
+  it("caps recency-driven visibility but never drops attention threads", () => {
+    // 20 recent threads + 1 old attention thread; the cap (15) trims the
+    // recency overflow while the attention thread stays visible.
+    const recentThreads = Array.from({ length: 20 }, (_, index) =>
+      makeFoldThread(`recent-${String(index + 1).padStart(2, "0")}`, {
+        latestUserMessageAt: new Date(NOW_MS - (index + 1) * 60 * 1000).toISOString(),
+      }),
+    );
+    const threads = [...recentThreads, makeFoldThread("thread-attention")];
+
+    const result = foldThreads(threads, {
+      needsAttention: (thread) => thread.id === "thread-attention",
+    });
+
+    expect(result.hasHiddenThreads).toBe(true);
+    expect(result.visibleThreads.length).toBe(15);
+    expect(result.visibleThreads.map((thread) => thread.id)).toContain("thread-attention");
+    // The most recent candidates win the capped slots, so the trailing
+    // recent threads fold.
+    expect(result.hiddenThreads.map((thread) => thread.id)).toEqual([
+      "recent-15",
+      "recent-16",
+      "recent-17",
+      "recent-18",
+      "recent-19",
+      "recent-20",
+    ]);
+  });
+
+  it("reports no hidden threads when every thread qualifies", () => {
+    const threads = Array.from({ length: 8 }, (_, index) =>
+      makeFoldThread(`thread-${index + 1}`, {
+        updatedAt: new Date(NOW_MS - 60 * 1000).toISOString(),
+      }),
+    );
+
+    const result = foldThreads(threads);
+
+    expect(result.hasHiddenThreads).toBe(false);
+    expect(result.visibleThreads.map((thread) => thread.id)).toEqual(
+      threads.map((thread) => thread.id),
+    );
+    expect(result.hiddenThreads).toEqual([]);
+  });
+});
+
+describe("threadNeedsAttention", () => {
+  it("is true when the thread has any status pill and false otherwise", () => {
+    const base = {
+      hasActionableProposedPlan: false,
+      hasPendingApprovals: false,
+      hasPendingUserInput: false,
+      interactionMode: DEFAULT_INTERACTION_MODE,
+      latestTurn: null,
+      session: null,
+    };
+    expect(threadNeedsAttention({ ...base, hasPendingApprovals: true })).toBe(true);
+    expect(threadNeedsAttention(base)).toBe(false);
   });
 });
 
@@ -1232,75 +1286,5 @@ describe("sortProjectsForSidebar", () => {
     );
 
     expect(timestamp).toBe(Date.parse("2026-03-09T10:10:00.000Z"));
-  });
-});
-
-describe("sortScopedProjectsForSidebar", () => {
-  it("keeps identical project ids in different environments separate", () => {
-    const remoteEnvironmentId = EnvironmentId.make("environment-remote");
-    const sharedProjectId = ProjectId.make("shared-project");
-    const projects = [
-      makeProject({
-        environmentId: localEnvironmentId,
-        id: sharedProjectId,
-        title: "Local project",
-      }),
-      makeProject({
-        environmentId: remoteEnvironmentId,
-        id: sharedProjectId,
-        title: "Remote project",
-      }),
-    ];
-    const threads = [
-      makeThread({
-        environmentId: localEnvironmentId,
-        projectId: sharedProjectId,
-        updatedAt: "2026-03-09T10:02:00.000Z",
-      }),
-      makeThread({
-        environmentId: remoteEnvironmentId,
-        projectId: sharedProjectId,
-        updatedAt: "2026-03-09T10:10:00.000Z",
-      }),
-    ];
-
-    const sorted = sortScopedProjectsForSidebar(projects, threads, "updated_at");
-
-    expect(sorted.map((project) => project.title)).toEqual(["Remote project", "Local project"]);
-  });
-
-  it("does not use archived threads as project activity", () => {
-    const projects = [
-      makeProject({
-        id: ProjectId.make("project-visible"),
-        title: "Visible project",
-        updatedAt: "2026-03-09T10:01:00.000Z",
-      }),
-      makeProject({
-        id: ProjectId.make("project-archived"),
-        title: "Archived-only project",
-        updatedAt: "2026-03-09T10:00:00.000Z",
-      }),
-    ];
-    const threads = [
-      makeThread({
-        id: ThreadId.make("thread-visible"),
-        projectId: ProjectId.make("project-visible"),
-        updatedAt: "2026-03-09T10:02:00.000Z",
-      }),
-      makeThread({
-        id: ThreadId.make("thread-archived"),
-        projectId: ProjectId.make("project-archived"),
-        updatedAt: "2026-03-09T10:10:00.000Z",
-        archivedAt: "2026-03-09T10:11:00.000Z",
-      }),
-    ];
-
-    const sorted = sortScopedProjectsForSidebar(projects, threads, "updated_at");
-
-    expect(sorted.map((project) => project.title)).toEqual([
-      "Visible project",
-      "Archived-only project",
-    ]);
   });
 });
