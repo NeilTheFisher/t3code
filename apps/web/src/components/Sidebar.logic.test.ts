@@ -1,9 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { defaultAnimateLayoutChanges, type AnimateLayoutChanges } from "@dnd-kit/sortable";
-import * as Cause from "effect/Cause";
-import { AsyncResult } from "effect/unstable/reactivity";
 import {
-  animateSidebarLayoutChanges,
+  animatePinnedLayoutChanges,
   applySidebarThreadDrop,
   archiveSelectedThreadEntries,
   buildBulkTitleRegenerationContextMenuItem,
@@ -11,14 +9,18 @@ import {
   buildMultiSelectThreadContextMenuItems,
   createThreadJumpHintVisibilityController,
   deleteSelectedThreadEntries,
+  discardDraftSession,
   filterSidebarProjectScopeItems,
   getSidebarThreadIdsToPrewarm,
+  getVisibleSidebarThreadIds,
   resolveAdjacentThreadId,
   reduceSidebarProjectScopeMenuState,
   getFallbackThreadIdAfterDelete,
+  getVisibleThreadsForProject,
   getProjectSortTimestamp,
   hasUnseenCompletion,
   isContextMenuPointerDown,
+  isMaterializedForkDraftThread,
   isSidebarNestedLinkClick,
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
@@ -29,6 +31,7 @@ import {
   resolveWorkingStartedAt,
   searchSidebarThreads,
   formatWorkingDurationLabel,
+  shouldNavigateAfterProjectRemoval,
   shouldClearThreadSelectionOnMouseDown,
   shouldRecedeSidebarThread,
   sortLogicalProjectsForSidebar,
@@ -43,12 +46,13 @@ import {
   sortProjectsForSidebar,
   sortScopedProjectsForSidebar,
   shouldCreateNewThreadInCurrentProject,
+  resolveSidebarDropVerb,
+  threadNeedsAttention,
   shouldNavigateAfterThreadPark,
   THREAD_JUMP_HINT_SHOW_DELAY_MS,
   type SidebarListItem,
   type SidebarListMarker,
   type SidebarSection,
-  resolveSidebarDropVerb,
 } from "./Sidebar.logic";
 import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
 import { sortSettledThreads } from "@t3tools/client-runtime/state/thread-sort";
@@ -64,7 +68,6 @@ import {
   DEFAULT_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
   type Project,
-  type SidebarThreadSummary,
   type Thread,
 } from "../types";
 
@@ -117,107 +120,133 @@ describe("animateSidebarLayoutChanges", () => {
 
   it("does not replay layout movement after the pointer is released", () => {
     expect(defaultAnimateLayoutChanges(baseArgs)).toBe(true);
-    expect(animateSidebarLayoutChanges(baseArgs)).toBe(false);
+    expect(animatePinnedLayoutChanges(baseArgs)).toBe(false);
   });
 
   it("keeps layout movement while the user is sorting", () => {
-    expect(animateSidebarLayoutChanges({ ...baseArgs, isSorting: true })).toBe(true);
+    expect(animatePinnedLayoutChanges({ ...baseArgs, isSorting: true })).toBe(true);
   });
 });
 
-describe("deleteSelectedThreadEntries", () => {
-  const entries = [{ threadKey: "one" }, { threadKey: "two" }, { threadKey: "three" }] as const;
-  const success = AsyncResult.success(undefined);
-  const failure = AsyncResult.failure(Cause.fail(new Error("Delete failed")));
-  const interrupted = AsyncResult.failure(Cause.interrupt());
+describe("isMaterializedForkDraftThread", () => {
+  const thread = { environmentId: "environment-local", id: "thread-fork" };
+  const forkDraft = {
+    environmentId: "environment-local",
+    threadId: "thread-fork",
+    forkDraft: true,
+    promotedTo: null,
+  };
 
-  it("waits for each delete and excludes only earlier successes from worktree checks", async () => {
-    let resolveDelete!: (result: typeof success) => void;
-    const pendingDelete = new Promise<typeof success>((resolve) => {
-      resolveDelete = resolve;
-    });
-    const worktreeChecks: { threadKey: string; deletedThreadKeys: string[] }[] = [];
-    const deletion = deleteSelectedThreadEntries({
-      entries,
-      delete: async ({ threadKey }, deletedThreadKeys) => {
-        worktreeChecks.push({ threadKey, deletedThreadKeys: [...deletedThreadKeys] });
-        return threadKey === "one" ? pendingDelete : success;
-      },
-    });
-
-    expect(worktreeChecks).toEqual([{ threadKey: "one", deletedThreadKeys: [] }]);
-    resolveDelete(success);
-    const outcome = await deletion;
-
-    expect(worktreeChecks).toEqual([
-      { threadKey: "one", deletedThreadKeys: [] },
-      { threadKey: "two", deletedThreadKeys: ["one"] },
-      { threadKey: "three", deletedThreadKeys: ["one", "two"] },
-    ]);
-    expect(outcome).toEqual({
-      deletedThreadKeys: new Set(["one", "two", "three"]),
-      firstFailure: null,
-    });
+  it("hides a server thread while its fork is represented by a draft row", () => {
+    expect(isMaterializedForkDraftThread(thread, [forkDraft])).toBe(true);
   });
 
-  it("continues after ordinary failures and keeps the first failure", async () => {
-    const laterFailure = AsyncResult.failure(Cause.fail(new Error("Later failure")));
-    const deletedKeysAtLastEntry: string[][] = [];
-    const outcome = await deleteSelectedThreadEntries({
-      entries: [...entries, { threadKey: "four" }],
-      delete: async ({ threadKey }, deletedThreadKeys) => {
-        if (threadKey === "one") return failure;
-        if (threadKey === "three") return laterFailure;
-        if (threadKey === "four") deletedKeysAtLastEntry.push([...deletedThreadKeys]);
-        return success;
+  it("keeps ordinary and promoted drafts out of the filter", () => {
+    expect(
+      isMaterializedForkDraftThread(thread, [
+        { ...forkDraft, forkDraft: false },
+        { ...forkDraft, promotedTo: { threadId: "thread-fork" } },
+      ]),
+    ).toBe(false);
+  });
+});
+
+describe("discardDraftSession", () => {
+  const session = {
+    environmentId: "environment-local",
+    threadId: "thread-fork",
+    forkDraft: true,
+  };
+
+  it("deletes a provisional fork before clearing its draft", async () => {
+    const calls: string[] = [];
+    const result = await discardDraftSession({
+      session,
+      deleteForkThread: async () => {
+        calls.push("delete");
+        return { _tag: "Success" as const };
       },
+      clearDraft: () => calls.push("clear"),
     });
 
-    expect(deletedKeysAtLastEntry).toEqual([["two"]]);
-    expect(outcome).toEqual({
-      deletedThreadKeys: new Set(["two", "four"]),
-      firstFailure: failure,
-    });
+    expect(result?._tag).toBe("Success");
+    expect(calls).toEqual(["delete", "clear"]);
   });
 
-  it.each([
-    { firstResult: success, deletedThreadKeys: new Set(["one"]), firstFailure: null },
-    { firstResult: failure, deletedThreadKeys: new Set<string>(), firstFailure: failure },
-  ])("stops on interruption and preserves earlier results %#", async (testCase) => {
-    const attemptedThreadKeys: string[] = [];
-    const outcome = await deleteSelectedThreadEntries({
-      entries,
-      delete: async ({ threadKey }) => {
-        attemptedThreadKeys.push(threadKey);
-        return threadKey === "one" ? testCase.firstResult : interrupted;
-      },
+  it("keeps the draft when deleting its fork fails", async () => {
+    const clearDraft = vi.fn();
+    const result = await discardDraftSession({
+      session,
+      deleteForkThread: async () => ({ _tag: "Failure" as const }),
+      clearDraft,
     });
 
-    expect(attemptedThreadKeys).toEqual(["one", "two"]);
-    expect(outcome).toEqual({
-      deletedThreadKeys: testCase.deletedThreadKeys,
-      firstFailure: testCase.firstFailure,
-    });
+    expect(result?._tag).toBe("Failure");
+    expect(clearDraft).not.toHaveBeenCalled();
   });
 
-  it("does not count a skipped entry as deleted", async () => {
-    const visibleEntries = new Set(entries.map(({ threadKey }) => threadKey));
-    const worktreeChecks: string[][] = [];
-    const outcome = await deleteSelectedThreadEntries({
-      entries,
-      delete: async ({ threadKey }, deletedThreadKeys) => {
-        if (!visibleEntries.has(threadKey)) return null;
-        worktreeChecks.push([...deletedThreadKeys]);
-        visibleEntries.delete("two");
-        return success;
-      },
+  it("clears an ordinary local draft without deleting a thread", async () => {
+    const deleteForkThread = vi.fn();
+    const clearDraft = vi.fn();
+    const result = await discardDraftSession({
+      session: { ...session, forkDraft: false },
+      deleteForkThread,
+      clearDraft,
     });
 
-    expect(worktreeChecks).toEqual([[], ["one"]]);
-    expect(outcome).toEqual({
-      deletedThreadKeys: new Set(["one", "three"]),
-      firstFailure: null,
-    });
+    expect(result).toBeNull();
+    expect(deleteForkThread).not.toHaveBeenCalled();
+    expect(clearDraft).toHaveBeenCalledOnce();
+  });
+});
+
+describe("shouldNavigateAfterProjectRemoval", () => {
+  const projectThreads = [{ environmentId: "environment-local", id: "thread-1" }];
+
+  it("navigates away from a draft route owned by the removed project", () => {
+    expect(
+      shouldNavigateAfterProjectRemoval({
+        routeTarget: { kind: "draft", draftId: "draft-1" as never },
+        projectThreads,
+        projectDraftId: "draft-1",
+      }),
+    ).toBe(true);
+  });
+
+  it("does not navigate away from a different draft route", () => {
+    expect(
+      shouldNavigateAfterProjectRemoval({
+        routeTarget: { kind: "draft", draftId: "draft-2" as never },
+        projectThreads,
+        projectDraftId: "draft-1",
+      }),
+    ).toBe(false);
+  });
+
+  it("navigates away from a server thread owned by the removed project", () => {
+    expect(
+      shouldNavigateAfterProjectRemoval({
+        routeTarget: {
+          kind: "server",
+          threadRef: {
+            environmentId: EnvironmentId.make("environment-local"),
+            threadId: ThreadId.make("thread-1"),
+          },
+        },
+        projectThreads,
+        projectDraftId: null,
+      }),
+    ).toBe(true);
+  });
+
+  it("does not navigate from an unrelated route", () => {
+    expect(
+      shouldNavigateAfterProjectRemoval({
+        routeTarget: null,
+        projectThreads,
+        projectDraftId: null,
+      }),
+    ).toBe(false);
   });
 });
 
@@ -271,19 +300,6 @@ describe("archiveSelectedThreadEntries", () => {
       mutationFailure: null,
       followupFailures: [failure],
     });
-  });
-});
-
-describe("buildBulkUnpinContextMenuItem", () => {
-  it("counts only the pinned rows of a mixed selection", () => {
-    expect(buildBulkUnpinContextMenuItem({ pinnedCount: 2 })).toEqual({
-      id: "unpin",
-      label: "Unpin (2)",
-    });
-  });
-
-  it("omits the action when nothing selected is pinned", () => {
-    expect(buildBulkUnpinContextMenuItem({ pinnedCount: 0 })).toBeNull();
   });
 });
 
@@ -378,63 +394,6 @@ describe("hasUnseenCompletion", () => {
         latestTurn: makeLatestTurn(),
         lastVisitedAt: undefined,
         session: null,
-      }),
-    ).toBe(false);
-  });
-});
-
-describe("shouldRecedeSidebarThread", () => {
-  it.each(["working", "monitoring"] as const)(
-    "recedes an inactive %s thread even when it is unread and woke",
-    (status) => {
-      expect(
-        shouldRecedeSidebarThread({
-          status,
-          isUnread: true,
-          isWoke: true,
-          isActive: false,
-          isSelected: false,
-        }),
-      ).toBe(true);
-    },
-  );
-
-  it.each(["ready", "approval", "input"] as const)(
-    "keeps an unread %s thread prominent",
-    (status) => {
-      expect(
-        shouldRecedeSidebarThread({
-          status,
-          isUnread: true,
-          isWoke: false,
-          isActive: false,
-          isSelected: false,
-        }),
-      ).toBe(false);
-    },
-  );
-
-  it("keeps active and selected working threads prominent", () => {
-    const input = {
-      status: "working" as const,
-      isUnread: true,
-      isWoke: true,
-      isActive: false,
-      isSelected: false,
-    };
-
-    expect(shouldRecedeSidebarThread({ ...input, isActive: true })).toBe(false);
-    expect(shouldRecedeSidebarThread({ ...input, isSelected: true })).toBe(false);
-  });
-
-  it.each([false, true])("keeps input-required threads prominent with unread=%s", (isUnread) => {
-    expect(
-      shouldRecedeSidebarThread({
-        status: "input",
-        isUnread,
-        isWoke: false,
-        isActive: false,
-        isSelected: false,
       }),
     ).toBe(false);
   });
@@ -743,6 +702,46 @@ describe("resolveAdjacentThreadId", () => {
   });
 });
 
+describe("getVisibleSidebarThreadIds", () => {
+  it("returns only the rendered visible thread order across projects", () => {
+    expect(
+      getVisibleSidebarThreadIds([
+        {
+          renderedThreadIds: [
+            ThreadId.make("thread-12"),
+            ThreadId.make("thread-11"),
+            ThreadId.make("thread-10"),
+          ],
+        },
+        {
+          renderedThreadIds: [ThreadId.make("thread-8"), ThreadId.make("thread-6")],
+        },
+      ]),
+    ).toEqual([
+      ThreadId.make("thread-12"),
+      ThreadId.make("thread-11"),
+      ThreadId.make("thread-10"),
+      ThreadId.make("thread-8"),
+      ThreadId.make("thread-6"),
+    ]);
+  });
+
+  it("skips threads from collapsed projects whose thread panels are not shown", () => {
+    expect(
+      getVisibleSidebarThreadIds([
+        {
+          shouldShowThreadPanel: false,
+          renderedThreadIds: [ThreadId.make("thread-hidden-2"), ThreadId.make("thread-hidden-1")],
+        },
+        {
+          shouldShowThreadPanel: true,
+          renderedThreadIds: [ThreadId.make("thread-12"), ThreadId.make("thread-11")],
+        },
+      ]),
+    ).toEqual([ThreadId.make("thread-12"), ThreadId.make("thread-11")]);
+  });
+});
+
 describe("isContextMenuPointerDown", () => {
   it("treats secondary-button presses as context menu gestures on all platforms", () => {
     expect(
@@ -905,26 +904,30 @@ describe("filterSidebarProjectScopeItems", () => {
     { value: "alpha", label: "Alpha workspace" },
     { value: "beta", label: "Beta tools" },
   ] as const;
-  const filter = (query: string) =>
+  const filter = (activeScopeKey: string | null, query: string) =>
     filterSidebarProjectScopeItems({
       items,
+      activeScopeKey,
       query,
       matches: (item, candidate) =>
         item.label.toLocaleLowerCase().includes(candidate.toLocaleLowerCase()),
     });
 
-  it("shows the default row first while the query is empty", () => {
-    expect(filter("")).toEqual(items);
-    expect(filter("   ")).toEqual(items);
+  it("omits the reset row when the sidebar is already unscoped", () => {
+    expect(filter(null, "")).toEqual(items.slice(1));
   });
 
-  it("hides the default row while filtering", () => {
-    expect(filter("all")).toEqual([]);
+  it("shows the reset row first while a project scope is active", () => {
+    expect(filter("alpha", "")).toEqual(items);
+  });
+
+  it("hides the reset row while filtering an active scope", () => {
+    expect(filter("alpha", "all")).toEqual([]);
   });
 
   it("returns matching projects in source order and supports no-match results", () => {
-    expect(filter("WORK")).toEqual([items[1]]);
-    expect(filter("missing")).toEqual([]);
+    expect(filter(null, "WORK")).toEqual([items[1]]);
+    expect(filter(null, "missing")).toEqual([]);
   });
 });
 
@@ -1921,6 +1924,7 @@ describe("resolveThreadStatusPill", () => {
   const baseThread = {
     hasActionableProposedPlan: false,
     hasPendingApprovals: false,
+    hasPendingBackgroundTasks: false,
     hasPendingUserInput: false,
     interactionMode: "plan" as const,
     latestTurn: null,
@@ -2067,6 +2071,180 @@ describe("resolveProjectStatusIndicator", () => {
         },
       ]),
     ).toMatchObject({ label: "Plan Ready", dotClass: "bg-violet-500" });
+  });
+});
+
+describe("getVisibleThreadsForProject", () => {
+  // Fixture threads are stamped 2026-03-09T10:00Z; this "now" puts them all
+  // far outside the recency window unless a test overrides their timestamps.
+  const NOW_MS = Date.parse("2026-03-12T10:00:00.000Z");
+
+  type FoldThread = {
+    id: string;
+    createdAt: string;
+    updatedAt: string;
+    latestUserMessageAt?: string | null;
+  };
+
+  const makeFoldThread = (id: string, overrides: Partial<FoldThread> = {}): FoldThread => ({
+    id,
+    createdAt: "2026-03-09T10:00:00.000Z",
+    updatedAt: "2026-03-09T10:00:00.000Z",
+    ...overrides,
+  });
+
+  const foldThreads = (
+    threads: readonly FoldThread[],
+    overrides: Partial<{
+      activeThreadKey: string;
+      isThreadListExpanded: boolean;
+      previewLimit: number;
+      needsAttention: (thread: FoldThread) => boolean;
+    }> = {},
+  ) =>
+    getVisibleThreadsForProject({
+      threads,
+      getThreadKey: (thread) => thread.id,
+      activeThreadKey: overrides.activeThreadKey,
+      isThreadListExpanded: overrides.isThreadListExpanded ?? false,
+      previewLimit: overrides.previewLimit ?? 6,
+      nowMs: NOW_MS,
+      needsAttention: overrides.needsAttention ?? (() => false),
+    });
+
+  it("includes the active thread even when it falls below the folded preview", () => {
+    const threads = Array.from({ length: 8 }, (_, index) => makeFoldThread(`thread-${index + 1}`));
+
+    const result = foldThreads(threads, { activeThreadKey: "thread-8" });
+
+    expect(result.hasHiddenThreads).toBe(true);
+    expect(result.visibleThreads.map((thread) => thread.id)).toEqual([
+      "thread-1",
+      "thread-2",
+      "thread-3",
+      "thread-4",
+      "thread-5",
+      "thread-6",
+      "thread-8",
+    ]);
+    expect(result.hiddenThreads.map((thread) => thread.id)).toEqual(["thread-7"]);
+  });
+
+  it("returns all threads when the list is expanded", () => {
+    const threads = Array.from({ length: 8 }, (_, index) => makeFoldThread(`thread-${index + 1}`));
+
+    const result = foldThreads(threads, {
+      activeThreadKey: "thread-8",
+      isThreadListExpanded: true,
+    });
+
+    expect(result.hasHiddenThreads).toBe(true);
+    expect(result.visibleThreads.map((thread) => thread.id)).toEqual(
+      threads.map((thread) => thread.id),
+    );
+    expect(result.hiddenThreads).toEqual([]);
+  });
+
+  it("keeps threads that need attention visible below the folded preview", () => {
+    const threads = Array.from({ length: 9 }, (_, index) => makeFoldThread(`thread-${index + 1}`));
+
+    const result = foldThreads(threads, {
+      needsAttention: (thread) => thread.id === "thread-9",
+    });
+
+    expect(result.visibleThreads.map((thread) => thread.id)).toContain("thread-9");
+    expect(result.hiddenThreads.map((thread) => thread.id)).toEqual(["thread-7", "thread-8"]);
+  });
+
+  it("keeps threads with recent activity visible below the folded preview", () => {
+    const threads = [
+      ...Array.from({ length: 7 }, (_, index) => makeFoldThread(`thread-${index + 1}`)),
+      makeFoldThread("thread-recent", {
+        updatedAt: new Date(NOW_MS - 10 * 60 * 1000).toISOString(),
+      }),
+    ];
+
+    const result = foldThreads(threads);
+
+    expect(result.visibleThreads.map((thread) => thread.id)).toContain("thread-recent");
+    expect(result.hiddenThreads.map((thread) => thread.id)).toEqual(["thread-7"]);
+  });
+
+  it("treats a recent agent completion as activity even when the prompt is old", () => {
+    // `updated_at` sorting prefers the latest user message, so recency must
+    // also consider `updatedAt` for threads whose agent finished after an
+    // old prompt.
+    const threads = [
+      ...Array.from({ length: 6 }, (_, index) => makeFoldThread(`thread-${index + 1}`)),
+      makeFoldThread("thread-finished", {
+        latestUserMessageAt: "2026-03-09T10:00:00.000Z",
+        updatedAt: new Date(NOW_MS - 5 * 60 * 1000).toISOString(),
+      }),
+    ];
+
+    const result = foldThreads(threads);
+
+    expect(result.visibleThreads.map((thread) => thread.id)).toContain("thread-finished");
+  });
+
+  it("caps recency-driven visibility but never drops attention threads", () => {
+    // 20 recent threads + 1 old attention thread; the cap (15) trims the
+    // recency overflow while the attention thread stays visible.
+    const recentThreads = Array.from({ length: 20 }, (_, index) =>
+      makeFoldThread(`recent-${String(index + 1).padStart(2, "0")}`, {
+        latestUserMessageAt: new Date(NOW_MS - (index + 1) * 60 * 1000).toISOString(),
+      }),
+    );
+    const threads = [...recentThreads, makeFoldThread("thread-attention")];
+
+    const result = foldThreads(threads, {
+      needsAttention: (thread) => thread.id === "thread-attention",
+    });
+
+    expect(result.hasHiddenThreads).toBe(true);
+    expect(result.visibleThreads.length).toBe(15);
+    expect(result.visibleThreads.map((thread) => thread.id)).toContain("thread-attention");
+    // The most recent candidates win the capped slots, so the trailing
+    // recent threads fold.
+    expect(result.hiddenThreads.map((thread) => thread.id)).toEqual([
+      "recent-15",
+      "recent-16",
+      "recent-17",
+      "recent-18",
+      "recent-19",
+      "recent-20",
+    ]);
+  });
+
+  it("reports no hidden threads when every thread qualifies", () => {
+    const threads = Array.from({ length: 8 }, (_, index) =>
+      makeFoldThread(`thread-${index + 1}`, {
+        updatedAt: new Date(NOW_MS - 60 * 1000).toISOString(),
+      }),
+    );
+
+    const result = foldThreads(threads);
+
+    expect(result.hasHiddenThreads).toBe(false);
+    expect(result.visibleThreads.map((thread) => thread.id)).toEqual(
+      threads.map((thread) => thread.id),
+    );
+    expect(result.hiddenThreads).toEqual([]);
+  });
+});
+
+describe("threadNeedsAttention", () => {
+  it("is true when the thread has any status pill and false otherwise", () => {
+    const base = {
+      hasActionableProposedPlan: false,
+      hasPendingApprovals: false,
+      hasPendingUserInput: false,
+      interactionMode: DEFAULT_INTERACTION_MODE,
+      latestTurn: null,
+      session: null,
+    };
+    expect(threadNeedsAttention({ ...base, hasPendingApprovals: true })).toBe(true);
+    expect(threadNeedsAttention(base)).toBe(false);
   });
 });
 

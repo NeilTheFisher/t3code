@@ -5,22 +5,24 @@ import {
   isAtomCommandInterrupted,
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
+import { MAX_SIDEBAR_THREAD_PREVIEW_COUNT } from "@t3tools/contracts/settings";
 import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
 import type { ContextMenuItem, EnvironmentId, ThreadId } from "@t3tools/contracts";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
 import type { AsyncResult } from "effect/unstable/reactivity";
 import { planPinnedReorder } from "@t3tools/client-runtime/state/thread-sort";
 import {
-  effectiveSnoozed,
-  type ThreadSnoozeShell,
-} from "@t3tools/client-runtime/state/thread-settled";
-import {
   getThreadSortTimestamp,
   sortThreads,
   toSortableTimestamp,
   type ThreadSortInput,
 } from "../lib/threadSort";
+import {
+  effectiveSnoozed,
+  type ThreadSnoozeShell,
+} from "@t3tools/client-runtime/state/thread-settled";
 import type { SidebarThreadSummary, Thread } from "../types";
+import type { ThreadRouteTarget } from "../threadRoutes";
 import { cn } from "../lib/utils";
 import { isLatestTurnSettled } from "../session-logic";
 
@@ -63,7 +65,7 @@ export function resolveSidebarRowAccessibility(input: {
 // activities, growing as agents work) for as long as the row stays visible,
 // so this limit is a direct renderer-heap and server-load multiplier — keep
 // it small; cold opens still render instantly from the cached snapshot.
-const SIDEBAR_THREAD_PREWARM_LIMIT = 3;
+export const SIDEBAR_THREAD_PREWARM_LIMIT = 3;
 // A small buffer keeps the next few rows warm without leasing every row that
 // content-visibility leaves mounted below the scroll viewport.
 const SIDEBAR_ROW_SUBSCRIPTION_OVERSCAN_PX = 160;
@@ -120,6 +122,10 @@ export function useRetainedValue<T>(key: string | null, value: T | null): T | nu
 // dragging; replaying their committed DOM order would animate the drop twice.
 export const animateSidebarLayoutChanges: AnimateLayoutChanges = (args) =>
   args.isSorting ? defaultAnimateLayoutChanges(args) : false;
+
+// Alias retained for Sidebar.tsx and tests; upstream renamed the above
+// (identical implementation).
+export const animatePinnedLayoutChanges = animateSidebarLayoutChanges;
 
 // Rows and section markers share one sortable list. The separators resolve
 // the lifecycle action; Sidebar.drag previews the resulting layout. Pinned
@@ -401,6 +407,47 @@ type ScopedSidebarThread = ThreadSortInput & {
   archivedAt: string | null;
 };
 
+type ForkDraftSession = {
+  environmentId: string;
+  threadId: string;
+  forkDraft: boolean;
+  promotedTo: unknown | null;
+};
+
+export function isMaterializedForkDraftThread(
+  thread: { environmentId: string; id: string },
+  draftSessions: readonly ForkDraftSession[],
+): boolean {
+  return draftSessions.some(
+    (draft) =>
+      draft.forkDraft &&
+      draft.promotedTo === null &&
+      draft.environmentId === thread.environmentId &&
+      draft.threadId === thread.id,
+  );
+}
+
+export async function discardDraftSession<
+  TResult extends { readonly _tag: "Success" | "Failure" },
+>(input: {
+  session: {
+    environmentId: string;
+    threadId: string;
+    forkDraft: boolean;
+  };
+  deleteForkThread: (thread: { environmentId: string; threadId: string }) => Promise<TResult>;
+  clearDraft: () => void;
+}): Promise<TResult | null> {
+  if (!input.session.forkDraft) {
+    input.clearDraft();
+    return null;
+  }
+
+  const result = await input.deleteForkThread(input.session);
+  if (result._tag === "Success") input.clearDraft();
+  return result;
+}
+
 type LogicalSidebarProject = SidebarProject & {
   projectKey: string;
   memberProjectRefs: readonly {
@@ -519,7 +566,6 @@ export function buildBulkUnpinContextMenuItem(input: {
   if (input.pinnedCount === 0) return null;
   return { id: "unpin", label: `Unpin (${input.pinnedCount})` };
 }
-
 export interface ThreadStatusPill {
   label:
     | "Working"
@@ -542,6 +588,7 @@ const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
   "Pending Approval": 6,
   "Awaiting Input": 5,
   Working: 4,
+  Waiting: 4,
   Connecting: 4,
   "Plan Ready": 3,
   Monitoring: 2,
@@ -552,7 +599,6 @@ type ThreadStatusInput = Pick<
   SidebarThreadSummary,
   | "hasActionableProposedPlan"
   | "hasPendingApprovals"
-  | "hasPendingBackgroundTasks"
   | "hasPendingUserInput"
   | "interactionMode"
   | "latestTurn"
@@ -805,9 +851,9 @@ export function shouldRecedeSidebarThread(input: {
   isActive: boolean;
   isSelected: boolean;
 }): boolean {
-  if (input.isActive || input.isSelected || input.status === "input") return false;
+  if (input.isActive || input.isSelected) return false;
   if (input.status === "working" || input.status === "monitoring") return true;
-  if (input.status === "ready" || input.status === "approval") {
+  if (input.status === "ready" || input.status === "approval" || input.status === "input") {
     return !input.isUnread && !input.isWoke;
   }
   return false;
@@ -860,7 +906,7 @@ export function firstValidTimestampMs(
 
 /** String twin of firstValidTimestampMs for callers that need the ISO string
     (display labels, tick anchors) rather than epoch ms. */
-function firstValidTimestamp(
+export function firstValidTimestamp(
   ...candidates: ReadonlyArray<string | null | undefined>
 ): string | null {
   for (const candidate of candidates) {
@@ -920,12 +966,16 @@ export function searchSidebarThreads<
 
 export function filterSidebarProjectScopeItems<TItem extends { readonly value: string }>(input: {
   items: readonly TItem[];
+  activeScopeKey: string | null;
   query: string;
   matches: (item: TItem, query: string) => boolean;
 }): readonly TItem[] {
+  const projectItems = input.items.filter((item) => item.value !== "all");
   const query = input.query.trim();
-  if (query.length === 0) return input.items;
-  return input.items.filter((item) => item.value !== "all" && input.matches(item, query));
+  if (query.length > 0) {
+    return projectItems.filter((item) => input.matches(item, query));
+  }
+  return input.activeScopeKey === null ? projectItems : input.items;
 }
 
 export interface SidebarProjectScopeMenuState {
@@ -1083,6 +1133,85 @@ export function resolveProjectStatusIndicator(
   return highestPriorityStatus;
 }
 
+export const SIDEBAR_RECENT_THREAD_WINDOW_MS = 2 * 60 * 60 * 1000;
+
+export function threadNeedsAttention(thread: ThreadStatusInput): boolean {
+  return resolveThreadStatusPill({ thread }) !== null;
+}
+
+// `getThreadSortTimestamp("updated_at")` prefers the latest user message, so a
+// thread whose agent finished recently but whose prompt is hours old would not
+// count as recent activity without also considering `updatedAt`.
+function getThreadActivityTimestamp(thread: ThreadSortInput): number {
+  return Math.max(
+    getThreadSortTimestamp(thread, "updated_at"),
+    toSortableTimestamp(thread.updatedAt) ?? Number.NEGATIVE_INFINITY,
+  );
+}
+
+// The preview limit is a floor, not a ceiling: beyond the first N threads,
+// folding keeps visible the active thread, any thread that still needs the
+// user's attention (it has a status pill: pending approval/input, running,
+// plan ready, or unseen completion), and threads with activity inside the
+// recency window. Recent-but-quiet threads are capped so a busy afternoon of
+// launches doesn't unfold the whole list; attention and active threads are
+// never dropped by the cap.
+export function getVisibleThreadsForProject<T extends ThreadSortInput>(input: {
+  threads: readonly T[];
+  getThreadKey: (thread: T) => string;
+  activeThreadKey: string | undefined;
+  isThreadListExpanded: boolean;
+  previewLimit: number;
+  nowMs: number;
+  needsAttention: (thread: T) => boolean;
+}): {
+  hasHiddenThreads: boolean;
+  visibleThreads: T[];
+  hiddenThreads: T[];
+} {
+  const { activeThreadKey, getThreadKey, isThreadListExpanded, previewLimit, threads } = input;
+
+  const visibleThreadKeys = new Set<string>();
+  for (const thread of threads.slice(0, previewLimit)) {
+    visibleThreadKeys.add(getThreadKey(thread));
+  }
+  for (const thread of threads) {
+    const threadKey = getThreadKey(thread);
+    if (threadKey === activeThreadKey || input.needsAttention(thread)) {
+      visibleThreadKeys.add(threadKey);
+    }
+  }
+
+  const maxAutoShownThreads = Math.max(previewLimit, MAX_SIDEBAR_THREAD_PREVIEW_COUNT);
+  const recencyCutoffMs = input.nowMs - SIDEBAR_RECENT_THREAD_WINDOW_MS;
+  const recentHiddenThreads = threads
+    .filter(
+      (thread) =>
+        !visibleThreadKeys.has(getThreadKey(thread)) &&
+        getThreadActivityTimestamp(thread) >= recencyCutoffMs,
+    )
+    .sort((a, b) => getThreadActivityTimestamp(b) - getThreadActivityTimestamp(a));
+  for (const thread of recentHiddenThreads) {
+    if (visibleThreadKeys.size >= maxAutoShownThreads) break;
+    visibleThreadKeys.add(getThreadKey(thread));
+  }
+
+  const hasHiddenThreads = visibleThreadKeys.size < threads.length;
+  if (!hasHiddenThreads || isThreadListExpanded) {
+    return {
+      hasHiddenThreads,
+      hiddenThreads: [],
+      visibleThreads: [...threads],
+    };
+  }
+
+  return {
+    hasHiddenThreads: true,
+    hiddenThreads: threads.filter((thread) => !visibleThreadKeys.has(getThreadKey(thread))),
+    visibleThreads: threads.filter((thread) => visibleThreadKeys.has(getThreadKey(thread))),
+  };
+}
+
 export function getFallbackThreadIdAfterDelete<
   T extends Pick<Thread, "id" | "projectId" | "createdAt" | "updatedAt"> & ThreadSortInput,
 >(input: {
@@ -1160,6 +1289,10 @@ export function sortProjectsForSidebar<
   threads: readonly TThread[],
   sortOrder: SidebarProjectSortOrder,
 ): TProject[] {
+  if (sortOrder === "manual") {
+    return [...projects];
+  }
+
   const threadsByProjectId = new Map<string, TThread[]>();
   for (const thread of threads) {
     const existing = threadsByProjectId.get(thread.projectId) ?? [];
@@ -1249,3 +1382,74 @@ export function sortScopedProjectsForSidebar<
       left.id.localeCompare(right.id),
   );
 }
+
+// Fork-retained sidebar helpers removed upstream; still used by Sidebar.tsx and tests.
+export function getVisibleSidebarThreadIds<TThreadId>(
+  renderedProjects: readonly {
+    shouldShowThreadPanel?: boolean;
+    renderedThreadIds: readonly TThreadId[];
+  }[],
+): TThreadId[] {
+  return renderedProjects.flatMap((renderedProject) =>
+    renderedProject.shouldShowThreadPanel === false ? [] : renderedProject.renderedThreadIds,
+  );
+}
+
+export function shouldNavigateAfterProjectRemoval(input: {
+  routeTarget: ThreadRouteTarget | null;
+  projectThreads: readonly {
+    environmentId: string;
+    id: string;
+  }[];
+  projectDraftId: string | null;
+}): boolean {
+  const { projectDraftId, projectThreads, routeTarget } = input;
+  if (routeTarget?.kind === "draft") {
+    return projectDraftId === routeTarget.draftId;
+  }
+  if (routeTarget?.kind !== "server") {
+    return false;
+  }
+  return projectThreads.some(
+    (thread) =>
+      thread.environmentId === routeTarget.threadRef.environmentId &&
+      thread.id === routeTarget.threadRef.threadId,
+  );
+}
+
+export function parseTimestampMs(isoDate: string): number {
+  const parsed = Date.parse(isoDate);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+// Pinned-reorder key math and the keyed sort live in client-runtime
+// (state/thread-sort) so web and mobile compute identical pinned orders.
+
+type SettledTimestampInput = Pick<
+  SidebarThreadSummary,
+  "settledAt" | "latestUserMessageAt" | "latestTurn" | "updatedAt"
+>;
+
+export function resolveSettledTimestamp(thread: SettledTimestampInput): string | null {
+  const settledAt = firstValidTimestamp(thread.settledAt);
+  if (settledAt !== null) return settledAt;
+  let latest: string | null = null;
+  let latestMs = Number.NEGATIVE_INFINITY;
+  for (const candidate of [
+    thread.latestUserMessageAt,
+    thread.latestTurn?.requestedAt,
+    thread.latestTurn?.startedAt,
+    thread.latestTurn?.completedAt,
+  ]) {
+    if (candidate == null) continue;
+    const parsed = Date.parse(candidate);
+    if (!Number.isNaN(parsed) && parsed > latestMs) {
+      latest = candidate;
+      latestMs = parsed;
+    }
+  }
+  return latest ?? firstValidTimestamp(thread.updatedAt);
+}
+
+// Settled rows are history, so they order by when the work ENDED, not when
+// the thread was created or last touched.
