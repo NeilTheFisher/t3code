@@ -17,7 +17,7 @@ import * as Schema from "effect/Schema";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { isBrowserPreviewFile, openFileInPreview } from "~/browser/openFileInPreview";
-import { useAssetUrlState } from "~/assets/assetUrls";
+import { useAssetUrl } from "~/assets/assetUrls";
 import ChatMarkdown from "~/components/ChatMarkdown";
 import { OpenInPicker } from "~/components/chat/OpenInPicker";
 import { useClientSettings } from "~/hooks/useSettings";
@@ -121,29 +121,15 @@ function WorkspaceImagePreview(props: {
   readonly absolutePath: string;
   readonly alt: string;
 }) {
-  const assetUrl = useAssetUrlState(props.environmentId, {
+  const src = useAssetUrl(props.environmentId, {
     _tag: "workspace-file",
     threadId: props.threadRef.threadId,
     path: props.absolutePath,
   });
-  const [failedUrl, setFailedUrl] = useState<string | null>(null);
 
-  if (assetUrl._tag === "Failure" || (assetUrl._tag === "Success" && failedUrl === assetUrl.url)) {
-    return (
-      <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center text-xs leading-relaxed text-destructive">
-        Unable to load workspace image.
-      </div>
-    );
-  }
-
-  return assetUrl._tag === "Success" ? (
+  return src ? (
     <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4">
-      <img
-        className="max-h-full max-w-full object-contain"
-        src={assetUrl.url}
-        alt={props.alt}
-        onError={() => setFailedUrl(assetUrl.url)}
-      />
+      <img className="max-h-full max-w-full object-contain" src={src} alt={props.alt} />
     </div>
   ) : (
     <div className="flex min-h-0 flex-1 items-center justify-center text-muted-foreground">
@@ -860,7 +846,6 @@ export default function FilePreviewPanel({
         >
           {relativePath && isImage && absolutePath ? (
             <WorkspaceImagePreview
-              key={absolutePath}
               environmentId={environmentId}
               threadRef={threadRef}
               absolutePath={absolutePath}
