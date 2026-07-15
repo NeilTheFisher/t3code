@@ -1239,7 +1239,6 @@ export default function FilePreviewPanel({
             />
           ) : relativePath && isImage && absolutePath ? (
             <WorkspaceImagePreview
-              key={absolutePath}
               environmentId={environmentId}
               threadRef={threadRef}
               absolutePath={absolutePath}
