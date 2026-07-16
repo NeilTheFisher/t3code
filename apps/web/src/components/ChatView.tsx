@@ -1721,6 +1721,7 @@ function ChatViewContent(props: ChatViewProps) {
   const [olderLoaded, setOlderLoaded] = useState(false);
   const [olderHasMore, setOlderHasMore] = useState(false);
   const [loadingOlderActivities, setLoadingOlderActivities] = useState(false);
+  const [olderHistoryCursorVersion, setOlderHistoryCursorVersion] = useState(0);
   const loadThreadActivities = useAtomCommand(orchestrationEnvironment.loadThreadActivities, {
     reportFailure: false,
   });
@@ -1781,6 +1782,7 @@ function ChatViewContent(props: ChatViewProps) {
     setOlderLoaded(false);
     setOlderHasMore(false);
     setLoadingOlderActivities(false);
+    setOlderHistoryCursorVersion((version) => version + 1);
   }, [activeThreadActivityRequestKey, liveOldestActivityId, liveActivityCount]);
 
   const threadActivities = useMemo(
@@ -1855,6 +1857,7 @@ function ChatViewContent(props: ChatViewProps) {
         }
         setOlderLoaded(true);
         setOlderHasMore(page.hasMore);
+        setOlderHistoryCursorVersion((version) => version + 1);
       })
       .finally(() => {
         if (olderActivitiesGenRef.current === gen) {
@@ -5223,6 +5226,7 @@ function ChatViewContent(props: ChatViewProps) {
                 timelineEntries={timelineEntries}
                 hasMoreOlder={hasMoreOlderActivities}
                 loadingOlder={loadingOlderActivities}
+                olderHistoryCursorVersion={olderHistoryCursorVersion}
                 onLoadOlder={loadOlderActivities}
                 latestTurn={activeLatestTurn}
                 runningTurnId={
