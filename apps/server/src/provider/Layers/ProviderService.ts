@@ -72,7 +72,9 @@ import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
 import * as ProviderAdapterRegistry from "../Services/ProviderAdapterRegistry.ts";
 import * as ProviderService from "../Services/ProviderService.ts";
 import * as ProviderSessionDirectory from "../Services/ProviderSessionDirectory.ts";
+import { ProjectionThreadMessageRepository } from "../../persistence/Services/ProjectionThreadMessages.ts";
 import { type EventNdjsonLogger } from "./EventNdjsonLogger.ts";
+import { buildRecoveredTranscript } from "./RecoveredThreadTranscript.ts";
 import * as ProviderEventLoggers from "./ProviderEventLoggers.ts";
 import * as AnalyticsService from "../../telemetry/AnalyticsService.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
@@ -478,6 +480,44 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   const issueMcpCredential =
     options?.issueMcpCredential ?? McpSessionRegistry.issueActiveMcpCredential;
   const fileSystem = yield* FileSystem.FileSystem;
+  // Optional dependency: present in the production runtime (persistence layer
+  // is merged above the provider layer), absent in minimal test harnesses.
+  // Without it, fresh-session recovery simply skips history injection.
+  const projectionMessages = Option.getOrUndefined(
+    yield* Effect.serviceOption(ProjectionThreadMessageRepository),
+  );
+  // Threads recovered with a fresh provider session (no resume cursor) whose
+  // persisted transcript should be prepended to the next sendTurn input so the
+  // model regains the conversational context the provider-side session lost.
+  const pendingContextInjections = new Map<ThreadId, string>();
+
+  const queueContextInjectionForFreshSession = (threadId: ThreadId) =>
+    projectionMessages === undefined
+      ? Effect.void
+      : projectionMessages.listByThreadId({ threadId }).pipe(
+          Effect.flatMap((messages) =>
+            Effect.sync(() => {
+              const transcript = buildRecoveredTranscript(messages);
+              if (transcript !== undefined) {
+                pendingContextInjections.set(threadId, transcript);
+              }
+              return transcript !== undefined;
+            }),
+          ),
+          Effect.tap((queued) =>
+            Effect.logInfo("provider.session.context-injection-queued", {
+              threadId,
+              queued,
+            }),
+          ),
+          Effect.catchCause((cause) =>
+            Effect.logWarning("provider.session.context-injection-failed", {
+              threadId,
+              cause,
+            }),
+          ),
+          Effect.asVoid,
+        );
   const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
   const pendingCompactions = new Map<ThreadId, PendingCompaction>();
   const timedOutNativeCompactions = new Set<ThreadId>();
@@ -1172,10 +1212,19 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       }
 
       if (!hasResumeCursor) {
-        return yield* toValidationError(
-          input.operation,
-          `Cannot recover thread '${input.binding.threadId}' because no provider resume state is persisted.`,
-        );
+        // No resume state was persisted (e.g. the adapter never emitted a
+        // resume cursor before a server restart). Starting a fresh provider
+        // session loses provider-side context, but the alternative is a
+        // permanently unroutable thread, so fall back instead of failing.
+        yield* Effect.logWarning("provider.session.recover-without-resume-state", {
+          threadId: input.binding.threadId,
+          provider: input.binding.provider,
+          operation: input.operation,
+        });
+        // The fresh session starts with zero provider-side history even though
+        // the projection store still holds the full thread transcript. Queue a
+        // recovered-history preamble for the next turn so context survives.
+        yield* queueContextInjectionForFreshSession(input.binding.threadId);
       }
 
       const persistedCwd = readPersistedCwd(input.binding.runtimePayload);
@@ -1207,7 +1256,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       );
       yield* analytics.record("provider.session.recovered", {
         provider: resumed.provider,
-        strategy: "resume-thread",
+        strategy: hasResumeCursor ? "resume-thread" : "fresh-session",
         hasResumeCursor: resumed.resumeCursor !== undefined,
       });
       return { adapter, session: resumed } as const;
@@ -1412,6 +1461,18 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         }
         const adapter = yield* registry.getByInstance(resolvedInstanceId);
         yield* clearTurnAnalyticsSession(resolvedInstanceId, threadId);
+        // An explicit (re)start supersedes any queued recovered-history
+        // injection from a previous fresh-session recovery.
+        pendingContextInjections.delete(threadId);
+        if (effectiveResumeCursor === undefined) {
+          // No provider-side resume state is available for this (re)start —
+          // e.g. a mid-thread model switch or a restart after the session
+          // stopped without persisting a cursor. The fresh provider session
+          // starts with zero history, so queue the persisted transcript for
+          // injection into the next sendTurn. For brand-new threads the
+          // projection store has no messages and this is a no-op.
+          yield* queueContextInjectionForFreshSession(threadId);
+        }
         yield* prepareMcpSession(threadId, resolvedInstanceId);
         const session = yield* adapter
           .startSession({
@@ -1610,6 +1671,23 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         "provider.kind": routed.adapter.provider,
         ...(input.modelSelection?.model ? { "provider.model": input.modelSelection.model } : {}),
       });
+      // If this thread was just recovered onto a fresh provider session,
+      // prepend the recovered-history preamble to the outgoing input exactly
+      // once so the model sees the prior conversation.
+      const recoveredContext = pendingContextInjections.get(input.threadId);
+      let effectiveInput = input;
+      if (recoveredContext !== undefined) {
+        pendingContextInjections.delete(input.threadId);
+        effectiveInput = {
+          ...input,
+          input:
+            input.input !== undefined ? `${recoveredContext}\n\n${input.input}` : recoveredContext,
+        };
+        yield* Effect.logInfo("provider.turn.context-injected", {
+          threadId: input.threadId,
+          contextChars: recoveredContext.length,
+        });
+      }
       // A turn is the clearest sign a session is still alive. The MCP
       // credential is minted once at session start and cannot be rotated into
       // an already-spawned agent process, so we keep the existing token valid
@@ -1629,7 +1707,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         }),
         (turnMetadata) =>
           Effect.gen(function* () {
-            const turn = yield* routed.adapter.sendTurn(input);
+            const turn = yield* routed.adapter.sendTurn(effectiveInput);
             yield* associateTurnAnalytics({
               providerInstanceId: routed.instanceId,
               threadId: input.threadId,
@@ -1955,6 +2033,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         }
         timedOutNativeCompactions.delete(input.threadId);
         yield* clearTurnAnalyticsSession(routed.instanceId, input.threadId);
+        pendingContextInjections.delete(input.threadId);
         yield* clearMcpSession(input.threadId);
         yield* directory.upsert({
           threadId: input.threadId,
