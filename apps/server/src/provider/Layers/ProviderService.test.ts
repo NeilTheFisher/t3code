@@ -840,6 +840,71 @@ it.effect(
     }).pipe(Effect.provide(NodeServices.layer)),
 );
 
+it.effect(
+  "ProviderServiceLive recovers threads without persisted resume state by starting a fresh session",
+  () =>
+    Effect.gen(function* () {
+      const tempDir = NodeFS.mkdtempSync(
+        NodePath.join(NodeOS.tmpdir(), "t3-provider-service-no-resume-"),
+      );
+      const dbPath = NodePath.join(tempDir, "orchestration.sqlite");
+      const codex = makeFakeCodexAdapter();
+      const registry = makeAdapterRegistryMock({
+        [ProviderDriverKind.make("codex")]: codex.adapter,
+      });
+      const runtimeRepositoryLayer = ProviderSessionRuntime.layer.pipe(
+        Layer.provide(makeSqlitePersistenceLive(dbPath)),
+      );
+      const directoryLayer = ProviderSessionDirectoryLive.pipe(
+        Layer.provide(runtimeRepositoryLayer),
+      );
+
+      // Simulate a binding left behind by a server restart where the adapter
+      // never persisted a resume cursor (e.g. OpenCode before it emitted one).
+      yield* Effect.gen(function* () {
+        const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
+        yield* directory.upsert({
+          provider: ProviderDriverKind.make("codex"),
+          providerInstanceId: codexInstanceId,
+          threadId: ThreadId.make("thread-no-resume-state"),
+          runtimeMode: "full-access",
+        });
+      }).pipe(Effect.provide(directoryLayer));
+
+      const providerLayer = makeProviderServiceLive().pipe(
+        Layer.provide(Layer.succeed(ProviderAdapterRegistry.ProviderAdapterRegistry, registry)),
+        Layer.provide(directoryLayer),
+        Layer.provide(defaultServerSettingsLayer),
+        Layer.provide(AnalyticsService.layerTest),
+        Layer.provide(
+          Layer.succeed(
+            ProviderEventLoggers.ProviderEventLoggers,
+            ProviderEventLoggers.NoOpProviderEventLoggers,
+          ),
+        ),
+      );
+
+      yield* Effect.gen(function* () {
+        const provider = yield* ProviderService.ProviderService;
+        yield* provider.sendTurn({
+          threadId: asThreadId("thread-no-resume-state"),
+          input: "continue after restart",
+          attachments: [],
+        });
+      }).pipe(Effect.provide(providerLayer));
+
+      assert.equal(codex.startSession.mock.calls.length, 1);
+      const startPayload = codex.startSession.mock.calls[0]?.[0] as
+        | { resumeCursor?: unknown; threadId?: string }
+        | undefined;
+      assert.equal(startPayload?.threadId, "thread-no-resume-state");
+      assert.equal(startPayload?.resumeCursor, undefined);
+      assert.equal(codex.sendTurn.mock.calls.length, 1);
+
+      NodeFS.rmSync(tempDir, { recursive: true, force: true });
+    }).pipe(Effect.provide(NodeServices.layer)),
+);
+
 routing.layer("ProviderServiceLive routing", (it) => {
   it.effect("routes provider operations and rollback conversation", () =>
     Effect.gen(function* () {
