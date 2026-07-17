@@ -1052,11 +1052,14 @@ function extractToolCommand(payload: Record<string, unknown> | null): {
   const itemInput = asRecord(item?.input);
   const itemType = asTrimmedString(payload?.itemType);
   const detail = asTrimmedString(payload?.detail);
+  const dataInput = asRecord(data?.input);
   const candidates: unknown[] = [
     item?.command,
     itemInput?.command,
     itemResult?.command,
     data?.command,
+    dataInput?.command,
+    dataInput?.cmd,
     itemType === "command_execution" && detail ? stripTrailingExitCode(detail).output : null,
   ];
 
@@ -1173,11 +1176,34 @@ function extractAcpTextContent(value: unknown): string | null {
   return chunks.length > 0 ? chunks.join("\n") : null;
 }
 
+// Claude tool_result content is either a plain string or an array of
+// { type: "text", text } blocks.
+function extractClaudeTextContent(value: unknown): string | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const chunks: string[] = [];
+  for (const entryValue of value) {
+    const entry = asRecord(entryValue);
+    if (entry?.type !== "text") {
+      continue;
+    }
+    const text = asTrimmedString(entry.text);
+    if (text) {
+      chunks.push(text);
+    }
+  }
+
+  return chunks.length > 0 ? chunks.join("\n") : null;
+}
+
 function extractToolOutput(payload: Record<string, unknown> | null): string | null {
   const data = asRecord(payload?.data);
   const item = asRecord(data?.item);
   const itemResult = asRecord(item?.result);
   const rawOutput = asRecord(data?.rawOutput);
+  const dataResult = asRecord(data?.result);
 
   const outputStreams: string[] = [];
   const stdout = asTrimmedString(rawOutput?.stdout);
@@ -1197,6 +1223,8 @@ function extractToolOutput(payload: Record<string, unknown> | null): string | nu
     outputStreams.length > 0 ? outputStreams.join("\n") : null,
     rawOutput?.output,
     extractAcpTextContent(data?.content),
+    dataResult?.content,
+    extractClaudeTextContent(dataResult?.content),
   ];
 
   for (const candidate of candidates) {
@@ -1236,12 +1264,21 @@ function extractToolDetail(
   const commandTool = isCommandToolDetail(payload, heading);
   const command = commandTool ? extractToolCommand(payload).command : null;
   const normalizedCommand = normalizePreviewForComparison(command);
+  // Providers persist detail as "ToolName: <command>", sometimes truncated, so a
+  // detail that restates the command (or a prefix of it) adds no information.
+  const toolName = asTrimmedString(asRecord(payload?.data)?.toolName);
+  const normalizedLabeledCommand = normalizePreviewForComparison(
+    command && toolName ? `${toolName}: ${command}` : null,
+  );
+  const detailRestatesCommand =
+    commandTool &&
+    normalizedDetail !== null &&
+    (normalizedCommand === normalizedDetail ||
+      normalizedCommand?.startsWith(normalizedDetail) === true ||
+      normalizedLabeledCommand === normalizedDetail ||
+      normalizedLabeledCommand?.startsWith(normalizedDetail) === true);
 
-  if (
-    detail &&
-    normalizedHeading !== normalizedDetail &&
-    (!commandTool || normalizedCommand !== normalizedDetail)
-  ) {
+  if (detail && normalizedHeading !== normalizedDetail && !detailRestatesCommand) {
     return detail;
   }
 

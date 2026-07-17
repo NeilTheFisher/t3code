@@ -80,4 +80,68 @@ describe("deriveWorkLogEntries command output", () => {
     expect(entry?.command).toBe("true");
     expect(entry?.detail).toBeUndefined();
   });
+
+  it("shows Claude tool_result output instead of repeating the labeled command", () => {
+    const command = "git status --short | grep -c '^UU'; git log --oneline -2";
+    const [entry] = deriveWorkLogEntries([
+      makeCommandActivity("claude-command", {
+        itemType: "command_execution",
+        detail: `Bash: ${command}`,
+        data: {
+          toolName: "Bash",
+          input: { command, description: "Inspect state" },
+          result: {
+            tool_use_id: "toolu_123",
+            type: "tool_result",
+            content: "5\n443f07c2 fix(web): show command output in work log",
+            is_error: false,
+          },
+        },
+      }),
+    ]);
+
+    expect(entry).toMatchObject({
+      command,
+      detail: "5\n443f07c2 fix(web): show command output in work log",
+    });
+  });
+
+  it("extracts Claude tool_result text block arrays", () => {
+    const command = "printf hi";
+    const [entry] = deriveWorkLogEntries([
+      makeCommandActivity("claude-command-blocks", {
+        itemType: "command_execution",
+        detail: `Bash: ${command}`,
+        data: {
+          toolName: "Bash",
+          input: { command },
+          result: {
+            tool_use_id: "toolu_456",
+            type: "tool_result",
+            content: [{ type: "text", text: "hi" }],
+            is_error: false,
+          },
+        },
+      }),
+    ]);
+
+    expect(entry).toMatchObject({ command, detail: "hi" });
+  });
+
+  it("drops a server-truncated labeled command restated as detail", () => {
+    const command = `long ${"x".repeat(500)} end`;
+    const [entry] = deriveWorkLogEntries([
+      makeCommandActivity("claude-truncated", {
+        itemType: "command_execution",
+        detail: `Bash: ${command.slice(0, 400)}`,
+        data: {
+          toolName: "Bash",
+          input: { command },
+        },
+      }),
+    ]);
+
+    expect(entry?.command).toBe(command);
+    expect(entry?.detail).toBeUndefined();
+  });
 });
