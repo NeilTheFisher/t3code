@@ -177,6 +177,7 @@ import {
   deriveAgentPanelModel,
   foldSubagentActivities,
 } from "@t3tools/client-runtime/state/subagentRuntime";
+import { WebPageSurface } from "./WebPageSurface";
 import { DiffWorkerPoolProvider } from "./DiffWorkerPoolProvider";
 import { BranchToolbar } from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
@@ -1776,6 +1777,8 @@ function ChatViewContent(props: ChatViewProps) {
     [activeKnownTerminalIds, panelTerminalIds],
   );
   const previewPanelOpen = activeRightPanelKind === "preview" && isPreviewSupportedInRuntime();
+  // Desktop uses native preview hosts; the web client falls back to an iframe surface.
+  const browserAvailable = true;
   const rightPanelOpen = rightPanelState.isOpen;
   const canMaximizeRightPanel = rightPanelOpen && !shouldUseRightPanelSheet;
   const rightPanelMaximized =
@@ -3603,6 +3606,11 @@ function ChatViewContent(props: ChatViewProps) {
   }, [handleInteractionModeChange, interactionMode]);
   const createBrowserSurface = useCallback(() => {
     if (!activeThreadRef) return;
+    if (!isPreviewSupportedInRuntime()) {
+      // Web client fallback: iframe-based browser surface.
+      useRightPanelStore.getState().openWebPage(activeThreadRef);
+      return;
+    }
     void addBrowserSurface({ threadRef: activeThreadRef, openPreview });
   }, [activeThreadRef, openPreview]);
   const addDiffSurface = useCallback(() => {
@@ -6975,6 +6983,12 @@ function ChatViewContent(props: ChatViewProps) {
           }}
         />
       </Suspense>
+    ) : activeRightPanelSurface?.kind === "webpage" ? (
+      <WebPageSurface
+        key={scopedThreadKey(activeThreadRef)}
+        threadRef={activeThreadRef}
+        url={activeRightPanelSurface.url}
+      />
     ) : activeRightPanelSurface?.kind === "terminal" ? (
       <PersistentThreadTerminalPanel
         threadRef={activeThreadRef}
@@ -7519,7 +7533,7 @@ function ChatViewContent(props: ChatViewProps) {
           onAddFiles={addFilesSurface}
           onAddPullRequest={addPullRequestSurface}
           onAddAgents={addAgentsSurface}
-          browserAvailable={isPreviewSupportedInRuntime()}
+          browserAvailable
           terminalAvailable={activeProject !== null}
           diffAvailable={isServerThread && isGitRepo}
           filesAvailable={activeProject !== null}
@@ -7559,7 +7573,7 @@ function ChatViewContent(props: ChatViewProps) {
             onAddFiles={addFilesSurface}
             onAddPullRequest={addPullRequestSurface}
             onAddAgents={addAgentsSurface}
-            browserAvailable={isPreviewSupportedInRuntime()}
+            browserAvailable
             terminalAvailable={activeProject !== null}
             diffAvailable={isServerThread && isGitRepo}
             filesAvailable={activeProject !== null}

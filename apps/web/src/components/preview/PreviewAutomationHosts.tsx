@@ -30,6 +30,8 @@ import {
   updatePreviewServerSnapshot,
 } from "~/previewStateStore";
 import { usePreviewMiniPlayerStore } from "~/previewMiniPlayerStore";
+import { selectThreadRightPanelState, useRightPanelStore } from "~/rightPanelStore";
+import { normalizeWebPageUrl } from "~/lib/webPageUrl";
 import { resolveBrowserNavigationTarget } from "~/browser/browserTargetResolver";
 import {
   readActiveBrowserRecordingTargets,
@@ -258,7 +260,21 @@ const raisePreviewAutomationHostError = (
 
 export function PreviewAutomationHosts() {
   const { environments } = useEnvironments();
-  if (!isElectron || !previewBridge?.automation) return null;
+  if (!isElectron || !previewBridge?.automation) {
+    // Plain web client: no desktop webview bridge, but the iframe-based
+    // web-page pane can still act as a limited automation host so agents can
+    // open the panel and point it at a page (e.g. a localhost dev server).
+    return (
+      <>
+        {environments.map((environment) => (
+          <WebPreviewAutomationHost
+            key={environment.environmentId}
+            environmentId={environment.environmentId}
+          />
+        ))}
+      </>
+    );
+  }
   return (
     <>
       {/*
@@ -274,6 +290,173 @@ export function PreviewAutomationHosts() {
       ))}
     </>
   );
+}
+
+const WEB_PREVIEW_AUTOMATION_OPERATIONS = ["status", "open", "navigate"] as const;
+
+/**
+ * Automation host for the browser (non-Electron) web client.
+ *
+ * Supports only the operations the sandboxed iframe surface can honour:
+ * `open` and `navigate` drive the per-thread web-page pane, `status` reports
+ * its URL. Everything else is excluded from `supportedOperations`, so the
+ * broker reports those operations as unsupported instead of timing out.
+ */
+function WebPreviewAutomationHost(props: { readonly environmentId: EnvironmentId }) {
+  const { environmentId } = props;
+  const [automationClientId] = useState(createPreviewAutomationClientId);
+  const initialAutomationHost = useMemo<PreviewAutomationHostState>(
+    () => ({
+      clientId: automationClientId,
+      environmentId,
+      supportedOperations: [...WEB_PREVIEW_AUTOMATION_OPERATIONS],
+    }),
+    [automationClientId, environmentId],
+  );
+  const automationRequestsAtom = previewEnvironment.automationRequests({
+    environmentId,
+    input: initialAutomationHost,
+  });
+  const respondToAutomation = useAtomCommand(
+    previewEnvironment.respondToAutomation,
+    "preview automation response",
+  );
+  const focusAutomationHost = useAtomCommand(
+    previewEnvironment.focusAutomationHost,
+    "preview automation host focus",
+  );
+  const [automationConnectionAtom] = useState(() => Atom.make<string | null>(null));
+  const automationConnectionId = useAtomValue(automationConnectionAtom);
+
+  const handleRequest = useCallback(
+    async (request: PreviewAutomationRequest): Promise<unknown> => {
+      const threadRef: ScopedThreadRef = {
+        environmentId,
+        threadId: request.threadId,
+      };
+      const readStatus = (): PreviewAutomationStatus => {
+        const state = selectThreadRightPanelState(
+          useRightPanelStore.getState().byThreadKey,
+          threadRef,
+        );
+        const surface = state.surfaces.find((candidate) => candidate.kind === "webpage");
+        return {
+          available: true,
+          visible: state.isOpen && state.activeSurfaceId === "webpage",
+          tabId: null,
+          url: surface?.kind === "webpage" ? surface.url : null,
+          title: null,
+          loading: false,
+        };
+      };
+      const navigateTo = (target: Parameters<typeof resolveBrowserNavigationTarget>[1]) => {
+        const resolved = resolveBrowserNavigationTarget(environmentId, target);
+        const store = useRightPanelStore.getState();
+        store.openWebPage(threadRef);
+        store.setWebPageUrl(
+          threadRef,
+          normalizeWebPageUrl(resolved.resolvedUrl) ?? resolved.resolvedUrl,
+        );
+      };
+      switch (request.operation) {
+        case "status":
+          return readStatus();
+        case "open": {
+          const input = request.input as PreviewAutomationOpenInput;
+          if (input.show !== false || input.url) {
+            useRightPanelStore.getState().openWebPage(threadRef);
+          }
+          if (input.url) {
+            navigateTo({ kind: "url", url: input.url });
+          }
+          return readStatus();
+        }
+        case "navigate": {
+          const input = request.input as PreviewAutomationNavigateInput;
+          if (input.url) {
+            navigateTo({ kind: "url", url: input.url });
+          } else if (input.target) {
+            navigateTo(input.target);
+          } else {
+            throw new PreviewAutomationTargetUnavailableError({
+              requestId: request.requestId,
+              operation: request.operation,
+              environmentId,
+              threadId: request.threadId,
+              tabId: null,
+              bridgeAvailable: false,
+            });
+          }
+          return readStatus();
+        }
+        default:
+          throw new PreviewAutomationTargetUnavailableError({
+            requestId: request.requestId,
+            operation: request.operation,
+            environmentId,
+            threadId: request.threadId,
+            tabId: null,
+            bridgeAvailable: false,
+          });
+      }
+    },
+    [environmentId],
+  );
+  const [requestHandlerAtom] = useState(() => Atom.make({ handle: handleRequest }));
+  const setRequestHandler = useAtomSet(requestHandlerAtom);
+  useEffect(() => {
+    setRequestHandler({ handle: handleRequest });
+  }, [handleRequest, setRequestHandler]);
+
+  const automationRequestConsumerAtom = useMemo(
+    () =>
+      createPreviewAutomationRequestConsumerAtom({
+        requestsAtom: automationRequestsAtom,
+        clientId: automationClientId,
+        connectionAtom: automationConnectionAtom,
+        environmentId,
+        requestHandlerAtom,
+        respond: (response) =>
+          respondToAutomation({
+            environmentId,
+            input: response,
+          }),
+        label: `preview:web-automation-host:${environmentId}:${automationClientId}`,
+      }),
+    [
+      automationClientId,
+      automationConnectionAtom,
+      automationRequestsAtom,
+      requestHandlerAtom,
+      respondToAutomation,
+      environmentId,
+    ],
+  );
+  useAtomValue(automationRequestConsumerAtom);
+
+  useEffect(() => {
+    const report = () => {
+      if (!automationConnectionId) return;
+      void focusAutomationHost({
+        environmentId,
+        input: {
+          clientId: automationClientId,
+          environmentId,
+          connectionId: automationConnectionId,
+          focused: document.hasFocus(),
+        },
+      });
+    };
+    report();
+    window.addEventListener("focus", report);
+    window.addEventListener("blur", report);
+    return () => {
+      window.removeEventListener("focus", report);
+      window.removeEventListener("blur", report);
+    };
+  }, [automationClientId, automationConnectionId, environmentId, focusAutomationHost]);
+
+  return null;
 }
 
 function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId }) {
