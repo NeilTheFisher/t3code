@@ -15,6 +15,7 @@ import {
   resolveSidebarNewThreadSeedContext,
   resolveSidebarNewThreadEnvMode,
   resolveSidebarStageBadgeLabel,
+  resolveThreadHeatBarClassName,
   resolveThreadRecencyHeat,
   resolveThreadRowClassName,
   resolveSidebarV2Status,
@@ -1328,22 +1329,19 @@ describe("resolveThreadRecencyHeat", () => {
   });
 });
 
-describe("resolveThreadRowClassName heat", () => {
-  it("uses solid primary for working threads even when selected", () => {
-    const className = resolveThreadRowClassName({
-      isActive: true,
-      isSelected: true,
-      heat: "working",
-    });
-    expect(className).toContain("bg-primary ");
-    expect(className).toContain("text-primary-foreground");
+describe("thread recency heat classes", () => {
+  it("maps heat buckets to accent bar classes", () => {
+    expect(resolveThreadHeatBarClassName("working")).toContain("bg-primary");
+    expect(resolveThreadHeatBarClassName("hot")).toContain("bg-primary/90");
+    expect(resolveThreadHeatBarClassName("faint")).toContain("bg-primary/18");
+    expect(resolveThreadHeatBarClassName(null)).toBeNull();
   });
 
-  it("applies heat tint only when not selected", () => {
-    expect(
-      resolveThreadRowClassName({ isActive: false, isSelected: false, heat: "hot" }),
-    ).toContain("bg-primary/28");
-    expect(resolveThreadRowClassName({ isActive: false, isSelected: true, heat: "hot" })).toContain(
+  it("keeps the row background driven by selection only", () => {
+    expect(resolveThreadRowClassName({ isActive: false, isSelected: false })).not.toContain(
+      "bg-primary",
+    );
+    expect(resolveThreadRowClassName({ isActive: false, isSelected: true })).toContain(
       "bg-primary/15",
     );
   });

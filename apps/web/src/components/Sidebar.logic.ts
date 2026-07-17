@@ -357,29 +357,35 @@ export function resolveThreadRecencyHeat(input: {
   return null;
 }
 
-const THREAD_HEAT_ROW_CLASS: Record<Exclude<ThreadRecencyHeat, null>, string> = {
-  working:
-    "bg-primary text-primary-foreground font-medium hover:bg-primary/90 hover:text-primary-foreground",
-  hot: "bg-primary/28 text-foreground hover:bg-primary/34 hover:text-foreground dark:bg-primary/36 dark:hover:bg-primary/42",
-  warm: "bg-primary/18 text-foreground hover:bg-primary/24 hover:text-foreground dark:bg-primary/24 dark:hover:bg-primary/30",
-  cool: "bg-primary/10 text-foreground hover:bg-primary/16 hover:text-foreground dark:bg-primary/14 dark:hover:bg-primary/20",
-  faint:
-    "bg-primary/5 text-muted-foreground hover:bg-primary/10 hover:text-foreground dark:bg-primary/7 dark:hover:bg-primary/12",
+/**
+ * Recency is shown as a small left accent bar so it never competes with the
+ * selection background. Only "working" takes over the whole row (solid
+ * primary, like the send button).
+ */
+const THREAD_HEAT_BAR_CLASS: Record<Exclude<ThreadRecencyHeat, null>, string> = {
+  working: "bg-primary",
+  hot: "bg-primary/90",
+  warm: "bg-primary/60",
+  cool: "bg-primary/35",
+  faint: "bg-primary/18",
 };
+
+export function resolveThreadHeatBarClassName(heat: ThreadRecencyHeat): string | null {
+  if (heat === null) {
+    return null;
+  }
+  return cn(
+    "pointer-events-none absolute inset-y-1 left-0 w-[3px] rounded-full",
+    THREAD_HEAT_BAR_CLASS[heat],
+  );
+}
 
 export function resolveThreadRowClassName(input: {
   isActive: boolean;
   isSelected: boolean;
-  heat?: ThreadRecencyHeat;
 }): string {
   const baseClassName =
     "h-6 w-full translate-x-0 cursor-pointer justify-start px-2 text-left select-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring sm:h-7";
-
-  // A working thread stays solid primary even while selected — it is the
-  // strongest signal in the heat map.
-  if (input.heat === "working") {
-    return cn(baseClassName, THREAD_HEAT_ROW_CLASS.working);
-  }
 
   if (input.isSelected && input.isActive) {
     return cn(
@@ -393,10 +399,6 @@ export function resolveThreadRowClassName(input: {
       baseClassName,
       "bg-primary/15 text-foreground hover:bg-primary/19 hover:text-foreground dark:bg-primary/22 dark:hover:bg-primary/28",
     );
-  }
-
-  if (input.heat) {
-    return cn(baseClassName, THREAD_HEAT_ROW_CLASS[input.heat]);
   }
 
   if (input.isActive) {

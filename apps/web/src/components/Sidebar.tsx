@@ -191,6 +191,7 @@ import {
   resolveSidebarNewThreadSeedContext,
   resolveSidebarNewThreadEnvMode,
   resolveThreadRowClassName,
+  resolveThreadHeatBarClassName,
   resolveThreadRecencyHeat,
   resolveThreadStatusPill,
   orderItemsByPreferredIds,
@@ -457,11 +458,15 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
   );
   const isThreadRunning =
     thread.session?.status === "running" && thread.session.activeTurnId != null;
-  const recencyHeat = resolveThreadRecencyHeat({
-    lastActivityAt: thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt,
-    nowMs: Date.now(),
-    isWorking: isThreadRunning || thread.session?.status === "starting",
-  });
+  const recencyHeatEnabled = useClientSettings((settings) => settings.sidebarRecencyHeat);
+  const recencyHeat = recencyHeatEnabled
+    ? resolveThreadRecencyHeat({
+        lastActivityAt: thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt,
+        nowMs: Date.now(),
+        isWorking: isThreadRunning || thread.session?.status === "starting",
+      })
+    : null;
+  const recencyHeatBarClassName = resolveThreadHeatBarClassName(recencyHeat);
   const threadStatus = resolveThreadStatusPill({
     thread: {
       ...thread,
@@ -687,13 +692,13 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
         className={`${resolveThreadRowClassName({
           isActive,
           isSelected,
-          heat: recencyHeat,
         })} relative isolate`}
         onClick={handleRowClick}
         onDoubleClick={handleRowDoubleClick}
         onKeyDown={handleRowKeyDown}
         onContextMenu={handleRowContextMenu}
       >
+        {recencyHeatBarClassName && <span className={recencyHeatBarClassName} aria-hidden />}
         <div className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
           {prStatus && (
             <Tooltip>
@@ -712,9 +717,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
               <TooltipPopup side="top">{prStatus.tooltip}</TooltipPopup>
             </Tooltip>
           )}
-          {threadStatus && (
-            <ThreadStatusLabel status={threadStatus} onAccent={recencyHeat === "working"} />
-          )}
+          {threadStatus && <ThreadStatusLabel status={threadStatus} />}
           {renamingThreadKey === threadKey ? (
             <input
               ref={handleRenameInputRef}
@@ -874,11 +877,9 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
                 ) : (
                   <span
                     className={`text-[10px] tabular-nums ${
-                      recencyHeat === "working"
-                        ? "text-primary-foreground/75"
-                        : isHighlighted
-                          ? "text-foreground/72 dark:text-foreground/82"
-                          : "text-muted-foreground/40"
+                      isHighlighted
+                        ? "text-foreground/72 dark:text-foreground/82"
+                        : "text-muted-foreground/40"
                     }`}
                   >
                     {formatRelativeTimeLabel(

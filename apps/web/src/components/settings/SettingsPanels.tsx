@@ -836,6 +836,32 @@ export function GeneralSettingsPanel() {
         />
 
         <SettingsRow
+          title="Sidebar recency heat map"
+          description="Highlight recently active threads with a blue accent bar and show working threads with a solid blue row."
+          resetAction={
+            settings.sidebarRecencyHeat !== DEFAULT_UNIFIED_SETTINGS.sidebarRecencyHeat ? (
+              <SettingResetButton
+                label="sidebar recency heat map"
+                onClick={() =>
+                  updateSettings({
+                    sidebarRecencyHeat: DEFAULT_UNIFIED_SETTINGS.sidebarRecencyHeat,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.sidebarRecencyHeat}
+              onCheckedChange={(checked) =>
+                updateSettings({ sidebarRecencyHeat: Boolean(checked) })
+              }
+              aria-label="Show sidebar recency heat map"
+            />
+          }
+        />
+
+        <SettingsRow
           title="Archive confirmation"
           description="Require a second click on the inline archive action before a thread is archived."
           resetAction={
