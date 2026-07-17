@@ -2118,16 +2118,23 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         appendTruncationMarker: true,
       },
     ).pipe(
-      Effect.orElseSucceed(() => ({
-        exitCode: 0,
-        stdout: "",
-        stderr: "",
-        stdoutTruncated: false,
-        stderrTruncated: false,
-      })),
+      Effect.map((result) => ({ ...result, error: null as string | null })),
+      Effect.catch((error) =>
+        Effect.succeed({
+          exitCode: 0,
+          stdout: "",
+          stderr: "",
+          stdoutTruncated: false,
+          stderrTruncated: false,
+          error: error.message as string | null,
+        }),
+      ),
     );
     const dirtyUntracked = yield* readUntrackedReviewDiffs(input.cwd).pipe(
-      Effect.orElseSucceed(() => ({ diff: "", truncated: false })),
+      Effect.map((result) => ({ ...result, error: null as string | null })),
+      Effect.catch((error) =>
+        Effect.succeed({ diff: "", truncated: false, error: error.message as string | null }),
+      ),
     );
     const dirtyDiff = [dirtyTrackedResult.stdout.trimEnd(), dirtyUntracked.diff.trimEnd()]
       .filter((diff) => diff.length > 0)
@@ -2153,13 +2160,17 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
               appendTruncationMarker: true,
             },
           ).pipe(
-            Effect.orElseSucceed(() => ({
-              exitCode: 0,
-              stdout: "",
-              stderr: "",
-              stdoutTruncated: false,
-              stderrTruncated: false,
-            })),
+            Effect.map((result) => ({ ...result, error: null as string | null })),
+            Effect.catch((error) =>
+              Effect.succeed({
+                exitCode: 0,
+                stdout: "",
+                stderr: "",
+                stdoutTruncated: false,
+                stderrTruncated: false,
+                error: error.message as string | null,
+              }),
+            ),
           )
         : null;
     const baseDiff = baseResult?.stdout ?? "";
@@ -2192,6 +2203,9 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         diff: dirtyDiff,
         diffHash: dirtyDiffHash,
         truncated: dirtyTrackedResult.stdoutTruncated || dirtyUntracked.truncated,
+        ...(dirtyTrackedResult.error || dirtyUntracked.error
+          ? { error: dirtyTrackedResult.error ?? dirtyUntracked.error ?? undefined }
+          : {}),
       },
       {
         id: "branch-range",
@@ -2202,6 +2216,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         diff: baseDiff,
         diffHash: baseDiffHash,
         truncated: baseResult?.stdoutTruncated ?? false,
+        ...(baseResult?.error ? { error: baseResult.error } : {}),
       },
     ];
 

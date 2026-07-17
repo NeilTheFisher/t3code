@@ -139,6 +139,7 @@ import {
   usePreviewMiniPlayerStore,
 } from "../previewMiniPlayerStore";
 import { RightPanelTabs } from "./RightPanelTabs";
+import { WebPageSurface } from "./WebPageSurface";
 import { DiffWorkerPoolProvider } from "./DiffWorkerPoolProvider";
 import { BranchToolbar } from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
@@ -3147,6 +3148,11 @@ function ChatViewContent(props: ChatViewProps) {
   }, [activeThreadRef, dismissPlanSidebarForCurrentTurn]);
   const createBrowserSurface = useCallback(() => {
     if (!activeThreadRef) return;
+    if (!isPreviewSupportedInRuntime()) {
+      // Web client fallback: iframe-based browser surface.
+      useRightPanelStore.getState().openWebPage(activeThreadRef);
+      return;
+    }
     void addBrowserSurface({ threadRef: activeThreadRef, openPreview });
   }, [activeThreadRef, openPreview]);
   const addDiffSurface = useCallback(() => {
@@ -5702,6 +5708,12 @@ function ChatViewContent(props: ChatViewProps) {
           visible
         />
       </Suspense>
+    ) : activeRightPanelSurface?.kind === "webpage" ? (
+      <WebPageSurface
+        key={scopedThreadKey(activeThreadRef)}
+        threadRef={activeThreadRef}
+        url={activeRightPanelSurface.url}
+      />
     ) : activeRightPanelSurface?.kind === "terminal" ? (
       <PersistentThreadTerminalPanel
         threadRef={activeThreadRef}
@@ -6175,7 +6187,7 @@ function ChatViewContent(props: ChatViewProps) {
           onAddTerminal={addTerminalSurface}
           onAddDiff={addDiffSurface}
           onAddFiles={addFilesSurface}
-          browserAvailable={isPreviewSupportedInRuntime()}
+          browserAvailable
           diffAvailable={isServerThread && isGitRepo}
           filesAvailable={activeProject !== null}
         >
@@ -6202,7 +6214,7 @@ function ChatViewContent(props: ChatViewProps) {
             onAddTerminal={addTerminalSurface}
             onAddDiff={addDiffSurface}
             onAddFiles={addFilesSurface}
-            browserAvailable={isPreviewSupportedInRuntime()}
+            browserAvailable
             diffAvailable={isServerThread && isGitRepo}
             filesAvailable={activeProject !== null}
           >
