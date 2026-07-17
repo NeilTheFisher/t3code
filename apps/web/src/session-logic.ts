@@ -60,6 +60,12 @@ export type WorkLogToolLifecycleStatus =
   | "declined"
   | "stopped";
 
+export interface WorkLogSubagentTranscriptItem {
+  role: "assistant" | "user" | "tool";
+  text: string;
+  toolName?: string;
+}
+
 export interface WorkLogEntry {
   id: string;
   createdAt: string;
@@ -78,12 +84,22 @@ export interface WorkLogEntry {
   toolLifecycleStatus?: WorkLogToolLifecycleStatus;
   /** Originating orchestration activity kind (e.g. `user-input.requested`) for row chrome. */
   sourceActivityKind?: OrchestrationThreadActivity["kind"];
+  /** Subagent (Task tool) prompt extracted from a collab_agent_tool_call payload. */
+  subagentPrompt?: string;
+  /** Subagent final report text extracted from a collab_agent_tool_call result. */
+  subagentReport?: string;
+  /** Nested subagent conversation grouped from `subagent.item` activities. */
+  subagentTranscript?: ReadonlyArray<WorkLogSubagentTranscriptItem>;
 }
 
 interface DerivedWorkLogEntry extends WorkLogEntry {
   activityKind: OrchestrationThreadActivity["kind"];
   collapseKey?: string;
   toolCallId?: string;
+  /** Parent tool call id from payload.itemId (used to group subagent.item activities). */
+  itemId?: string;
+  /** Claude tool_use id from data.result.tool_use_id (grouping fallback). */
+  resultToolUseId?: string;
 }
 
 export interface PendingApproval {
@@ -629,7 +645,23 @@ export function deriveWorkLogEntries(
 ): WorkLogEntry[] {
   const ordered = [...activities].toSorted(compareActivitiesByOrder);
   const entries: DerivedWorkLogEntry[] = [];
+  const subagentTranscripts = new Map<string, WorkLogSubagentTranscriptItem[]>();
   for (const activity of ordered) {
+    if (activity.kind === "subagent.item") {
+      // Nested subagent conversation items are grouped under their parent tool
+      // entry instead of appearing as top-level work-log rows. Orphans (no
+      // matching parent) are dropped.
+      const parsed = parseSubagentItemActivity(activity);
+      if (parsed) {
+        const bucket = subagentTranscripts.get(parsed.parentItemId);
+        if (bucket) {
+          bucket.push(parsed.item);
+        } else {
+          subagentTranscripts.set(parsed.parentItemId, [parsed.item]);
+        }
+      }
+      continue;
+    }
     if (activity.kind === "tool.started") continue;
     if (activity.kind === "task.started") continue;
     if (activity.kind === "context-window.updated") continue;
@@ -638,9 +670,52 @@ export function deriveWorkLogEntries(
     entries.push(toDerivedWorkLogEntry(activity));
   }
   return collapseDerivedWorkLogEntries(entries).map((entry) => {
-    const { activityKind, collapseKey: _collapseKey, ...rest } = entry;
-    return Object.assign(rest, { sourceActivityKind: activityKind });
+    const { activityKind, collapseKey: _collapseKey, itemId, resultToolUseId, ...rest } = entry;
+    const transcript =
+      (itemId ? subagentTranscripts.get(itemId) : undefined) ??
+      (entry.toolCallId ? subagentTranscripts.get(entry.toolCallId) : undefined) ??
+      (resultToolUseId ? subagentTranscripts.get(resultToolUseId) : undefined);
+    return Object.assign(rest, {
+      sourceActivityKind: activityKind,
+      ...(transcript && transcript.length > 0 ? { subagentTranscript: transcript } : {}),
+    });
   });
+}
+
+function parseSubagentItemActivity(activity: OrchestrationThreadActivity): {
+  parentItemId: string;
+  item: WorkLogSubagentTranscriptItem;
+} | null {
+  const payload = asRecord(activity.payload);
+  const parentItemId = asTrimmedString(payload?.parentItemId);
+  if (!parentItemId) {
+    return null;
+  }
+  const role = payload?.role;
+  if (role !== "assistant" && role !== "user" && role !== "tool") {
+    return null;
+  }
+  const data = asRecord(payload?.data);
+  const toolName = asTrimmedString(data?.toolName);
+  let text = asTrimmedString(payload?.detail);
+  if (!text && data?.input !== undefined) {
+    try {
+      text = JSON.stringify(data.input);
+    } catch {
+      text = null;
+    }
+  }
+  if (!text && !toolName) {
+    return null;
+  }
+  return {
+    parentItemId,
+    item: {
+      role,
+      text: text ?? "",
+      ...(toolName ? { toolName } : {}),
+    },
+  };
 }
 
 function isPlanBoundaryToolActivity(activity: OrchestrationThreadActivity): boolean {
@@ -740,6 +815,33 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
       entry.toolData = data.item;
     }
   }
+  if (itemType === "collab_agent_tool_call") {
+    const data = asRecord(payload?.data);
+    const input = asRecord(data?.input);
+    const prompt = asTrimmedString(input?.prompt) ?? asTrimmedString(input?.description);
+    const subagentType = asTrimmedString(input?.subagent_type);
+    const subagentPrompt = prompt ? (subagentType ? `[${subagentType}] ${prompt}` : prompt) : null;
+    if (subagentPrompt) {
+      entry.subagentPrompt = subagentPrompt;
+    }
+    const result = asRecord(data?.result);
+    const report = asTrimmedString(result?.content) ?? extractClaudeTextContent(result?.content);
+    if (report) {
+      entry.subagentReport = report;
+    }
+  }
+  // Ids used to group nested subagent.item activities onto their parent row.
+  {
+    const data = asRecord(payload?.data);
+    const parentToolItemId = asTrimmedString(payload?.itemId);
+    if (parentToolItemId) {
+      entry.itemId = parentToolItemId;
+    }
+    const resultToolUseId = asTrimmedString(asRecord(data?.result)?.tool_use_id);
+    if (resultToolUseId) {
+      entry.resultToolUseId = resultToolUseId;
+    }
+  }
   if (itemType) {
     entry.itemType = itemType;
   }
@@ -818,6 +920,10 @@ function mergeDerivedWorkLogEntries(
   const toolCallId = next.toolCallId ?? previous.toolCallId;
   const toolLifecycleStatus = next.toolLifecycleStatus ?? previous.toolLifecycleStatus;
   const toolData = next.toolData ?? previous.toolData;
+  const itemId = next.itemId ?? previous.itemId;
+  const resultToolUseId = next.resultToolUseId ?? previous.resultToolUseId;
+  const subagentPrompt = next.subagentPrompt ?? previous.subagentPrompt;
+  const subagentReport = next.subagentReport ?? previous.subagentReport;
   return {
     ...previous,
     ...next,
@@ -832,6 +938,10 @@ function mergeDerivedWorkLogEntries(
     ...(toolCallId ? { toolCallId } : {}),
     ...(toolLifecycleStatus !== undefined ? { toolLifecycleStatus } : {}),
     ...(toolData !== undefined ? { toolData } : {}),
+    ...(itemId ? { itemId } : {}),
+    ...(resultToolUseId ? { resultToolUseId } : {}),
+    ...(subagentPrompt ? { subagentPrompt } : {}),
+    ...(subagentReport ? { subagentReport } : {}),
   };
 }
 

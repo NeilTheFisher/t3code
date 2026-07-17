@@ -2100,6 +2100,9 @@ function buildToolCallExpandedBody(
   if (workEntry.itemType === "mcp_tool_call" && workEntry.toolData !== undefined) {
     blocks.push(`MCP call\n${JSON.stringify(workEntry.toolData, null, 2)}`);
   }
+  if (workEntry.itemType === "collab_agent_tool_call" && workEntry.subagentPrompt?.trim()) {
+    blocks.push(`Subagent prompt\n${workEntry.subagentPrompt.trim()}`);
+  }
   const raw = workEntryRawCommand(workEntry);
   if (raw?.trim()) {
     blocks.push(raw.trim());
@@ -2188,7 +2191,15 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
       : rawPreview;
   const displayText = preview ? `${heading} - ${preview}` : heading;
   const expandedBody = buildToolCallExpandedBody(workEntry, workspaceRoot);
-  const canExpand = expandedBody !== null;
+  const subagentTranscript =
+    workEntry.itemType === "collab_agent_tool_call" &&
+    (workEntry.subagentTranscript?.length ?? 0) > 0
+      ? workEntry.subagentTranscript
+      : undefined;
+  const subagentReport =
+    workEntry.itemType === "collab_agent_tool_call" ? workEntry.subagentReport?.trim() : undefined;
+  const canExpand =
+    expandedBody !== null || subagentTranscript !== undefined || Boolean(subagentReport);
   const showFailedIndicator = workEntryIndicatesToolFailure(workEntry);
   const showDestructiveRowStyle =
     showFailedIndicator &&
@@ -2312,15 +2323,54 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
           </div>
         </div>
       </div>
-      {expanded && canExpand && expandedBody ? (
+      {expanded && canExpand ? (
         <div
-          className="mt-1 ms-7 cursor-default border-s border-border/45 ps-3 pt-0.5"
+          className="mt-1 ms-7 flex cursor-default flex-col gap-1.5 border-s border-border/45 ps-3 pt-0.5"
           onClick={stopRowToggle}
           onPointerDown={stopRowToggle}
         >
-          <pre className="max-h-64 cursor-text overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-muted-foreground select-text">
-            {expandedBody}
-          </pre>
+          {expandedBody ? (
+            <pre className="max-h-64 cursor-text overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-muted-foreground select-text">
+              {expandedBody}
+            </pre>
+          ) : null}
+          {subagentTranscript ? (
+            <div className="max-h-64 overflow-auto">
+              <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
+                Subagent transcript
+              </div>
+              <ol className="flex flex-col gap-1.5">
+                {subagentTranscript.map((item, index) => (
+                  <li key={index}>
+                    <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
+                      {item.role === "tool"
+                        ? item.toolName
+                          ? `Tool · ${item.toolName}`
+                          : "Tool"
+                        : item.role === "user"
+                          ? "User"
+                          : "Assistant"}
+                    </div>
+                    {item.text ? (
+                      <pre className="cursor-text whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-muted-foreground select-text">
+                        {item.text}
+                      </pre>
+                    ) : null}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          ) : null}
+          {subagentReport ? (
+            <div>
+              <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
+                Final report
+              </div>
+              <pre className="max-h-64 cursor-text overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-muted-foreground select-text">
+                {subagentReport}
+              </pre>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>
