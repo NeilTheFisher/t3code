@@ -1270,13 +1270,18 @@ function extractToolDetail(
   const normalizedLabeledCommand = normalizePreviewForComparison(
     command && toolName ? `${toolName}: ${command}` : null,
   );
+  // Truncated details often carry a trailing ellipsis ("..." or "…") that
+  // would defeat the prefix comparison against the full command.
+  const normalizedDetailSansEllipsis = normalizePreviewForComparison(
+    detail ? detail.replace(/(?:\.{3}|…)\s*$/u, "") : null,
+  );
   const detailRestatesCommand =
     commandTool &&
-    normalizedDetail !== null &&
-    (normalizedCommand === normalizedDetail ||
-      normalizedCommand?.startsWith(normalizedDetail) === true ||
-      normalizedLabeledCommand === normalizedDetail ||
-      normalizedLabeledCommand?.startsWith(normalizedDetail) === true);
+    normalizedDetailSansEllipsis !== null &&
+    (normalizedCommand === normalizedDetailSansEllipsis ||
+      normalizedCommand?.startsWith(normalizedDetailSansEllipsis) === true ||
+      normalizedLabeledCommand === normalizedDetailSansEllipsis ||
+      normalizedLabeledCommand?.startsWith(normalizedDetailSansEllipsis) === true);
 
   if (detail && normalizedHeading !== normalizedDetail && !detailRestatesCommand) {
     return detail;
