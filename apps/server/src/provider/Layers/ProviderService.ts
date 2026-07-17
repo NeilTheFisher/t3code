@@ -388,10 +388,15 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       }
 
       if (!hasResumeCursor) {
-        return yield* toValidationError(
-          input.operation,
-          `Cannot recover thread '${input.binding.threadId}' because no provider resume state is persisted.`,
-        );
+        // No resume state was persisted (e.g. the adapter never emitted a
+        // resume cursor before a server restart). Starting a fresh provider
+        // session loses provider-side context, but the alternative is a
+        // permanently unroutable thread, so fall back instead of failing.
+        yield* Effect.logWarning("provider.session.recover-without-resume-state", {
+          threadId: input.binding.threadId,
+          provider: input.binding.provider,
+          operation: input.operation,
+        });
       }
 
       const persistedCwd = readPersistedCwd(input.binding.runtimePayload);
@@ -423,7 +428,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       );
       yield* analytics.record("provider.session.recovered", {
         provider: resumed.provider,
-        strategy: "resume-thread",
+        strategy: hasResumeCursor ? "resume-thread" : "fresh-session",
         hasResumeCursor: resumed.resumeCursor !== undefined,
       });
       return { adapter, session: resumed } as const;
