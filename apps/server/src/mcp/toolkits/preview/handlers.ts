@@ -43,6 +43,9 @@ const invoke = Effect.fn("PreviewToolkit.invoke")(function* <A>(
     scope,
     operation,
     input,
+    // Ride out UI tab reloads / reconnects instead of failing immediately
+    // with PreviewAutomationNoAvailableHostError.
+    waitForHostMs: 10_000,
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
     ...(tabId === undefined ? {} : { tabId }),
   });

@@ -22,6 +22,7 @@ export const RIGHT_PANEL_KINDS = [
   "preview",
   "terminal",
   "agents",
+  "webpage",
 ] as const;
 export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
 
@@ -46,7 +47,8 @@ export type RightPanelSurface =
       revealRequestId: number;
     }
   | { id: "plan"; kind: "plan" }
-  | { id: "agents"; kind: "agents" };
+  | { id: "agents"; kind: "agents" }
+  | { id: "webpage"; kind: "webpage"; url: string | null };
 
 const RIGHT_PANEL_STORAGE_KEY = "t3code:right-panel-state:v2";
 const RIGHT_PANEL_STORAGE_VERSION = 8;
@@ -61,6 +63,8 @@ interface RightPanelStoreState {
   byThreadKey: Record<string, ThreadRightPanelState>;
   open: (ref: ScopedThreadRef, kind: Exclude<RightPanelKind, "file" | "terminal">) => void;
   openBrowser: (ref: ScopedThreadRef, tabId: string | null) => void;
+  openWebPage: (ref: ScopedThreadRef) => void;
+  setWebPageUrl: (ref: ScopedThreadRef, url: string | null) => void;
   openFile: (ref: ScopedThreadRef, relativePath: string, line?: number) => void;
   openTerminal: (ref: ScopedThreadRef, terminalId: string) => void;
   splitTerminal: (
@@ -92,7 +96,7 @@ const EMPTY_THREAD_STATE: ThreadRightPanelState = {
 };
 
 const singletonSurface = (
-  kind: Exclude<RightPanelKind, "file" | "preview" | "terminal">,
+  kind: Exclude<RightPanelKind, "file" | "preview" | "terminal" | "webpage">,
 ): RightPanelSurface => {
   switch (kind) {
     case "diff":
@@ -110,6 +114,12 @@ const browserSurface = (tabId: string | null): RightPanelSurface =>
   tabId
     ? { id: `browser:${tabId}`, kind: "preview", resourceId: tabId }
     : { id: "browser:new", kind: "preview", resourceId: null };
+
+const webPageSurface = (url: string | null): RightPanelSurface => ({
+  id: "webpage",
+  kind: "webpage",
+  url,
+});
 
 const fileSurface = (
   relativePath: string,
@@ -257,8 +267,28 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
               const existing = current.surfaces.find((surface) => surface.kind === "preview");
               return upsertSurface(current, existing ?? browserSurface(null));
             }
+            if (kind === "webpage") {
+              const existing = current.surfaces.find((surface) => surface.kind === "webpage");
+              return upsertSurface(current, existing ?? webPageSurface(null));
+            }
             return upsertSurface(current, singletonSurface(kind));
           }),
+        })),
+      openWebPage: (ref) =>
+        set((state) => ({
+          byThreadKey: updateThread(state.byThreadKey, scopedThreadKey(ref), (current) => {
+            const existing = current.surfaces.find((surface) => surface.kind === "webpage");
+            return upsertSurface(current, existing ?? webPageSurface(null));
+          }),
+        })),
+      setWebPageUrl: (ref, url) =>
+        set((state) => ({
+          byThreadKey: updateThread(state.byThreadKey, scopedThreadKey(ref), (current) => ({
+            ...current,
+            surfaces: current.surfaces.map((surface) =>
+              surface.kind === "webpage" ? { ...surface, url } : surface,
+            ),
+          })),
         })),
       openBrowser: (ref, tabId) =>
         set((state) => ({
@@ -520,6 +550,10 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             if (kind === "preview") {
               const existing = current.surfaces.find((surface) => surface.kind === "preview");
               return upsertSurface(current, existing ?? browserSurface(null));
+            }
+            if (kind === "webpage") {
+              const existing = current.surfaces.find((surface) => surface.kind === "webpage");
+              return upsertSurface(current, existing ?? webPageSurface(null));
             }
             return upsertSurface(current, singletonSurface(kind));
           }),

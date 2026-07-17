@@ -690,12 +690,31 @@ export class PreviewAutomationNoAvailableHostError extends Schema.TaggedErrorCla
     requestId: Schema.optional(TrimmedNonEmptyString),
     tabId: Schema.optional(PreviewTabId),
     timeoutMs: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))),
+    availability: Schema.optional(
+      Schema.Literals([
+        "no-host-connected",
+        "environment-mismatch",
+        "operation-unsupported",
+        "assigned-host-unsupported",
+      ]),
+    ),
     ...PreviewAutomationOptionalRemoteDiagnosticFields,
   },
 ) {
   override get message(): string {
     const summary = `No preview automation host is available for ${this.operation} in environment ${this.environmentId}.`;
-    return summary;
+    switch (this.availability) {
+      case "no-host-connected":
+        return `${summary} No T3 Code UI is connected: the browser preview panel in an open T3 Code tab acts as the automation host. Ask the user to open (or reload) the T3 Code web UI or desktop app for this environment, then retry.`;
+      case "environment-mismatch":
+        return `${summary} A T3 Code UI is connected, but for a different environment. Ask the user to open this thread's environment in the T3 Code UI, then retry.`;
+      case "operation-unsupported":
+        return `${summary} A host is connected for this environment but does not support ${this.operation}. Ask the user to reload the T3 Code UI so it picks up the latest build, then retry.`;
+      case "assigned-host-unsupported":
+        return `${summary} This session is pinned to a host that does not support ${this.operation}. Reloading that T3 Code tab, or starting a fresh provider session, will re-assign a capable host.`;
+      default:
+        return `${summary} The T3 Code web UI acts as the automation host: ask the user to open or reload the T3 Code UI for this environment, then retry.`;
+    }
   }
 }
 
