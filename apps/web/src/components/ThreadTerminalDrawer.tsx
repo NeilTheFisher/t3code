@@ -61,7 +61,9 @@ import { isTerminalUrl, resolvePathLinkTarget } from "../terminal-links";
 import {
   isDiffToggleShortcut,
   isTerminalClearShortcut,
+  isTerminalCloseShortcut,
   isTerminalNewShortcut,
+  isTerminalPasteShortcut,
   isTerminalSplitShortcut,
   isTerminalSplitVerticalShortcut,
   isTerminalToggleShortcut,
@@ -755,6 +757,25 @@ export function TerminalViewport({
           isTerminalNewShortcut(event, currentKeybindings, options) ||
           isDiffToggleShortcut(event, currentKeybindings, options)
         ) {
+          return false;
+        }
+
+        if (isTerminalPasteShortcut(event)) {
+          event.preventDefault();
+          event.stopPropagation();
+          void navigator.clipboard
+            .readText()
+            .then((text) => {
+              if (text) {
+                terminalRef.current?.paste(text);
+              }
+            })
+            .catch(() => {
+              const activeTerminal = terminalRef.current;
+              if (activeTerminal) {
+                writeSystemMessage(activeTerminal, "Clipboard read was blocked by the browser");
+              }
+            });
           return false;
         }
 
