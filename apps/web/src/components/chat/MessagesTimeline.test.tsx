@@ -190,6 +190,7 @@ function buildProps() {
     onAnchorReady: () => {},
     onAnchorSizeChanged: () => {},
     contentInsetEndAdjustment: 0,
+    autoFollowEnabled: true,
     onIsAtEndChange: () => {},
     onManualNavigation: () => {},
   };
@@ -283,10 +284,16 @@ describe("MessagesTimeline", () => {
     } = await import("./MessagesTimeline.logic");
 
     expect(resolveTimelineIsAtEnd({ isNearEnd: true, isAtEnd: false })).toBe(true);
+    expect(
+      resolveTimelineIsAtEnd({
+        isWithinMaintainScrollAtEndThreshold: false,
+        isNearEnd: true,
+        isAtEnd: true,
+      }),
+    ).toBe(false);
     expect(resolveTimelineIsAtEnd({ isNearEnd: false, isAtEnd: true })).toBe(false);
     expect(resolveTimelineIsAtEnd({ isAtEnd: true })).toBe(true);
     expect(resolveTimelineIsAtEnd(undefined)).toBeUndefined();
-
     expect(resolveTimelineMinimapHeightStyle(5)).toBe("min(32px, calc(100vh - 18rem))");
     expect(resolveTimelineMinimapTopPercent(2, 5)).toBe(50);
     expect(
@@ -330,6 +337,84 @@ describe("MessagesTimeline", () => {
     expect(resolveTimelineMinimapInteractiveWidth(0, true)).toBe("22rem");
     expect(resolveTimelineMinimapInteractiveWidth(14, true)).toBe("22rem");
     expect(resolveTimelineMinimapInteractiveWidth(40, true)).toBe("22rem");
+  });
+
+  it("recognizes directional user input without inferring intent from layout offsets", async () => {
+    const {
+      resolveTimelineScrollableNodeIsAtEnd,
+      timelineManualNavigationReachedEnd,
+      timelineNavigationInputMovesTowardHistory,
+      timelineScrollableNodeCanNavigateTowardHistory,
+    } = await import("./MessagesTimeline.logic");
+
+    expect(timelineNavigationInputMovesTowardHistory({ type: "wheel", deltaY: -0.1 })).toBe(true);
+    expect(timelineNavigationInputMovesTowardHistory({ type: "wheel", deltaY: 0.1 })).toBe(false);
+    expect(
+      timelineNavigationInputMovesTowardHistory({ type: "touch", previousY: 100, currentY: 100.1 }),
+    ).toBe(true);
+    expect(
+      timelineNavigationInputMovesTowardHistory({
+        type: "keyboard",
+        key: "PageUp",
+        shiftKey: false,
+      }),
+    ).toBe(true);
+    expect(
+      timelineScrollableNodeCanNavigateTowardHistory({
+        clientHeight: 400,
+        scrollHeight: 400,
+        scrollTop: 0,
+      }),
+    ).toBe(false);
+    expect(
+      timelineScrollableNodeCanNavigateTowardHistory({
+        clientHeight: 400,
+        scrollHeight: 800,
+        scrollTop: 0,
+      }),
+    ).toBe(false);
+    expect(
+      timelineScrollableNodeCanNavigateTowardHistory({
+        clientHeight: 400,
+        scrollHeight: 800,
+        scrollTop: 400,
+      }),
+    ).toBe(true);
+    expect(
+      resolveTimelineScrollableNodeIsAtEnd({
+        clientHeight: 400,
+        scrollHeight: 800,
+        scrollTop: 398.9,
+      }),
+    ).toBe(false);
+    expect(
+      resolveTimelineScrollableNodeIsAtEnd({
+        clientHeight: 400,
+        scrollHeight: 800,
+        scrollTop: 399.9,
+      }),
+    ).toBe(true);
+    expect(
+      resolveTimelineScrollableNodeIsAtEnd({
+        clientHeight: 400,
+        scrollHeight: 800,
+        scrollTop: 400,
+      }),
+    ).toBe(true);
+    expect(
+      timelineManualNavigationReachedEnd({
+        previousScrollTop: 400,
+        scrollTop: 399.9,
+        isAtEnd: true,
+      }),
+    ).toBe(false);
+    expect(
+      timelineManualNavigationReachedEnd({
+        previousScrollTop: 399.9,
+        scrollTop: 400,
+        isAtEnd: true,
+      }),
+    ).toBe(true);
   });
 
   it("anchors a sent attachment message using its measured height", async () => {
@@ -412,6 +497,19 @@ describe("MessagesTimeline", () => {
 
     expect(markup).not.toContain("Show full message");
     expect(markup).toContain('data-user-message-collapsible="false"');
+  });
+
+  it("disables LegendList auto-follow while the reader is away from the live edge", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        autoFollowEnabled={false}
+        timelineEntries={[buildUserTimelineEntry("Earlier message.")]}
+      />,
+    );
+
+    expect(markup).not.toContain('data-maintain-scroll-at-end="enabled"');
   });
 
   it("renders inline terminal labels with the composer chip UI", async () => {
