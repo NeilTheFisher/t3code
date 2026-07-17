@@ -208,6 +208,43 @@ function truncateDetail(value: string, limit = 180): string {
   return value.length > limit ? `${value.slice(0, limit - 3)}...` : value;
 }
 
+const SUBAGENT_DETAIL_LIMIT = 4000;
+
+function subagentItemRole(itemType: string): "assistant" | "user" | "tool" {
+  if (isToolLifecycleItemType(itemType)) {
+    return "tool";
+  }
+  return itemType === "user_message" ? "user" : "assistant";
+}
+
+function subagentItemActivity(
+  event: Extract<
+    ProviderRuntimeEvent,
+    { type: "item.started" | "item.updated" | "item.completed" }
+  >,
+  maybeSequence: { sequence?: number },
+): OrchestrationThreadActivity {
+  return {
+    id: event.eventId,
+    createdAt: event.createdAt,
+    tone: "tool",
+    kind: "subagent.item",
+    summary: event.payload.title ?? "Subagent activity",
+    payload: {
+      itemType: event.payload.itemType,
+      ...(event.itemId ? { itemId: event.itemId } : {}),
+      parentItemId: event.parentItemId,
+      role: subagentItemRole(event.payload.itemType),
+      ...(event.payload.detail
+        ? { detail: truncateDetail(event.payload.detail, SUBAGENT_DETAIL_LIMIT) }
+        : {}),
+      ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
+    },
+    turnId: toTurnId(event.turnId) ?? null,
+    ...maybeSequence,
+  };
+}
+
 function normalizeProposedPlanMarkdown(planMarkdown: string | undefined): string | undefined {
   const trimmed = planMarkdown?.trim();
   if (!trimmed) {
@@ -740,6 +777,9 @@ export function runtimeEventToActivities(
     }
 
     case "item.updated": {
+      if (event.parentItemId !== undefined) {
+        return [subagentItemActivity(event, maybeSequence)];
+      }
       if (!isToolLifecycleItemType(event.payload.itemType)) {
         return [];
       }
@@ -752,6 +792,7 @@ export function runtimeEventToActivities(
           summary: event.payload.title ?? "Tool updated",
           payload: {
             itemType: event.payload.itemType,
+            ...(event.itemId ? { itemId: event.itemId } : {}),
             ...(event.payload.status ? { status: event.payload.status } : {}),
             ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
             ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
@@ -767,6 +808,9 @@ export function runtimeEventToActivities(
     }
 
     case "item.completed": {
+      if (event.parentItemId !== undefined) {
+        return [subagentItemActivity(event, maybeSequence)];
+      }
       if (!isToolLifecycleItemType(event.payload.itemType)) {
         return [];
       }
@@ -779,6 +823,7 @@ export function runtimeEventToActivities(
           summary: event.payload.title ?? "Tool",
           payload: {
             itemType: event.payload.itemType,
+            ...(event.itemId ? { itemId: event.itemId } : {}),
             ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
             ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
             ...(event.payload.agentId ? { agentId: event.payload.agentId } : {}),
@@ -793,6 +838,9 @@ export function runtimeEventToActivities(
     }
 
     case "item.started": {
+      if (event.parentItemId !== undefined) {
+        return [subagentItemActivity(event, maybeSequence)];
+      }
       if (!isToolLifecycleItemType(event.payload.itemType)) {
         return [];
       }
@@ -805,6 +853,7 @@ export function runtimeEventToActivities(
           summary: `${event.payload.title ?? "Tool"} started`,
           payload: {
             itemType: event.payload.itemType,
+            ...(event.itemId ? { itemId: event.itemId } : {}),
             ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
             ...(event.payload.agentId ? { agentId: event.payload.agentId } : {}),
             ...(event.payload.parentToolUseId
@@ -1691,7 +1740,9 @@ const make = Effect.gen(function* () {
       }
 
       const assistantCompletion =
-        event.type === "item.completed" && event.payload.itemType === "assistant_message"
+        event.type === "item.completed" &&
+        event.payload.itemType === "assistant_message" &&
+        event.parentItemId === undefined
           ? {
               messageId: MessageId.make(
                 `assistant:${event.itemId ?? event.turnId ?? event.eventId}`,
