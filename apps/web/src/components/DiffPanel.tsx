@@ -19,7 +19,8 @@ import {
   SearchIcon,
   TextWrapIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Component, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { useOpenInPreferredEditor } from "../editorPreferences";
 import { type DraftId } from "../composerDraftStore";
 import { openDiffFilePrimaryAction } from "../diffFileActions";
@@ -82,6 +83,44 @@ interface CollapsedDiffFilesState {
 }
 
 const EMPTY_COLLAPSED_DIFF_FILE_KEYS: ReadonlySet<string> = new Set();
+
+interface DiffRenderErrorBoundaryProps {
+  /** Changing this key resets the boundary so a new selection can retry rendering. */
+  resetKey: string;
+  fallback: ReactNode;
+  children: ReactNode;
+}
+
+/**
+ * Guards the virtualized diff renderer: an unrenderable patch (e.g. unexpected
+ * binary or malformed content) degrades to a raw-patch fallback instead of
+ * white-screening the whole app.
+ */
+class DiffRenderErrorBoundary extends Component<
+  DiffRenderErrorBoundaryProps,
+  { hasError: boolean }
+> {
+  override state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  override componentDidCatch(error: unknown) {
+    console.error("Diff render failed; showing raw patch fallback.", error);
+  }
+
+  override componentDidUpdate(previousProps: DiffRenderErrorBoundaryProps) {
+    if (this.state.hasError && previousProps.resetKey !== this.props.resetKey) {
+      // Selection changed; retry rendering.
+      this.setState({ hasError: false });
+    }
+  }
+
+  override render() {
+    return this.state.hasError ? this.props.fallback : this.props.children;
+  }
+}
 
 const DIFF_PANEL_UNSAFE_CSS = `
 [data-diffs-header],
@@ -428,6 +467,23 @@ export default function DiffPanel({
       }),
     [resolvedTheme, selectedPatch, selectedTurnId],
   );
+  const binaryFileEntries = useMemo(() => {
+    if (!renderablePatch || renderablePatch.kind !== "files") {
+      return [];
+    }
+    return renderablePatch.binaryFiles
+      .map((fileDiff) => ({
+        fileDiff,
+        filePath: resolveFileDiffPath(fileDiff),
+        fileKey: buildFileDiffRenderKey(fileDiff),
+      }))
+      .toSorted((left, right) =>
+        left.filePath.localeCompare(right.filePath, undefined, {
+          numeric: true,
+          sensitivity: "base",
+        }),
+      );
+  }, [renderablePatch]);
   const renderableFiles = useMemo(() => {
     if (!renderablePatch || renderablePatch.kind !== "files") {
       return [];
@@ -460,7 +516,11 @@ export default function DiffPanel({
     if (!selectedFilePath) return;
     const file = codeViewFiles.find((candidate) => candidate.filePath === selectedFilePath);
     if (!file) return;
-    codeViewRef.current?.scrollTo({ type: "item", id: file.fileKey, align: "start" });
+    codeViewRef.current?.scrollTo({
+      type: "item",
+      id: file.fileKey,
+      align: "start",
+    });
   }, [codeViewFiles, selectedFilePath, selectedFileRevealRequestId]);
 
   const openDiffFile = useCallback(
@@ -862,71 +922,113 @@ export default function DiffPanel({
                 </div>
               )
             ) : renderablePatch.kind === "files" ? (
-              <div
-                className="min-h-0 flex-1"
-                onClickCapture={(event) => {
-                  const composedPath = event.nativeEvent.composedPath?.() ?? [];
-                  const title = composedPath.find(
-                    (node): node is HTMLElement =>
-                      node instanceof HTMLElement && node.hasAttribute("data-title"),
-                  );
-                  const filePath = title?.textContent?.trim();
-                  if (filePath) openDiffFile(filePath);
-                }}
-              >
-                <AnnotatableCodeView
-                  viewerRef={codeViewRef}
-                  key={collapseScopeKey ?? reviewSectionId}
-                  className="diff-render-surface h-full min-h-0 overflow-auto"
-                  files={codeViewFiles}
-                  sectionId={reviewSectionId}
-                  sectionTitle={reviewSectionTitle}
-                  composerDraftTarget={composerDraftTarget}
-                  renderHeaderPrefix={(fileDiff, fileKey, collapsed) => {
-                    const filePath = resolveFileDiffPath(fileDiff);
-                    return (
-                      <Tooltip>
-                        <TooltipTrigger
-                          render={
-                            <button
-                              type="button"
-                              className={cn(
-                                "inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm border-0 bg-transparent p-0 transition-colors hover:bg-foreground/10 focus-visible:outline-hidden",
-                                getDiffCollapseIconClassName(fileDiff),
-                              )}
-                              aria-label={collapsed ? `Expand ${filePath}` : `Collapse ${filePath}`}
-                              aria-expanded={!collapsed}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                toggleDiffFileCollapsed(fileKey);
-                              }}
-                            />
-                          }
+              <div className="flex min-h-0 flex-1 flex-col">
+                {binaryFileEntries.length > 0 && (
+                  <div className="shrink-0 space-y-1 border-b border-border/70 px-3 py-2">
+                    {binaryFileEntries.map((entry) => (
+                      <div
+                        key={entry.fileKey}
+                        className="flex items-center gap-2 text-[11px] text-muted-foreground/80"
+                      >
+                        <span
+                          className={cn("font-mono", getDiffCollapseIconClassName(entry.fileDiff))}
                         >
-                          {collapsed ? (
-                            <ChevronRightIcon className="size-4" />
-                          ) : (
-                            <ChevronDownIcon className="size-4" />
-                          )}
-                        </TooltipTrigger>
-                        <TooltipPopup side="top">
-                          {collapsed ? "Expand diff" : "Collapse diff"}
-                        </TooltipPopup>
-                      </Tooltip>
+                          {entry.fileDiff.type === "new"
+                            ? "A"
+                            : entry.fileDiff.type === "deleted"
+                              ? "D"
+                              : "M"}
+                        </span>
+                        <span className="truncate font-mono">{entry.filePath}</span>
+                        <span className="shrink-0 text-muted-foreground/60">
+                          Binary file — content not shown
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div
+                  className="min-h-0 flex-1"
+                  onClickCapture={(event) => {
+                    const composedPath = event.nativeEvent.composedPath?.() ?? [];
+                    const title = composedPath.find(
+                      (node): node is HTMLElement =>
+                        node instanceof HTMLElement && node.hasAttribute("data-title"),
                     );
+                    const filePath = title?.textContent?.trim();
+                    if (filePath) openDiffFile(filePath);
                   }}
-                  options={{
-                    diffStyle: diffRenderMode === "split" ? "split" : "unified",
-                    lineDiffType: "none",
-                    overflow: wordWrap ? "wrap" : "scroll",
-                    theme: resolveDiffThemeName(resolvedTheme),
-                    themeType: resolvedTheme as DiffThemeType,
-                    unsafeCSS: DIFF_PANEL_UNSAFE_CSS,
-                    stickyHeaders: true,
-                    itemMetrics: { diffHeaderHeight: 33 },
-                    layout: { paddingTop: 0, paddingBottom: 8, gap: 8 },
-                  }}
-                />
+                >
+                  <DiffRenderErrorBoundary
+                    resetKey={collapseScopeKey ?? reviewSectionId}
+                    fallback={
+                      <div className="min-h-0 flex-1 overflow-auto p-2">
+                        <p className="mb-2 text-[11px] text-muted-foreground/75">
+                          Failed to render this diff. Showing raw patch.
+                        </p>
+                        <pre className="max-h-[72vh] overflow-auto rounded-md border border-border/70 bg-background/70 p-3 font-mono text-[11px] leading-relaxed text-muted-foreground/90">
+                          {selectedPatch}
+                        </pre>
+                      </div>
+                    }
+                  >
+                    <AnnotatableCodeView
+                      viewerRef={codeViewRef}
+                      key={collapseScopeKey ?? reviewSectionId}
+                      className="diff-render-surface h-full min-h-0 overflow-auto"
+                      files={codeViewFiles}
+                      sectionId={reviewSectionId}
+                      sectionTitle={reviewSectionTitle}
+                      composerDraftTarget={composerDraftTarget}
+                      renderHeaderPrefix={(fileDiff, fileKey, collapsed) => {
+                        const filePath = resolveFileDiffPath(fileDiff);
+                        return (
+                          <Tooltip>
+                            <TooltipTrigger
+                              render={
+                                <button
+                                  type="button"
+                                  className={cn(
+                                    "inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm border-0 bg-transparent p-0 transition-colors hover:bg-foreground/10 focus-visible:outline-hidden",
+                                    getDiffCollapseIconClassName(fileDiff),
+                                  )}
+                                  aria-label={
+                                    collapsed ? `Expand ${filePath}` : `Collapse ${filePath}`
+                                  }
+                                  aria-expanded={!collapsed}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    toggleDiffFileCollapsed(fileKey);
+                                  }}
+                                />
+                              }
+                            >
+                              {collapsed ? (
+                                <ChevronRightIcon className="size-4" />
+                              ) : (
+                                <ChevronDownIcon className="size-4" />
+                              )}
+                            </TooltipTrigger>
+                            <TooltipPopup side="top">
+                              {collapsed ? "Expand diff" : "Collapse diff"}
+                            </TooltipPopup>
+                          </Tooltip>
+                        );
+                      }}
+                      options={{
+                        diffStyle: diffRenderMode === "split" ? "split" : "unified",
+                        lineDiffType: "none",
+                        overflow: wordWrap ? "wrap" : "scroll",
+                        theme: resolveDiffThemeName(resolvedTheme),
+                        themeType: resolvedTheme as DiffThemeType,
+                        unsafeCSS: DIFF_PANEL_UNSAFE_CSS,
+                        stickyHeaders: true,
+                        itemMetrics: { diffHeaderHeight: 33 },
+                        layout: { paddingTop: 0, paddingBottom: 8, gap: 8 },
+                      }}
+                    />
+                  </DiffRenderErrorBoundary>
+                </div>
               </div>
             ) : (
               <div className="min-h-0 flex-1 overflow-auto p-2">
