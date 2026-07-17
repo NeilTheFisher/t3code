@@ -4011,7 +4011,8 @@ function ChatViewContent(props: ChatViewProps) {
       return;
     }
     const sendCtx = composerRef.current?.getSendContext();
-    if (!sendCtx?.providerAvailable) return;
+    if (!sendCtx) return;
+    const wasRunningAtSend = phase === "running";
     const {
       images: composerImages,
       terminalContexts: composerTerminalContexts,
@@ -4356,6 +4357,12 @@ function ChatViewContent(props: ChatViewProps) {
     }
     sendInFlightRef.current = false;
     if (!turnStartSucceeded) {
+      resetLocalDispatch();
+    } else if (wasRunningAtSend) {
+      // A follow-up dispatched into an already-running turn steers that turn:
+      // latestTurn never changes, so hasServerAcknowledgedLocalDispatch would
+      // hold isSendBusy until the whole turn settles and block further sends.
+      // The accepted start command is the acknowledgment for a steer.
       resetLocalDispatch();
     }
   };
