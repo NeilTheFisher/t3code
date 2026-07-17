@@ -15,6 +15,7 @@ import {
   modelPickerJumpIndexFromCommand,
   isOpenFavoriteEditorShortcut,
   isTerminalClearShortcut,
+  isTerminalPasteShortcut,
   isTerminalCloseShortcut,
   isTerminalNewShortcut,
   isTerminalSplitShortcut,
@@ -834,6 +835,29 @@ describe("isTerminalClearShortcut", () => {
   it("ignores non-keydown events", () => {
     assert.isFalse(
       isTerminalClearShortcut(event({ type: "keyup", key: "l", ctrlKey: true }), "Linux"),
+    );
+  });
+});
+
+describe("isTerminalPasteShortcut", () => {
+  it("matches Ctrl+V and Ctrl+Shift+V on non-mac platforms", () => {
+    assert.isTrue(isTerminalPasteShortcut(event({ key: "v", ctrlKey: true }), "Linux"));
+    assert.isTrue(
+      isTerminalPasteShortcut(event({ key: "V", ctrlKey: true, shiftKey: true }), "Win32"),
+    );
+  });
+
+  it("matches Cmd+V on macOS but not Ctrl+V", () => {
+    assert.isTrue(isTerminalPasteShortcut(event({ key: "v", metaKey: true }), "MacIntel"));
+    assert.isFalse(isTerminalPasteShortcut(event({ key: "v", ctrlKey: true }), "MacIntel"));
+  });
+
+  it("ignores alt variants and non-keydown events", () => {
+    assert.isFalse(
+      isTerminalPasteShortcut(event({ key: "v", ctrlKey: true, altKey: true }), "Linux"),
+    );
+    assert.isFalse(
+      isTerminalPasteShortcut(event({ type: "keyup", key: "v", ctrlKey: true }), "Linux"),
     );
   });
 });
