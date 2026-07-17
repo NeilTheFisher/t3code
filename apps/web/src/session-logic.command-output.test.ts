@@ -128,6 +128,23 @@ describe("deriveWorkLogEntries command output", () => {
     expect(entry).toMatchObject({ command, detail: "hi" });
   });
 
+  it("drops an ellipsis-truncated labeled command restated as detail", () => {
+    const command = `cd ~/repos/t3code && ${"x".repeat(200)} && git rev-parse --show-toplevel`;
+    const [entry] = deriveWorkLogEntries([
+      makeCommandActivity("claude-ellipsis", {
+        itemType: "command_execution",
+        detail: `Bash: ${command.slice(0, 177)}...`,
+        data: {
+          toolName: "Bash",
+          input: { command },
+        },
+      }),
+    ]);
+
+    expect(entry?.command).toBe(command);
+    expect(entry?.detail).toBeUndefined();
+  });
+
   it("drops a server-truncated labeled command restated as detail", () => {
     const command = `long ${"x".repeat(500)} end`;
     const [entry] = deriveWorkLogEntries([
