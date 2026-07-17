@@ -205,6 +205,14 @@ function surfaceTitle(
       );
     case "plan":
       return "Plan";
+    case "webpage": {
+      if (!surface.url) return "Browser";
+      try {
+        return new URL(surface.url).host || "Browser";
+      } catch {
+        return "Browser";
+      }
+    }
     case "preview": {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null;
       if (!snapshot || snapshot.navStatus._tag === "Idle") return "Browser";
@@ -266,6 +274,8 @@ function SurfaceIcon({
       return <TerminalSquare className="size-3.5 shrink-0" />;
     case "plan":
       return <ClipboardList className="size-3.5 shrink-0" />;
+    case "webpage":
+      return <PreviewFavicon url={surface.url} />;
   }
 }
 
