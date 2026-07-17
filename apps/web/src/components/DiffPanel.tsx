@@ -416,6 +416,23 @@ export default function DiffPanel({
       }),
     );
   }, [renderablePatch]);
+  const binaryFileEntries = useMemo(() => {
+    if (!renderablePatch || renderablePatch.kind !== "files") {
+      return [];
+    }
+    return renderablePatch.binaryFiles
+      .map((fileDiff) => ({
+        fileDiff,
+        filePath: resolveFileDiffPath(fileDiff),
+        fileKey: buildFileDiffRenderKey(fileDiff),
+      }))
+      .toSorted((left, right) =>
+        left.filePath.localeCompare(right.filePath, undefined, {
+          numeric: true,
+          sensitivity: "base",
+        }),
+      );
+  }, [renderablePatch]);
   const renderableFileEntries = useMemo(
     () =>
       renderableFiles.map((fileDiff) => ({
@@ -931,7 +948,7 @@ export default function DiffPanel({
             ) : renderablePatch.kind === "files" ? (
               <div className="flex min-h-0 flex-1 overflow-hidden">
                 <div
-                  className="min-h-0 min-w-0 flex-1"
+                  className="flex min-h-0 min-w-0 flex-1 flex-col"
                   onClickCapture={(event) => {
                     const composedPath = event.nativeEvent.composedPath?.() ?? [];
                     for (const node of composedPath) {
@@ -966,11 +983,38 @@ export default function DiffPanel({
                     if (file) toggleDiffFileCollapsed(file.fileKey);
                   }}
                 >
+                  {binaryFileEntries.length > 0 && (
+                    <div className="shrink-0 space-y-1 border-b border-border/70 px-3 py-2">
+                      {binaryFileEntries.map((entry) => (
+                        <div
+                          key={entry.fileKey}
+                          className="flex items-center gap-2 text-[11px] text-muted-foreground/80"
+                        >
+                          <span
+                            className={cn(
+                              "font-mono",
+                              getDiffCollapseIconClassName(entry.fileDiff),
+                            )}
+                          >
+                            {entry.fileDiff.type === "new"
+                              ? "A"
+                              : entry.fileDiff.type === "deleted"
+                                ? "D"
+                                : "M"}
+                          </span>
+                          <span className="truncate font-mono">{entry.filePath}</span>
+                          <span className="shrink-0 text-muted-foreground/60">
+                            Binary file — content not shown
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <AnnotatableCodeView
                     key={collapseScopeKey ?? reviewSectionId}
                     viewerRef={setCodeView}
                     codeViewKey={codeViewMountKey}
-                    className="h-full min-h-0 overflow-auto"
+                    className="min-h-0 flex-1 overflow-auto"
                     files={codeViewFiles}
                     sectionId={reviewSectionId}
                     sectionTitle={reviewSectionTitle}
