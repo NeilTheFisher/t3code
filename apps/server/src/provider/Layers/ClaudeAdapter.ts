@@ -290,6 +290,19 @@ interface ClaudeSessionContext {
     items: Array<unknown>;
   }>;
   readonly inFlightTools: Map<number, ToolInFlight>;
+  /**
+   * Sub-agent tool calls keyed by their tool_use id, so forwarded subagent
+   * tool_result blocks can be matched back to the right child item.
+   */
+  readonly subagentTools: Map<
+    string,
+    {
+      readonly parentToolUseId: string;
+      readonly itemType: CanonicalItemType;
+      readonly toolName: string;
+      readonly input: Record<string, unknown>;
+    }
+  >;
   readonly claudeTasks: Map<string, ClaudeTaskState>;
   readonly taskAgents: Map<string, ClaudeTaskAgentState>;
   /**
@@ -2343,6 +2356,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     }
     // Clear any remaining stale entries (e.g. from interrupted content blocks)
     context.inFlightTools.clear();
+    context.subagentTools.clear();
 
     for (const block of turnState.assistantTextBlockOrder) {
       yield* completeAssistantTextBlock(context, block, {
@@ -2395,11 +2409,160 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     yield* updateResumeCursor(context);
   });
 
+  /**
+   * Emit a coalesced sub-agent transcript entry as an `item.updated` runtime
+   * event tagged with `parentItemId` (the parent Task tool_use id). These are
+   * persisted as `subagent.item` activities by ProviderRuntimeIngestion and
+   * never touch the main timeline.
+   */
+  const emitSubagentItem = Effect.fn("emitSubagentItem")(function* (
+    context: ClaudeSessionContext,
+    input: {
+      readonly parentToolUseId: string;
+      readonly childItemId: string;
+      readonly itemType: CanonicalItemType;
+      readonly status?: "inProgress" | "completed" | "failed";
+      readonly title?: string;
+      readonly detail?: string;
+      readonly data?: unknown;
+      readonly rawMethod: string;
+      readonly rawPayload: unknown;
+    },
+  ) {
+    const stamp = yield* makeEventStamp();
+    yield* offerRuntimeEvent({
+      type: "item.updated",
+      eventId: stamp.eventId,
+      provider: PROVIDER,
+      createdAt: stamp.createdAt,
+      threadId: context.session.threadId,
+      ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
+      itemId: asRuntimeItemId(input.childItemId),
+      parentItemId: asRuntimeItemId(input.parentToolUseId),
+      payload: {
+        itemType: input.itemType,
+        ...(input.status ? { status: input.status } : {}),
+        ...(input.title ? { title: input.title } : {}),
+        ...(input.detail && input.detail.trim().length > 0 ? { detail: input.detail } : {}),
+        ...(input.data !== undefined ? { data: input.data } : {}),
+      },
+      providerRefs: nativeProviderRefs(context, {
+        providerItemId: input.childItemId,
+      }),
+      raw: {
+        source: "claude.sdk.message",
+        method: input.rawMethod,
+        payload: input.rawPayload,
+      },
+    });
+  });
+
+  const handleSubagentAssistantMessage = Effect.fn("handleSubagentAssistantMessage")(function* (
+    context: ClaudeSessionContext,
+    parentToolUseId: string,
+    message: Extract<SDKMessage, { type: "assistant" }>,
+  ) {
+    const content = message.message?.content;
+    if (!Array.isArray(content)) {
+      return;
+    }
+
+    const textParts: Array<string> = [];
+    for (const block of content) {
+      if (!block || typeof block !== "object") {
+        continue;
+      }
+      if (block.type === "text" || block.type === "thinking") {
+        const text = extractContentBlockText(block);
+        if (block.type === "text" && text.length > 0) {
+          textParts.push(text);
+        }
+        continue;
+      }
+      if (
+        block.type !== "tool_use" &&
+        block.type !== "server_tool_use" &&
+        block.type !== "mcp_tool_use"
+      ) {
+        continue;
+      }
+      const toolName = block.name;
+      const itemType = classifyToolItemType(toolName);
+      const toolInput =
+        typeof block.input === "object" && block.input !== null
+          ? (block.input as Record<string, unknown>)
+          : {};
+      context.subagentTools.set(block.id, {
+        parentToolUseId,
+        itemType,
+        toolName,
+        input: toolInput,
+      });
+      yield* emitSubagentItem(context, {
+        parentToolUseId,
+        childItemId: `${parentToolUseId}:${block.id}`,
+        itemType,
+        status: "inProgress",
+        title: titleForTool(itemType),
+        detail: summarizeToolRequest(toolName, toolInput),
+        data: { toolName, input: toolInput },
+        rawMethod: "claude/assistant/subagent",
+        rawPayload: message,
+      });
+    }
+
+    const joinedText = textParts.join("\n\n");
+    if (joinedText.trim().length > 0) {
+      yield* emitSubagentItem(context, {
+        parentToolUseId,
+        childItemId: `${parentToolUseId}:${message.message?.id ?? message.uuid}`,
+        itemType: "assistant_message",
+        status: "completed",
+        detail: joinedText,
+        rawMethod: "claude/assistant/subagent",
+        rawPayload: message,
+      });
+    }
+  });
+
+  const handleSubagentUserMessage = Effect.fn("handleSubagentUserMessage")(function* (
+    context: ClaudeSessionContext,
+    parentToolUseId: string,
+    message: Extract<SDKMessage, { type: "user" }>,
+  ) {
+    for (const toolResult of toolResultBlocksFromUserMessage(message)) {
+      const known = context.subagentTools.get(toolResult.toolUseId);
+      yield* emitSubagentItem(context, {
+        parentToolUseId,
+        childItemId: `${parentToolUseId}:${toolResult.toolUseId}`,
+        itemType: known?.itemType ?? "dynamic_tool_call",
+        status: toolResult.isError ? "failed" : "completed",
+        ...(known ? { title: titleForTool(known.itemType) } : {}),
+        detail: toolResult.text,
+        data: {
+          ...(known ? { toolName: known.toolName, input: known.input } : {}),
+          result: toolResult.block,
+        },
+        rawMethod: "claude/user/subagent",
+        rawPayload: message,
+      });
+      context.subagentTools.delete(toolResult.toolUseId);
+    }
+  });
+
   const handleStreamEvent = Effect.fn("handleStreamEvent")(function* (
     context: ClaudeSessionContext,
     message: SDKMessage,
   ) {
     if (message.type !== "stream_event") {
+      return;
+    }
+
+    // Sub-agent stream events (partial deltas) are intentionally dropped:
+    // the complete messages arrive via forwardSubagentText as assistant/user
+    // messages tagged with parent_tool_use_id and are coalesced there. This
+    // also keeps subagent usage out of the thread token meter.
+    if (message.parent_tool_use_id !== null && message.parent_tool_use_id !== undefined) {
       return;
     }
 
@@ -2707,6 +2870,11 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     message: SDKMessage,
   ) {
     if (message.type !== "user") {
+      return;
+    }
+
+    if (message.parent_tool_use_id !== null && message.parent_tool_use_id !== undefined) {
+      yield* handleSubagentUserMessage(context, message.parent_tool_use_id, message);
       return;
     }
 
@@ -3849,6 +4017,15 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const pendingApprovals = new Map<ApprovalRequestId, PendingApproval>();
       const pendingUserInputs = new Map<ApprovalRequestId, PendingUserInput>();
       const inFlightTools = new Map<number, ToolInFlight>();
+      const subagentTools = new Map<
+        string,
+        {
+          readonly parentToolUseId: string;
+          readonly itemType: CanonicalItemType;
+          readonly toolName: string;
+          readonly input: Record<string, unknown>;
+        }
+      >();
       const claudeTasks = new Map<string, ClaudeTaskState>();
       const taskAgents = new Map<string, ClaudeTaskAgentState>();
       const pendingTaskModels = new Map<string, string>();
@@ -4309,6 +4486,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(existingResumeSessionId ? { resume: existingResumeSessionId } : {}),
         ...(newSessionId ? { sessionId: newSessionId } : {}),
         includePartialMessages: true,
+        // Forward the full subagent conversation (assistant/user messages
+        // tagged with parent_tool_use_id) so it can be persisted as nested
+        // transcript items. See handleAssistantMessage/handleUserMessage.
+        forwardSubagentText: true,
         canUseTool,
         onUserDialog,
         supportedDialogKinds: ["resume_return"],
@@ -4403,6 +4584,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         pendingUserInputs,
         turns: [],
         inFlightTools,
+        subagentTools,
         claudeTasks,
         taskAgents,
         pendingTaskModels,

@@ -260,6 +260,10 @@ const ProviderRuntimeEventBase = Schema.Struct({
   createdAt: IsoDateTime,
   turnId: Schema.optional(TurnId),
   itemId: Schema.optional(RuntimeItemId),
+  // Present when this item belongs to a sub-agent conversation nested under a
+  // parent tool call (e.g. a Claude subagent Task or an OpenCode child
+  // session); the value is the parent tool call's itemId.
+  parentItemId: Schema.optional(RuntimeItemId),
   requestId: Schema.optional(RuntimeRequestId),
   providerRefs: Schema.optional(ProviderRefs),
   raw: Schema.optional(RuntimeEventRaw),
