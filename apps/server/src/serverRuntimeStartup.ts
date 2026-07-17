@@ -28,6 +28,7 @@ import * as ExternalLauncher from "./process/externalLauncher.ts";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as OrchestrationReactor from "./orchestration/Services/OrchestrationReactor.ts";
+import { settleOrphanedRunningTurns } from "./orchestration/settleOrphanedTurns.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
@@ -334,6 +335,17 @@ export const make = Effect.gen(function* () {
           }),
         ),
         Effect.forkScoped,
+      ),
+    );
+
+    yield* Effect.logDebug("startup phase: settling orphaned running turns");
+    yield* runStartupPhase(
+      "orphaned-turns.settle",
+      settleOrphanedRunningTurns.pipe(
+        Effect.provideService(Crypto.Crypto, crypto),
+        Effect.catchCause((cause) =>
+          Effect.logWarning("failed to settle orphaned running turns", { cause }),
+        ),
       ),
     );
 
