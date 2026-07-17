@@ -45,6 +45,8 @@ export type RenderablePatch =
   | {
       kind: "files";
       files: FileDiffMetadata[];
+      /** Binary file entries stripped from `files` — render as static rows, never as text diffs. */
+      binaryFiles: FileDiffMetadata[];
     }
   | {
       kind: "raw";
@@ -87,6 +89,59 @@ export function compactPartialHunkOffsets(file: FileDiffMetadata): FileDiffMetad
   };
 }
 
+/**
+ * Collect the paths of files that git reported as binary in a unified patch
+ * ("Binary files a/x and b/x differ" or a "GIT binary patch" section).
+ *
+ * @pierre/diffs' parser silently drops these markers, leaving a hunk-less
+ * FileDiffMetadata whose virtualized rendering can crash the app. We detect
+ * them from the raw patch text so they can be rendered as static rows instead.
+ */
+export function extractBinaryPatchPaths(patch: string): Set<string> {
+  const binaryPaths = new Set<string>();
+  const lines = patch.split("\n");
+  let currentPaths: string[] = [];
+  for (const rawLine of lines) {
+    const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+    if (line.startsWith("diff --git ")) {
+      currentPaths = [];
+      const match = /^diff --git (?:"?a\/(.+?)"?) (?:"?b\/(.+?)"?)$/.exec(line);
+      if (match) {
+        for (const path of [match[1], match[2]]) {
+          if (path) currentPaths.push(path);
+        }
+      }
+      continue;
+    }
+    if (line.startsWith("Binary files ") || line === "GIT binary patch") {
+      if (line.startsWith("Binary files ")) {
+        const match =
+          /^Binary files (?:"?a\/(.+?)"?|\/dev\/null) and (?:"?b\/(.+?)"?|\/dev\/null) differ$/.exec(
+            line,
+          );
+        if (match) {
+          for (const path of [match[1], match[2]]) {
+            if (path) binaryPaths.add(path);
+          }
+          continue;
+        }
+      }
+      for (const path of currentPaths) {
+        binaryPaths.add(path);
+      }
+    }
+  }
+  return binaryPaths;
+}
+
+function isBinaryFileDiff(file: FileDiffMetadata, binaryPaths: Set<string>): boolean {
+  if (file.hunks.length !== 0) return false;
+  const candidates = [file.name, file.prevName]
+    .filter((name): name is string => typeof name === "string" && name.length > 0)
+    .map((name) => (name.startsWith("a/") || name.startsWith("b/") ? name.slice(2) : name));
+  return candidates.some((path) => binaryPaths.has(path));
+}
+
 export function getRenderablePatch(
   patch: string | undefined,
   cacheScope = "diff-panel",
@@ -101,13 +156,23 @@ export function getRenderablePatch(
       normalizedPatch,
       buildPatchCacheKey(normalizedPatch, cacheScope),
     );
-    const files = parsedPatches.flatMap((parsedPatch) =>
+    const parsedFiles = parsedPatches.flatMap((parsedPatch) =>
       options.compactPartialHunkOffsets
         ? parsedPatch.files.map(compactPartialHunkOffsets)
         : parsedPatch.files,
     );
-    if (files.length > 0) {
-      return { kind: "files", files };
+    const binaryPaths = extractBinaryPatchPaths(normalizedPatch);
+    const files: FileDiffMetadata[] = [];
+    const binaryFiles: FileDiffMetadata[] = [];
+    for (const file of parsedFiles) {
+      if (isBinaryFileDiff(file, binaryPaths)) {
+        binaryFiles.push(file);
+      } else {
+        files.push(file);
+      }
+    }
+    if (files.length > 0 || binaryFiles.length > 0) {
+      return { kind: "files", files, binaryFiles };
     }
 
     return {
