@@ -327,12 +327,59 @@ export function isContextMenuPointerDown(input: {
   return input.isMac && input.button === 0 && input.ctrlKey;
 }
 
+/**
+ * Recency heat for the sidebar thread list: "working" is a thread with a
+ * running turn (solid primary row); the rest bucket the time since the last
+ * user activity so recently touched threads read hotter.
+ */
+export type ThreadRecencyHeat = "working" | "hot" | "warm" | "cool" | "faint" | null;
+
+export function resolveThreadRecencyHeat(input: {
+  lastActivityAt: string | undefined;
+  nowMs: number;
+  isWorking: boolean;
+}): ThreadRecencyHeat {
+  if (input.isWorking) {
+    return "working";
+  }
+  if (!input.lastActivityAt) {
+    return null;
+  }
+  const activityMs = Date.parse(input.lastActivityAt);
+  if (Number.isNaN(activityMs)) {
+    return null;
+  }
+  const age = input.nowMs - activityMs;
+  if (age < 15 * 60 * 1000) return "hot";
+  if (age < 60 * 60 * 1000) return "warm";
+  if (age < 3 * 60 * 60 * 1000) return "cool";
+  if (age < 24 * 60 * 60 * 1000) return "faint";
+  return null;
+}
+
+const THREAD_HEAT_ROW_CLASS: Record<Exclude<ThreadRecencyHeat, null>, string> = {
+  working:
+    "bg-primary text-primary-foreground font-medium hover:bg-primary/90 hover:text-primary-foreground",
+  hot: "bg-primary/28 text-foreground hover:bg-primary/34 hover:text-foreground dark:bg-primary/36 dark:hover:bg-primary/42",
+  warm: "bg-primary/18 text-foreground hover:bg-primary/24 hover:text-foreground dark:bg-primary/24 dark:hover:bg-primary/30",
+  cool: "bg-primary/10 text-foreground hover:bg-primary/16 hover:text-foreground dark:bg-primary/14 dark:hover:bg-primary/20",
+  faint:
+    "bg-primary/5 text-muted-foreground hover:bg-primary/10 hover:text-foreground dark:bg-primary/7 dark:hover:bg-primary/12",
+};
+
 export function resolveThreadRowClassName(input: {
   isActive: boolean;
   isSelected: boolean;
+  heat?: ThreadRecencyHeat;
 }): string {
   const baseClassName =
     "h-6 w-full translate-x-0 cursor-pointer justify-start px-2 text-left select-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring sm:h-7";
+
+  // A working thread stays solid primary even while selected — it is the
+  // strongest signal in the heat map.
+  if (input.heat === "working") {
+    return cn(baseClassName, THREAD_HEAT_ROW_CLASS.working);
+  }
 
   if (input.isSelected && input.isActive) {
     return cn(
@@ -346,6 +393,10 @@ export function resolveThreadRowClassName(input: {
       baseClassName,
       "bg-primary/15 text-foreground hover:bg-primary/19 hover:text-foreground dark:bg-primary/22 dark:hover:bg-primary/28",
     );
+  }
+
+  if (input.heat) {
+    return cn(baseClassName, THREAD_HEAT_ROW_CLASS[input.heat]);
   }
 
   if (input.isActive) {
