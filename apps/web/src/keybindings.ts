@@ -467,6 +467,27 @@ export function isTerminalClearShortcut(
   );
 }
 
+export function isTerminalPasteShortcut(
+  event: ShortcutEventLike,
+  platform = navigator.platform,
+): boolean {
+  if (event.type !== undefined && event.type !== "keydown") {
+    return false;
+  }
+
+  if (event.key.toLowerCase() !== "v" || event.altKey) {
+    return false;
+  }
+
+  if (isMacPlatform(platform)) {
+    return event.metaKey && !event.ctrlKey;
+  }
+
+  // Ctrl+V and Ctrl+Shift+V both paste; leave Ctrl+V alone on mac so it can
+  // still act as the literal-next (quoted insert) control sequence.
+  return event.ctrlKey && !event.metaKey;
+}
+
 export function terminalDeleteShortcutData(
   event: ShortcutEventLike,
   platform = navigator.platform,
