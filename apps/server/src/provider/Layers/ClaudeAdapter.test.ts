@@ -1386,6 +1386,161 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("captures forwarded subagent messages as parentItemId-tagged item events", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      const runtimeEventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.takeUntil((event) => event.type === "turn.completed"),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "delegate this",
+        attachments: [],
+      });
+
+      // Parent Task tool call on the main timeline.
+      harness.query.emit({
+        type: "stream_event",
+        session_id: "sdk-session-subagent",
+        uuid: "stream-subagent-parent",
+        parent_tool_use_id: null,
+        event: {
+          type: "content_block_start",
+          index: 0,
+          content_block: {
+            type: "tool_use",
+            id: "tool-task-parent",
+            name: "Task",
+            input: { description: "Review", prompt: "Audit", subagent_type: "code-reviewer" },
+          },
+        },
+      } as unknown as SDKMessage);
+
+      // Subagent partial stream events must be dropped (no main text deltas).
+      harness.query.emit({
+        type: "stream_event",
+        session_id: "sdk-session-subagent",
+        uuid: "stream-subagent-delta",
+        parent_tool_use_id: "tool-task-parent",
+        event: {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "text_delta", text: "LEAKED SUBAGENT DELTA" },
+        },
+      } as unknown as SDKMessage);
+
+      // Forwarded subagent assistant message (text + tool_use).
+      harness.query.emit({
+        type: "assistant",
+        session_id: "sdk-session-subagent",
+        uuid: "assistant-subagent-1",
+        parent_tool_use_id: "tool-task-parent",
+        message: {
+          id: "subagent-msg-1",
+          content: [
+            { type: "text", text: "Subagent findings" },
+            { type: "tool_use", id: "subagent-tool-1", name: "Bash", input: { command: "ls" } },
+          ],
+        },
+      } as unknown as SDKMessage);
+
+      // Forwarded subagent tool result.
+      harness.query.emit({
+        type: "user",
+        session_id: "sdk-session-subagent",
+        uuid: "user-subagent-1",
+        parent_tool_use_id: "tool-task-parent",
+        message: {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "subagent-tool-1",
+              content: [{ type: "text", text: "file-a.ts" }],
+            },
+          ],
+        },
+      } as unknown as SDKMessage);
+
+      harness.query.emit({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        errors: [],
+        session_id: "sdk-session-subagent",
+        uuid: "result-subagent-1",
+      } as unknown as SDKMessage);
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+
+      // No subagent text leaks into main content deltas.
+      const leaked = runtimeEvents.filter(
+        (event) =>
+          event.type === "content.delta" && event.payload.delta.includes("LEAKED SUBAGENT DELTA"),
+      );
+      assert.deepEqual(leaked, []);
+
+      // Exactly one turn (no synthetic turn auto-start from the subagent message).
+      assert.equal(runtimeEvents.filter((event) => event.type === "turn.started").length, 1);
+
+      const subagentEvents = runtimeEvents.filter(
+        (event) =>
+          event.type === "item.updated" && String(event.parentItemId) === "tool-task-parent",
+      );
+      assert.equal(subagentEvents.length, 3);
+
+      const toolStartedChild = subagentEvents.find(
+        (event) =>
+          String(event.itemId) === "tool-task-parent:subagent-tool-1" &&
+          event.type === "item.updated" &&
+          event.payload.status === "inProgress",
+      );
+      assert.ok(toolStartedChild);
+      if (toolStartedChild?.type === "item.updated") {
+        assert.equal(toolStartedChild.payload.itemType, "command_execution");
+        assert.deepEqual(toolStartedChild.payload.data, {
+          toolName: "Bash",
+          input: { command: "ls" },
+        });
+      }
+
+      const assistantChild = subagentEvents.find(
+        (event) => String(event.itemId) === "tool-task-parent:subagent-msg-1",
+      );
+      assert.equal(assistantChild?.type, "item.updated");
+      if (assistantChild?.type === "item.updated") {
+        assert.equal(assistantChild.payload.itemType, "assistant_message");
+        assert.equal(assistantChild.payload.detail, "Subagent findings");
+      }
+
+      const toolResultChild = subagentEvents.find(
+        (event) =>
+          String(event.itemId) === "tool-task-parent:subagent-tool-1" &&
+          event.type === "item.updated" &&
+          event.payload.status === "completed",
+      );
+      assert.equal(toolResultChild?.type, "item.updated");
+      if (toolResultChild?.type === "item.updated") {
+        assert.equal(toolResultChild.payload.itemType, "command_execution");
+        assert.equal(toolResultChild.payload.detail, "file-a.ts");
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("treats user-aborted Claude results as interrupted without a runtime error", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {

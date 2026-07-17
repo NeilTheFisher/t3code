@@ -1034,6 +1034,125 @@ describe("ProviderRuntimeIngestion", () => {
     expect(rawOutput?.content).toBe('import * as Effect from "effect/Effect"\n');
   });
 
+  it("adds itemId to tool lifecycle activity payloads", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-tool-completed-item-id"),
+      provider: ProviderDriverKind.make("cursor"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-tool-item-id"),
+      itemId: asItemId("item-tool-with-id"),
+      payload: {
+        itemType: "dynamic_tool_call",
+        status: "completed",
+        title: "Read file",
+      },
+    });
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) => activity.id === "evt-tool-completed-item-id",
+      ),
+    );
+    const activity = thread.activities.find(
+      (entry: ProviderRuntimeTestActivity) => entry.id === "evt-tool-completed-item-id",
+    );
+    const payload =
+      activity?.payload && typeof activity.payload === "object"
+        ? (activity.payload as Record<string, unknown>)
+        : undefined;
+
+    expect(activity?.kind).toBe("tool.completed");
+    expect(payload?.itemId).toBe("item-tool-with-id");
+  });
+
+  it("projects parentItemId-tagged item events as subagent.item activities", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    harness.emit({
+      type: "item.updated",
+      eventId: asEventId("evt-subagent-assistant"),
+      provider: ProviderDriverKind.make("claudeAgent"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-subagent"),
+      itemId: asItemId("parent-tool-1:child-msg-1"),
+      parentItemId: asItemId("parent-tool-1"),
+      payload: {
+        itemType: "assistant_message",
+        status: "completed",
+        detail: "Subagent findings",
+      },
+    });
+
+    harness.emit({
+      type: "item.updated",
+      eventId: asEventId("evt-subagent-tool"),
+      provider: ProviderDriverKind.make("claudeAgent"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-subagent"),
+      itemId: asItemId("parent-tool-1:child-tool-1"),
+      parentItemId: asItemId("parent-tool-1"),
+      payload: {
+        itemType: "command_execution",
+        status: "completed",
+        detail: "x".repeat(6000),
+        data: { toolName: "Bash", input: { command: "ls" } },
+      },
+    });
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) => activity.id === "evt-subagent-tool",
+      ),
+    );
+
+    const assistantActivity = thread.activities.find(
+      (entry: ProviderRuntimeTestActivity) => entry.id === "evt-subagent-assistant",
+    );
+    const assistantPayload =
+      assistantActivity?.payload && typeof assistantActivity.payload === "object"
+        ? (assistantActivity.payload as Record<string, unknown>)
+        : undefined;
+    expect(assistantActivity?.kind).toBe("subagent.item");
+    expect(assistantActivity?.tone).toBe("tool");
+    expect(assistantPayload?.itemType).toBe("assistant_message");
+    expect(assistantPayload?.itemId).toBe("parent-tool-1:child-msg-1");
+    expect(assistantPayload?.parentItemId).toBe("parent-tool-1");
+    expect(assistantPayload?.role).toBe("assistant");
+    expect(assistantPayload?.detail).toBe("Subagent findings");
+
+    // Subagent items must not appear as main-timeline tool activities.
+    expect(
+      thread.activities.some(
+        (entry: ProviderRuntimeTestActivity) =>
+          entry.id === "evt-subagent-tool" && entry.kind !== "subagent.item",
+      ),
+    ).toBe(false);
+
+    const toolActivity = thread.activities.find(
+      (entry: ProviderRuntimeTestActivity) => entry.id === "evt-subagent-tool",
+    );
+    const toolPayload =
+      toolActivity?.payload && typeof toolActivity.payload === "object"
+        ? (toolActivity.payload as Record<string, unknown>)
+        : undefined;
+    expect(toolActivity?.kind).toBe("subagent.item");
+    expect(toolPayload?.role).toBe("tool");
+    expect(toolPayload?.parentItemId).toBe("parent-tool-1");
+    expect(toolPayload?.data).toEqual({ toolName: "Bash", input: { command: "ls" } });
+    // Server-side truncation uses the generous subagent cap (~4000 chars).
+    expect(typeof toolPayload?.detail).toBe("string");
+    expect((toolPayload?.detail as string).length).toBeLessThanOrEqual(4000);
+    expect((toolPayload?.detail as string).length).toBeGreaterThan(1000);
+  });
+
   it("normalizes command execution activities to ran-command summaries", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";
