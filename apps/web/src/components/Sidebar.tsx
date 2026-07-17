@@ -191,6 +191,7 @@ import {
   resolveSidebarNewThreadSeedContext,
   resolveSidebarNewThreadEnvMode,
   resolveThreadRowClassName,
+  resolveThreadRecencyHeat,
   resolveThreadStatusPill,
   orderItemsByPreferredIds,
   shouldClearThreadSelectionOnMouseDown,
@@ -456,6 +457,11 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
   );
   const isThreadRunning =
     thread.session?.status === "running" && thread.session.activeTurnId != null;
+  const recencyHeat = resolveThreadRecencyHeat({
+    lastActivityAt: thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt,
+    nowMs: Date.now(),
+    isWorking: isThreadRunning || thread.session?.status === "starting",
+  });
   const threadStatus = resolveThreadStatusPill({
     thread: {
       ...thread,
@@ -681,6 +687,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
         className={`${resolveThreadRowClassName({
           isActive,
           isSelected,
+          heat: recencyHeat,
         })} relative isolate`}
         onClick={handleRowClick}
         onDoubleClick={handleRowDoubleClick}
@@ -705,7 +712,9 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
               <TooltipPopup side="top">{prStatus.tooltip}</TooltipPopup>
             </Tooltip>
           )}
-          {threadStatus && <ThreadStatusLabel status={threadStatus} />}
+          {threadStatus && (
+            <ThreadStatusLabel status={threadStatus} onAccent={recencyHeat === "working"} />
+          )}
           {renamingThreadKey === threadKey ? (
             <input
               ref={handleRenameInputRef}
@@ -865,9 +874,11 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
                 ) : (
                   <span
                     className={`text-[10px] tabular-nums ${
-                      isHighlighted
-                        ? "text-foreground/72 dark:text-foreground/82"
-                        : "text-muted-foreground/40"
+                      recencyHeat === "working"
+                        ? "text-primary-foreground/75"
+                        : isHighlighted
+                          ? "text-foreground/72 dark:text-foreground/82"
+                          : "text-muted-foreground/40"
                     }`}
                   >
                     {formatRelativeTimeLabel(

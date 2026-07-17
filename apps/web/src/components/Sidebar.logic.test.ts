@@ -15,6 +15,7 @@ import {
   resolveSidebarNewThreadSeedContext,
   resolveSidebarNewThreadEnvMode,
   resolveSidebarStageBadgeLabel,
+  resolveThreadRecencyHeat,
   resolveThreadRowClassName,
   resolveSidebarV2Status,
   resolveThreadStatusPill,
@@ -1286,5 +1287,64 @@ describe("sortProjectsForSidebar", () => {
     );
 
     expect(timestamp).toBe(Date.parse("2026-03-09T10:10:00.000Z"));
+  });
+});
+
+describe("resolveThreadRecencyHeat", () => {
+  const nowMs = Date.parse("2026-07-17T12:00:00.000Z");
+  const at = (minutesAgo: number) => new Date(nowMs - minutesAgo * 60 * 1000).toISOString();
+
+  it("marks running threads as working regardless of activity age", () => {
+    expect(resolveThreadRecencyHeat({ lastActivityAt: at(60 * 48), nowMs, isWorking: true })).toBe(
+      "working",
+    );
+  });
+
+  it("buckets recency into hot, warm, cool, faint, then none", () => {
+    expect(resolveThreadRecencyHeat({ lastActivityAt: at(5), nowMs, isWorking: false })).toBe(
+      "hot",
+    );
+    expect(resolveThreadRecencyHeat({ lastActivityAt: at(30), nowMs, isWorking: false })).toBe(
+      "warm",
+    );
+    expect(resolveThreadRecencyHeat({ lastActivityAt: at(120), nowMs, isWorking: false })).toBe(
+      "cool",
+    );
+    expect(resolveThreadRecencyHeat({ lastActivityAt: at(60 * 12), nowMs, isWorking: false })).toBe(
+      "faint",
+    );
+    expect(
+      resolveThreadRecencyHeat({ lastActivityAt: at(60 * 30), nowMs, isWorking: false }),
+    ).toBeNull();
+  });
+
+  it("returns null for missing or invalid timestamps", () => {
+    expect(
+      resolveThreadRecencyHeat({ lastActivityAt: undefined, nowMs, isWorking: false }),
+    ).toBeNull();
+    expect(
+      resolveThreadRecencyHeat({ lastActivityAt: "not-a-date", nowMs, isWorking: false }),
+    ).toBeNull();
+  });
+});
+
+describe("resolveThreadRowClassName heat", () => {
+  it("uses solid primary for working threads even when selected", () => {
+    const className = resolveThreadRowClassName({
+      isActive: true,
+      isSelected: true,
+      heat: "working",
+    });
+    expect(className).toContain("bg-primary ");
+    expect(className).toContain("text-primary-foreground");
+  });
+
+  it("applies heat tint only when not selected", () => {
+    expect(
+      resolveThreadRowClassName({ isActive: false, isSelected: false, heat: "hot" }),
+    ).toContain("bg-primary/28");
+    expect(resolveThreadRowClassName({ isActive: false, isSelected: true, heat: "hot" })).toContain(
+      "bg-primary/15",
+    );
   });
 });

@@ -130,12 +130,22 @@ export function ThreadWorktreeIndicator({
 }
 
 export function ThreadStatusLabel({
-  status,
+  status: statusProp,
   compact = false,
+  onAccent = false,
 }: {
   status: ThreadStatusPill;
   compact?: boolean;
+  /** Render in primary-foreground (white) for rows with a solid primary background. */
+  onAccent?: boolean;
 }) {
+  const status = onAccent
+    ? {
+        ...statusProp,
+        colorClass: "text-primary-foreground/90",
+        dotClass: "bg-primary-foreground/90",
+      }
+    : statusProp;
   if (compact) {
     return (
       <Tooltip>
