@@ -46,6 +46,7 @@ import {
 import {
   isDiffToggleShortcut,
   isTerminalClearShortcut,
+  isTerminalPasteShortcut,
   isTerminalCloseShortcut,
   isTerminalNewShortcut,
   isTerminalSplitShortcut,
@@ -536,6 +537,25 @@ export function TerminalViewport({
         isTerminalCloseShortcut(event, currentKeybindings, options) ||
         isDiffToggleShortcut(event, currentKeybindings, options)
       ) {
+        return false;
+      }
+
+      if (isTerminalPasteShortcut(event)) {
+        event.preventDefault();
+        event.stopPropagation();
+        void navigator.clipboard
+          .readText()
+          .then((text) => {
+            if (text) {
+              terminalRef.current?.paste(text);
+            }
+          })
+          .catch(() => {
+            const activeTerminal = terminalRef.current;
+            if (activeTerminal) {
+              writeSystemMessage(activeTerminal, "Clipboard read was blocked by the browser");
+            }
+          });
         return false;
       }
 
