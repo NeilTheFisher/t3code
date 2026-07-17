@@ -642,6 +642,15 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         // An explicit (re)start supersedes any queued recovered-history
         // injection from a previous fresh-session recovery.
         pendingContextInjections.delete(threadId);
+        if (effectiveResumeCursor === undefined) {
+          // No provider-side resume state is available for this (re)start —
+          // e.g. a mid-thread model switch or a restart after the session
+          // stopped without persisting a cursor. The fresh provider session
+          // starts with zero history, so queue the persisted transcript for
+          // injection into the next sendTurn. For brand-new threads the
+          // projection store has no messages and this is a no-op.
+          yield* queueContextInjectionForFreshSession(threadId);
+        }
         yield* prepareMcpSession(threadId, resolvedInstanceId);
         const session = yield* adapter
           .startSession({

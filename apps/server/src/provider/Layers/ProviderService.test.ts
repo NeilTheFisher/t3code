@@ -1010,6 +1010,171 @@ it.effect(
     }).pipe(Effect.provide(NodeServices.layer)),
 );
 
+it.effect(
+  "ProviderServiceLive injects thread history when an explicit fresh startSession replaces a session with prior turns (e.g. model switch restart)",
+  () =>
+    Effect.gen(function* () {
+      const tempDir = NodeFS.mkdtempSync(
+        NodePath.join(NodeOS.tmpdir(), "t3-provider-service-restart-inject-"),
+      );
+      const dbPath = NodePath.join(tempDir, "orchestration.sqlite");
+      const codex = makeFakeCodexAdapter();
+      const registry = makeAdapterRegistryMock({
+        [ProviderDriverKind.make("codex")]: codex.adapter,
+      });
+      const runtimeRepositoryLayer = ProviderSessionRuntime.layer.pipe(
+        Layer.provide(makeSqlitePersistenceLive(dbPath)),
+      );
+      const directoryLayer = ProviderSessionDirectoryLive.pipe(
+        Layer.provide(runtimeRepositoryLayer),
+      );
+
+      const threadId = asThreadId("thread-restart-inject");
+      const persistedMessage = (
+        role: "user" | "assistant",
+        text: string,
+        index: number,
+      ): ProjectionThreadMessage =>
+        ({
+          messageId: `msg-${index}`,
+          threadId,
+          turnId: null,
+          role,
+          text,
+          isStreaming: false,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        }) as unknown as ProjectionThreadMessage;
+      const listByThreadId = vi.fn(() =>
+        Effect.succeed([
+          persistedMessage("user", "remember the secret word is xylophone", 1),
+          persistedMessage("assistant", "understood, the secret word is xylophone", 2),
+        ]),
+      );
+      const projectionMessagesLayer = Layer.succeed(ProjectionThreadMessageRepository, {
+        upsert: () => Effect.void,
+        getByMessageId: () => Effect.succeed(Option.none()),
+        listByThreadId,
+        deleteByThreadId: () => Effect.void,
+      });
+
+      const providerLayer = makeProviderServiceLive().pipe(
+        Layer.provide(Layer.succeed(ProviderAdapterRegistry.ProviderAdapterRegistry, registry)),
+        Layer.provide(directoryLayer),
+        Layer.provide(projectionMessagesLayer),
+        Layer.provide(defaultServerSettingsLayer),
+        Layer.provide(AnalyticsService.layerTest),
+        Layer.provide(
+          Layer.succeed(
+            ProviderEventLoggers.ProviderEventLoggers,
+            ProviderEventLoggers.NoOpProviderEventLoggers,
+          ),
+        ),
+      );
+
+      yield* Effect.gen(function* () {
+        const provider = yield* ProviderService.ProviderService;
+        // Fresh (re)start with no resume cursor — the shape of a mid-thread
+        // model-switch restart or a restart after the cursor was lost.
+        yield* provider.startSession(threadId, {
+          provider: ProviderDriverKind.make("codex"),
+          providerInstanceId: codexInstanceId,
+          threadId,
+          runtimeMode: "full-access",
+        });
+        yield* provider.sendTurn({
+          threadId,
+          input: "what was the secret word?",
+          attachments: [],
+        });
+        yield* provider.sendTurn({
+          threadId,
+          input: "second turn",
+          attachments: [],
+        });
+      }).pipe(Effect.provide(providerLayer));
+
+      assert.equal(listByThreadId.mock.calls.length, 1);
+      assert.equal(codex.sendTurn.mock.calls.length, 2);
+      const firstTurn = codex.sendTurn.mock.calls[0]?.[0] as { input?: string } | undefined;
+      assert.ok(firstTurn?.input?.startsWith("[Recovered conversation history follows"));
+      assert.include(firstTurn?.input, "User:\nremember the secret word is xylophone");
+      assert.include(firstTurn?.input, "Assistant:\nunderstood, the secret word is xylophone");
+      assert.ok(firstTurn?.input?.endsWith("what was the secret word?"));
+      const secondTurn = codex.sendTurn.mock.calls[1]?.[0] as { input?: string } | undefined;
+      assert.equal(secondTurn?.input, "second turn");
+
+      NodeFS.rmSync(tempDir, { recursive: true, force: true });
+    }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect(
+  "ProviderServiceLive does not inject history when startSession resumes with a cursor",
+  () =>
+    Effect.gen(function* () {
+      const tempDir = NodeFS.mkdtempSync(
+        NodePath.join(NodeOS.tmpdir(), "t3-provider-service-resume-noinject-"),
+      );
+      const dbPath = NodePath.join(tempDir, "orchestration.sqlite");
+      const codex = makeFakeCodexAdapter();
+      const registry = makeAdapterRegistryMock({
+        [ProviderDriverKind.make("codex")]: codex.adapter,
+      });
+      const runtimeRepositoryLayer = ProviderSessionRuntime.layer.pipe(
+        Layer.provide(makeSqlitePersistenceLive(dbPath)),
+      );
+      const directoryLayer = ProviderSessionDirectoryLive.pipe(
+        Layer.provide(runtimeRepositoryLayer),
+      );
+
+      const threadId = asThreadId("thread-resume-noinject");
+      const listByThreadId = vi.fn(() => Effect.succeed([]));
+      const projectionMessagesLayer = Layer.succeed(ProjectionThreadMessageRepository, {
+        upsert: () => Effect.void,
+        getByMessageId: () => Effect.succeed(Option.none()),
+        listByThreadId,
+        deleteByThreadId: () => Effect.void,
+      });
+
+      const providerLayer = makeProviderServiceLive().pipe(
+        Layer.provide(Layer.succeed(ProviderAdapterRegistry.ProviderAdapterRegistry, registry)),
+        Layer.provide(directoryLayer),
+        Layer.provide(projectionMessagesLayer),
+        Layer.provide(defaultServerSettingsLayer),
+        Layer.provide(AnalyticsService.layerTest),
+        Layer.provide(
+          Layer.succeed(
+            ProviderEventLoggers.ProviderEventLoggers,
+            ProviderEventLoggers.NoOpProviderEventLoggers,
+          ),
+        ),
+      );
+
+      yield* Effect.gen(function* () {
+        const provider = yield* ProviderService.ProviderService;
+        yield* provider.startSession(threadId, {
+          provider: ProviderDriverKind.make("codex"),
+          providerInstanceId: codexInstanceId,
+          threadId,
+          resumeCursor: { sessionId: "existing-session" },
+          runtimeMode: "full-access",
+        });
+        yield* provider.sendTurn({
+          threadId,
+          input: "continue where we left off",
+          attachments: [],
+        });
+      }).pipe(Effect.provide(providerLayer));
+
+      // Resume path must not touch the projection store or mutate the input.
+      assert.equal(listByThreadId.mock.calls.length, 0);
+      const firstTurn = codex.sendTurn.mock.calls[0]?.[0] as { input?: string } | undefined;
+      assert.equal(firstTurn?.input, "continue where we left off");
+
+      NodeFS.rmSync(tempDir, { recursive: true, force: true });
+    }).pipe(Effect.provide(NodeServices.layer)),
+);
+
 routing.layer("ProviderServiceLive routing", (it) => {
   it.effect("routes provider operations and rollback conversation", () =>
     Effect.gen(function* () {
