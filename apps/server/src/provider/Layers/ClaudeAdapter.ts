@@ -157,8 +157,18 @@ interface PendingApproval {
 
 interface PendingUserInput {
   readonly questions: ReadonlyArray<UserInputQuestion>;
-  readonly answers: Deferred.Deferred<ProviderUserInputAnswers>;
+  readonly resolution: Deferred.Deferred<PendingUserInputResolution>;
 }
+
+type PendingUserInputResolution =
+  | {
+      readonly _tag: "answered";
+      readonly answers: ProviderUserInputAnswers;
+    }
+  | {
+      readonly _tag: "cancelled";
+      readonly answers: ProviderUserInputAnswers;
+    };
 
 interface ToolInFlight {
   readonly itemId: string;
@@ -3054,6 +3064,30 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     }
     context.pendingApprovals.clear();
 
+    for (const [requestId, pending] of context.pendingUserInputs) {
+      const answers = {} as ProviderUserInputAnswers;
+      const resolution: PendingUserInputResolution = { _tag: "cancelled", answers };
+      yield* Deferred.succeed(pending.resolution, resolution);
+      const stamp = yield* makeEventStamp();
+      yield* offerRuntimeEvent({
+        type: "user-input.resolved",
+        eventId: stamp.eventId,
+        provider: PROVIDER,
+        createdAt: stamp.createdAt,
+        threadId: context.session.threadId,
+        ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
+        requestId: asRuntimeRequestId(requestId),
+        payload: { answers },
+        providerRefs: nativeProviderRefs(context),
+        raw: {
+          source: "claude.sdk.permission",
+          method: "canUseTool/AskUserQuestion/cancelled",
+          payload: {},
+        },
+      });
+    }
+    context.pendingUserInputs.clear();
+
     if (context.turnState) {
       yield* completeTurn(context, "interrupted", "Session stopped.");
     }
@@ -3230,11 +3264,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           }),
         );
 
-        const answersDeferred = yield* Deferred.make<ProviderUserInputAnswers>();
-        let aborted = false;
+        const resolutionDeferred = yield* Deferred.make<PendingUserInputResolution>();
         const pendingInput: PendingUserInput = {
           questions,
-          answers: answersDeferred,
+          resolution: resolutionDeferred,
         };
 
         // Emit user-input.requested so the UI can present the questions.
@@ -3272,44 +3305,50 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           if (!pendingUserInputs.has(requestId)) {
             return;
           }
-          aborted = true;
           pendingUserInputs.delete(requestId);
-          runFork(Deferred.succeed(answersDeferred, {} as ProviderUserInputAnswers));
+          const resolution: PendingUserInputResolution = {
+            _tag: "cancelled",
+            answers: {} as ProviderUserInputAnswers,
+          };
+          runFork(Deferred.succeed(resolutionDeferred, resolution));
         };
         callbackOptions.signal.addEventListener("abort", onAbort, {
           once: true,
         });
 
         // Block until the user provides answers.
-        const answers = yield* Deferred.await(answersDeferred);
+        const resolution = yield* Deferred.await(resolutionDeferred);
+        const answers = resolution.answers;
         pendingUserInputs.delete(requestId);
 
-        // Emit user-input.resolved so the UI knows the interaction completed.
-        const resolvedStamp = yield* makeEventStamp();
-        yield* offerRuntimeEvent({
-          type: "user-input.resolved",
-          eventId: resolvedStamp.eventId,
-          provider: PROVIDER,
-          createdAt: resolvedStamp.createdAt,
-          threadId: context.session.threadId,
-          ...(context.turnState
-            ? {
-                turnId: asCanonicalTurnId(context.turnState.turnId),
-              }
-            : {}),
-          requestId: asRuntimeRequestId(requestId),
-          payload: { answers },
-          providerRefs: nativeProviderRefs(context, {
-            providerItemId: callbackOptions.toolUseID,
-          }),
-          raw: {
-            source: "claude.sdk.permission",
-            method: "canUseTool/AskUserQuestion/resolved",
+        if (!(context.stopped && resolution._tag === "cancelled")) {
+          // Emit user-input.resolved so the UI knows the interaction completed.
+          const resolvedStamp = yield* makeEventStamp();
+          yield* offerRuntimeEvent({
+            type: "user-input.resolved",
+            eventId: resolvedStamp.eventId,
+            provider: PROVIDER,
+            createdAt: resolvedStamp.createdAt,
+            threadId: context.session.threadId,
+            ...(context.turnState
+              ? {
+                  turnId: asCanonicalTurnId(context.turnState.turnId),
+                }
+              : {}),
+            requestId: asRuntimeRequestId(requestId),
             payload: { answers },
-          },
-        });
+            providerRefs: nativeProviderRefs(context, {
+              providerItemId: callbackOptions.toolUseID,
+            }),
+            raw: {
+              source: "claude.sdk.permission",
+              method: "canUseTool/AskUserQuestion/resolved",
+              payload: { answers },
+            },
+          });
+        }
 
-        if (aborted) {
+        if (resolution._tag === "cancelled") {
           return {
             behavior: "deny",
             message: "User cancelled tool execution.",
@@ -3880,7 +3919,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     }
 
     context.pendingUserInputs.delete(requestId);
-    yield* Deferred.succeed(pending.answers, answers);
+    const resolution: PendingUserInputResolution = { _tag: "answered", answers };
+    yield* Deferred.succeed(pending.resolution, resolution);
   });
 
   const stopSession: ClaudeAdapterShape["stopSession"] = Effect.fn("stopSession")(
