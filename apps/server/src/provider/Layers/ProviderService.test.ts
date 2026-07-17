@@ -52,6 +52,10 @@ import { ProviderSessionDirectoryLive } from "./ProviderSessionDirectory.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as ProviderSessionRuntime from "../../persistence/ProviderSessionRuntime.ts";
 import {
+  ProjectionThreadMessageRepository,
+  type ProjectionThreadMessage,
+} from "../../persistence/Services/ProjectionThreadMessages.ts";
+import {
   makeSqlitePersistenceLive,
   SqlitePersistenceMemory,
 } from "../../persistence/Layers/Sqlite.ts";
@@ -900,6 +904,107 @@ it.effect(
       assert.equal(startPayload?.threadId, "thread-no-resume-state");
       assert.equal(startPayload?.resumeCursor, undefined);
       assert.equal(codex.sendTurn.mock.calls.length, 1);
+
+      NodeFS.rmSync(tempDir, { recursive: true, force: true });
+    }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect(
+  "ProviderServiceLive injects recovered thread history into the first turn of a fresh recovered session",
+  () =>
+    Effect.gen(function* () {
+      const tempDir = NodeFS.mkdtempSync(
+        NodePath.join(NodeOS.tmpdir(), "t3-provider-service-ctx-inject-"),
+      );
+      const dbPath = NodePath.join(tempDir, "orchestration.sqlite");
+      const codex = makeFakeCodexAdapter();
+      const registry = makeAdapterRegistryMock({
+        [ProviderDriverKind.make("codex")]: codex.adapter,
+      });
+      const runtimeRepositoryLayer = ProviderSessionRuntime.layer.pipe(
+        Layer.provide(makeSqlitePersistenceLive(dbPath)),
+      );
+      const directoryLayer = ProviderSessionDirectoryLive.pipe(
+        Layer.provide(runtimeRepositoryLayer),
+      );
+
+      const threadId = asThreadId("thread-ctx-inject");
+      yield* Effect.gen(function* () {
+        const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
+        yield* directory.upsert({
+          provider: ProviderDriverKind.make("codex"),
+          providerInstanceId: codexInstanceId,
+          threadId,
+          runtimeMode: "full-access",
+        });
+      }).pipe(Effect.provide(directoryLayer));
+
+      const persistedMessage = (
+        role: "user" | "assistant",
+        text: string,
+        index: number,
+      ): ProjectionThreadMessage =>
+        ({
+          messageId: `msg-${index}`,
+          threadId,
+          turnId: null,
+          role,
+          text,
+          isStreaming: false,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        }) as unknown as ProjectionThreadMessage;
+      const listByThreadId = vi.fn(() =>
+        Effect.succeed([
+          persistedMessage("user", "what is the plan?", 1),
+          persistedMessage("assistant", "we agreed on plan X", 2),
+        ]),
+      );
+      const projectionMessagesLayer = Layer.succeed(ProjectionThreadMessageRepository, {
+        upsert: () => Effect.void,
+        getByMessageId: () => Effect.succeed(Option.none()),
+        listByThreadId,
+        deleteByThreadId: () => Effect.void,
+      });
+
+      const providerLayer = makeProviderServiceLive().pipe(
+        Layer.provide(Layer.succeed(ProviderAdapterRegistry.ProviderAdapterRegistry, registry)),
+        Layer.provide(directoryLayer),
+        Layer.provide(projectionMessagesLayer),
+        Layer.provide(defaultServerSettingsLayer),
+        Layer.provide(AnalyticsService.layerTest),
+        Layer.provide(
+          Layer.succeed(
+            ProviderEventLoggers.ProviderEventLoggers,
+            ProviderEventLoggers.NoOpProviderEventLoggers,
+          ),
+        ),
+      );
+
+      yield* Effect.gen(function* () {
+        const provider = yield* ProviderService.ProviderService;
+        yield* provider.sendTurn({
+          threadId,
+          input: "continue after restart",
+          attachments: [],
+        });
+        yield* provider.sendTurn({
+          threadId,
+          input: "second turn",
+          attachments: [],
+        });
+      }).pipe(Effect.provide(providerLayer));
+
+      assert.equal(listByThreadId.mock.calls.length, 1);
+      assert.equal(codex.sendTurn.mock.calls.length, 2);
+      const firstTurn = codex.sendTurn.mock.calls[0]?.[0] as { input?: string } | undefined;
+      assert.ok(firstTurn?.input?.startsWith("[Recovered conversation history follows"));
+      assert.include(firstTurn?.input, "User:\nwhat is the plan?");
+      assert.include(firstTurn?.input, "Assistant:\nwe agreed on plan X");
+      assert.ok(firstTurn?.input?.endsWith("continue after restart"));
+      // The preamble is injected exactly once.
+      const secondTurn = codex.sendTurn.mock.calls[1]?.[0] as { input?: string } | undefined;
+      assert.equal(secondTurn?.input, "second turn");
 
       NodeFS.rmSync(tempDir, { recursive: true, force: true });
     }).pipe(Effect.provide(NodeServices.layer)),
