@@ -802,6 +802,124 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
     }),
   );
 
+  it.effect("routes child-session events into parentItemId-tagged subagent items", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-subagent");
+      runtimeMock.state.subscribedEvents = [
+        // Main-session task tool part exposing the spawned child session id.
+        {
+          type: "message.part.updated",
+          properties: {
+            sessionID: "http://127.0.0.1:9999/session",
+            part: {
+              id: "part-task-main",
+              sessionID: "http://127.0.0.1:9999/session",
+              messageID: "msg-main-1",
+              type: "tool",
+              callID: "call-task-1",
+              tool: "task",
+              state: {
+                status: "running",
+                input: { description: "Investigate" },
+                title: "Investigate",
+                metadata: { sessionID: "child-session-1" },
+                time: { start: 1 },
+              },
+            },
+          },
+        },
+        // Child session announced with parentID pointing at the main session.
+        {
+          type: "session.created",
+          properties: {
+            info: {
+              id: "child-session-1",
+              parentID: "http://127.0.0.1:9999/session",
+              title: "Subagent",
+            },
+          },
+        },
+        // Child assistant message + completed text part.
+        {
+          type: "message.updated",
+          properties: {
+            sessionID: "child-session-1",
+            info: { id: "msg-child-1", role: "assistant" },
+          },
+        },
+        {
+          type: "message.part.updated",
+          properties: {
+            sessionID: "child-session-1",
+            part: {
+              id: "part-child-text",
+              sessionID: "child-session-1",
+              messageID: "msg-child-1",
+              type: "text",
+              text: "Child answer",
+              time: { start: 1, end: 2 },
+            },
+          },
+        },
+        // Child tool part completion.
+        {
+          type: "message.part.updated",
+          properties: {
+            sessionID: "child-session-1",
+            part: {
+              id: "part-child-tool",
+              sessionID: "child-session-1",
+              messageID: "msg-child-1",
+              type: "tool",
+              callID: "child-call-1",
+              tool: "bash",
+              state: {
+                status: "completed",
+                input: { command: "ls" },
+                output: "file-a.ts",
+                title: "ls",
+                metadata: {},
+                time: { start: 1, end: 2 },
+              },
+            },
+          },
+        },
+      ];
+
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.threadId === threadId && event.parentItemId !== undefined),
+        Stream.take(2),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      const events = Array.from(yield* Fiber.join(eventsFiber).pipe(Effect.timeout("1 second")));
+      NodeAssert.equal(events.length, 2);
+      for (const event of events) {
+        NodeAssert.equal(event.type, "item.updated");
+        NodeAssert.equal(String(event.parentItemId), "call-task-1");
+      }
+      const [textEvent, toolEvent] = events;
+      if (textEvent?.type === "item.updated") {
+        NodeAssert.equal(String(textEvent.itemId), "part-child-text");
+        NodeAssert.equal(textEvent.payload.itemType, "assistant_message");
+        NodeAssert.equal(textEvent.payload.detail, "Child answer");
+      }
+      if (toolEvent?.type === "item.updated") {
+        NodeAssert.equal(String(toolEvent.itemId), "child-call-1");
+        NodeAssert.equal(toolEvent.payload.itemType, "command_execution");
+        NodeAssert.equal(toolEvent.payload.status, "completed");
+      }
+    }),
+  );
+
   it.effect("writes provider-native observability records using the session thread id", () =>
     Effect.gen(function* () {
       const nativeEvents: Array<{
