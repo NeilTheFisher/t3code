@@ -22,6 +22,8 @@ export const ReviewDiffPreviewSource = Schema.Struct({
   diff: Schema.String,
   diffHash: TrimmedNonEmptyString,
   truncated: Schema.Boolean,
+  /** Set when the underlying git command failed; the diff is empty, not clean. */
+  error: Schema.optional(TrimmedNonEmptyString),
 });
 export type ReviewDiffPreviewSource = typeof ReviewDiffPreviewSource.Type;
 

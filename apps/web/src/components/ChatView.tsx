@@ -209,6 +209,7 @@ import {
   deriveAgentPanelModel,
   foldSubagentActivities,
 } from "@t3tools/client-runtime/state/subagentRuntime";
+import { WebPageSurface } from "./WebPageSurface";
 import { BranchToolbar } from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
@@ -1915,6 +1916,8 @@ export default function ChatView(props: ChatViewProps) {
     [activeKnownTerminalIds, panelTerminalIds],
   );
   const previewPanelOpen = activeRightPanelKind === "preview" && isPreviewSupportedInRuntime();
+  // Desktop uses native preview hosts; the web client falls back to an iframe surface.
+  const browserAvailable = true;
   const rightPanelOpen = rightPanelState.isOpen;
   const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
     usePanelAnimationSettings();
@@ -4097,6 +4100,11 @@ export default function ChatView(props: ChatViewProps) {
   const createBrowserSurface = useCallback(
     (profileId?: string) => {
       if (!activeThreadRef) return;
+      if (!isPreviewSupportedInRuntime()) {
+        // Web client fallback: iframe-based browser surface.
+        useRightPanelStore.getState().openWebPage(activeThreadRef);
+        return;
+      }
       void addBrowserSurface({
         threadRef: activeThreadRef,
         openPreview,
@@ -8010,6 +8018,12 @@ export default function ChatView(props: ChatViewProps) {
           }}
         />
       </Suspense>
+    ) : renderedRightPanelSurface?.kind === "webpage" ? (
+      <WebPageSurface
+        key={scopedThreadKey(activeThreadRef)}
+        threadRef={activeThreadRef}
+        url={renderedRightPanelSurface.url}
+      />
     ) : renderedRightPanelSurface?.kind === "terminal" ? (
       <PersistentThreadTerminalPanel
         visible={rightPanelOpen}
@@ -8655,7 +8669,7 @@ export default function ChatView(props: ChatViewProps) {
           onAddPullRequest={addPullRequestSurface}
           onAddPullRequests={addPullRequestsSurface}
           onAddAgents={addAgentsSurface}
-          browserAvailable={isPreviewSupportedInRuntime()}
+          browserAvailable
           terminalAvailable={activeProject !== null}
           diffAvailable={isServerThread && isGitRepo}
           filesAvailable={activeProject !== null}
@@ -8707,7 +8721,7 @@ export default function ChatView(props: ChatViewProps) {
             onAddPullRequest={addPullRequestSurface}
             onAddPullRequests={addPullRequestsSurface}
             onAddAgents={addAgentsSurface}
-            browserAvailable={isPreviewSupportedInRuntime()}
+            browserAvailable
             terminalAvailable={activeProject !== null}
             diffAvailable={isServerThread && isGitRepo}
             filesAvailable={activeProject !== null}
