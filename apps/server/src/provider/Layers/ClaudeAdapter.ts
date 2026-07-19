@@ -1117,7 +1117,7 @@ function summarizeToolRequest(toolName: string, input: Record<string, unknown>):
   const commandValue = input.command ?? input.cmd;
   const command = typeof commandValue === "string" ? commandValue : undefined;
   if (command && command.trim().length > 0) {
-    return `${toolName}: ${command.trim().slice(0, 400)}`;
+    return `${toolName}: ${command.trim().slice(0, 16000)}`;
   }
 
   // For agent/subagent tools, prefer the human-readable description or prompt
@@ -1128,17 +1128,17 @@ function summarizeToolRequest(toolName: string, input: Record<string, unknown>):
     const description =
       typeof input.description === "string" ? input.description.trim() : undefined;
     const prompt = typeof input.prompt === "string" ? input.prompt.trim() : undefined;
-    const label = description || (prompt ? prompt.slice(0, 200) : undefined);
+    const label = description || (prompt ? prompt.slice(0, 2000) : undefined);
     if (label) {
       return label;
     }
   }
 
   const serialized = encodeJsonStringForDiagnostics(input) ?? "[unserializable input]";
-  if (serialized.length <= 400) {
+  if (serialized.length <= 16000) {
     return `${toolName}: ${serialized}`;
   }
-  return `${toolName}: ${serialized.slice(0, 397)}...`;
+  return `${toolName}: ${serialized.slice(0, 15997)}...`;
 }
 
 function titleForTool(itemType: CanonicalItemType): string {
@@ -1584,7 +1584,7 @@ function previewUnknownSdkContent(message: unknown): string | undefined {
     return undefined;
   }
   const joined = parts.join(" · ");
-  return joined.length > 280 ? `${joined.slice(0, 279)}…` : joined;
+  return joined.length > 2000 ? `${joined.slice(0, 1999)}…` : joined;
 }
 
 function describeUnknownSdkMessage(kind: string, message: unknown): string {

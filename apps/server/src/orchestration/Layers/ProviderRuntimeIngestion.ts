@@ -204,11 +204,11 @@ function maxCheckpointTurnCount(
   return maxTurnCount;
 }
 
-function truncateDetail(value: string, limit = 180): string {
+function truncateDetail(value: string, limit = 16000): string {
   return value.length > limit ? `${value.slice(0, limit - 3)}...` : value;
 }
 
-const SUBAGENT_DETAIL_LIMIT = 4000;
+const SUBAGENT_DETAIL_LIMIT = 16000;
 
 function subagentItemRole(itemType: string): "assistant" | "user" | "tool" {
   if (isToolLifecycleItemType(itemType)) {
