@@ -1424,6 +1424,7 @@ function WorkGroupToggleTimelineRow({
 }) {
   const ctx = use(TimelineRowCtx);
   const labelNoun = row.onlyToolEntries ? "tool call" : "log entry";
+  const labelNounPlural = row.onlyToolEntries ? "tool calls" : "log entries";
 
   return (
     <button
@@ -1450,8 +1451,7 @@ function WorkGroupToggleTimelineRow({
         </span>
       ) : (
         <span className="font-medium text-foreground/82">
-          +{row.hiddenCount} previous {labelNoun}
-          {row.hiddenCount === 1 ? "" : "s"}
+          +{row.hiddenCount} previous {row.hiddenCount === 1 ? labelNoun : labelNounPlural}
         </span>
       )}
     </button>
