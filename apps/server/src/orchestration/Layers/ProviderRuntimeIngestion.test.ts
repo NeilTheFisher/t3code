@@ -1254,9 +1254,9 @@ describe("ProviderRuntimeIngestion", () => {
     expect(toolPayload?.role).toBe("tool");
     expect(toolPayload?.parentItemId).toBe("parent-tool-1");
     expect(toolPayload?.data).toEqual({ toolName: "Bash", input: { command: "ls" } });
-    // Server-side truncation uses the generous subagent cap (~4000 chars).
+    // Server-side truncation uses the generous subagent cap (~16000 chars).
     expect(typeof toolPayload?.detail).toBe("string");
-    expect((toolPayload?.detail as string).length).toBeLessThanOrEqual(4000);
+    expect((toolPayload?.detail as string).length).toBeLessThanOrEqual(16000);
     expect((toolPayload?.detail as string).length).toBeGreaterThan(1000);
   });
 
