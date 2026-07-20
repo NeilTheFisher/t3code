@@ -1146,6 +1146,156 @@ describe("deriveWorkLogEntries", () => {
     ]);
   });
 
+  it("extracts OpenCode edit inputs and provider patch for inline preview", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "opencode-edit",
+        kind: "tool.completed",
+        summary: "File change",
+        payload: {
+          itemType: "file_change",
+          detail: "Edit applied successfully.",
+          data: {
+            tool: "edit",
+            state: {
+              status: "completed",
+              input: {
+                filePath: "/home/user/project/src/index.ts",
+                oldString: "const a = 1;",
+                newString: "const a = 2;",
+              },
+              metadata: {
+                filediff: {
+                  file: "/home/user/project/src/index.ts",
+                  patch:
+                    "Index: /home/user/project/src/index.ts\n@@ -1 +1 @@\n-const a = 1;\n+const a = 2;",
+                  additions: 1,
+                  deletions: 1,
+                },
+              },
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities);
+    expect(entry?.fileChange).toEqual({
+      filePath: "/home/user/project/src/index.ts",
+      oldString: "const a = 1;",
+      newString: "const a = 2;",
+      patch: "Index: /home/user/project/src/index.ts\n@@ -1 +1 @@\n-const a = 1;\n+const a = 2;",
+    });
+  });
+
+  it("extracts OpenCode write content for inline preview", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "opencode-write",
+        kind: "tool.completed",
+        summary: "File change",
+        payload: {
+          itemType: "file_change",
+          detail: "Wrote file successfully.",
+          data: {
+            tool: "write",
+            state: {
+              status: "completed",
+              input: {
+                filePath: "/home/user/project/notes.md",
+                content: "# Notes\nhello world\n",
+              },
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities);
+    expect(entry?.fileChange).toEqual({
+      filePath: "/home/user/project/notes.md",
+      content: "# Notes\nhello world\n",
+    });
+  });
+
+  it("extracts Claude edit inputs for inline preview", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "claude-edit",
+        kind: "tool.completed",
+        summary: "File change",
+        payload: {
+          itemType: "file_change",
+          data: {
+            toolName: "Edit",
+            input: {
+              file_path: "/home/user/project/src/app.ts",
+              old_string: "foo()",
+              new_string: "bar()",
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities);
+    expect(entry?.fileChange).toEqual({
+      filePath: "/home/user/project/src/app.ts",
+      oldString: "foo()",
+      newString: "bar()",
+    });
+  });
+
+  it("keeps edit inputs when a later lifecycle update only adds the patch", () => {
+    const shared = {
+      itemType: "file_change",
+      data: {
+        tool: "edit",
+        state: {
+          input: {
+            filePath: "/home/user/project/src/index.ts",
+            oldString: "const a = 1;",
+            newString: "const a = 2;",
+          },
+        },
+      },
+    };
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "edit-start",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "tool.updated",
+        summary: "File change",
+        payload: { ...shared, status: "inProgress" },
+      }),
+      makeActivity({
+        id: "edit-complete",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "tool.completed",
+        summary: "File change",
+        payload: {
+          itemType: "file_change",
+          status: "completed",
+          data: {
+            tool: "edit",
+            state: {
+              status: "completed",
+              metadata: {
+                filediff: { patch: "Index: x\n@@ -1 +1 @@\n-a\n+b" },
+              },
+            },
+          },
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities);
+    const entry = entries.find((e) => e.itemType === "file_change");
+    expect(entry?.fileChange?.oldString).toBe("const a = 1;");
+    expect(entry?.fileChange?.newString).toBe("const a = 2;");
+    expect(entry?.fileChange?.patch).toBe("Index: x\n@@ -1 +1 @@\n-a\n+b");
+  });
+
   it("drops duplicated tool detail when it only repeats the title", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({

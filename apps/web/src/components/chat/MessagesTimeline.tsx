@@ -2176,6 +2176,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   workspaceRoot: string | undefined;
 }) {
   const { workEntry, workspaceRoot } = props;
+  const ctx = use(TimelineRowCtx);
   const activity = use(TimelineRowActivityCtx);
   const [expanded, setExpanded] = useState(false);
   const iconConfig = workToneIcon(workEntry.tone);
@@ -2198,8 +2199,34 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
       : undefined;
   const subagentReport =
     workEntry.itemType === "collab_agent_tool_call" ? workEntry.subagentReport?.trim() : undefined;
+
+  // Inline before/after preview for file changes, extracted from the tool payload.
+  const isFileChange =
+    workEntry.itemType === "file_change" || workEntry.requestKind === "file-change";
+  const fileChange = isFileChange ? workEntry.fileChange : undefined;
+  const renderablePatch = useMemo(() => {
+    if (!expanded || !fileChange?.patch) return null;
+    // OpenCode's filediff.patch is partial (hunks in source-file coordinates),
+    // so compact the hunk offsets or the virtualizer renders the hunk thousands
+    // of lines below the fold — i.e. an empty box.
+    return getRenderablePatch(fileChange.patch, `inline-diff:${workEntry.id}`, {
+      compactPartialHunkOffsets: true,
+    });
+  }, [expanded, fileChange?.patch, workEntry.id]);
+  const showEditFallback =
+    expanded &&
+    isFileChange &&
+    !renderablePatch &&
+    fileChange?.oldString !== undefined &&
+    fileChange.newString !== undefined;
+  const showWriteContent =
+    expanded && isFileChange && !renderablePatch && fileChange?.content !== undefined;
+
   const canExpand =
-    expandedBody !== null || subagentTranscript !== undefined || Boolean(subagentReport);
+    expandedBody !== null ||
+    subagentTranscript !== undefined ||
+    Boolean(subagentReport) ||
+    Boolean(fileChange);
   const showFailedIndicator = workEntryIndicatesToolFailure(workEntry);
   const showDestructiveRowStyle =
     showFailedIndicator &&
@@ -2368,6 +2395,82 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
               </div>
               <pre className="max-h-64 cursor-text overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-muted-foreground select-text">
                 {subagentReport}
+              </pre>
+            </div>
+          ) : null}
+          {renderablePatch && renderablePatch.kind === "files" ? (
+            <div className="max-h-96 overflow-auto rounded-md border border-border/50 bg-background/50">
+              {renderablePatch.files.map((fileDiff) => {
+                const parsedPath = resolveFileDiffPath(fileDiff);
+                // Pierre mangles absolute paths without a/ b/ prefixes; prefer
+                // the real path from the tool payload when there's one file.
+                const filePath =
+                  renderablePatch.files.length === 1 && fileChange?.filePath
+                    ? fileChange.filePath
+                    : parsedPath;
+                const fileKey = fileDiff.cacheKey ?? parsedPath;
+                return (
+                  <div key={fileKey} className="border-b border-border/30 last:border-b-0">
+                    <div className="flex items-center gap-2 border-b border-border/30 bg-muted/30 px-2 py-1">
+                      <span className="font-mono text-[10px] text-muted-foreground/70">
+                        {fileDiff.type === "new" ? "A" : fileDiff.type === "deleted" ? "D" : "M"}
+                      </span>
+                      <span className="truncate font-mono text-[11px] text-muted-foreground/80">
+                        {formatWorkspaceRelativePath(filePath, workspaceRoot)}
+                      </span>
+                    </div>
+                    <div className="diff-render-surface">
+                      <FileDiff
+                        fileDiff={fileDiff}
+                        options={{
+                          collapsed: false,
+                          diffStyle: "unified",
+                          theme: resolveDiffThemeName(ctx.resolvedTheme),
+                        }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
+          {renderablePatch && renderablePatch.kind === "raw" ? (
+            <div className="max-h-64 overflow-auto rounded-md border border-border/50 bg-background/50 p-2">
+              <p className="mb-1 text-[10px] text-muted-foreground/70">{renderablePatch.reason}</p>
+              <pre className="cursor-text whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-muted-foreground select-text">
+                {renderablePatch.text}
+              </pre>
+            </div>
+          ) : null}
+          {showEditFallback ? (
+            <div className="flex flex-col gap-1.5">
+              <div className="max-h-48 overflow-auto rounded-md border border-destructive/30 bg-destructive/5">
+                <div className="border-b border-destructive/20 bg-destructive/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-destructive/80">
+                  Before
+                </div>
+                <pre className="cursor-text whitespace-pre-wrap break-words px-2 py-1 font-mono text-[11px] leading-relaxed text-muted-foreground select-text">
+                  {fileChange!.oldString}
+                </pre>
+              </div>
+              <div className="max-h-48 overflow-auto rounded-md border border-success/30 bg-success/5">
+                <div className="border-b border-success/20 bg-success/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-success/80">
+                  After
+                </div>
+                <pre className="cursor-text whitespace-pre-wrap break-words px-2 py-1 font-mono text-[11px] leading-relaxed text-muted-foreground select-text">
+                  {fileChange!.newString}
+                </pre>
+              </div>
+            </div>
+          ) : null}
+          {showWriteContent ? (
+            <div className="max-h-96 overflow-auto rounded-md border border-border/50 bg-background/50">
+              {fileChange!.filePath ? (
+                <div className="sticky top-0 border-b border-border/30 bg-muted/30 px-2 py-1 font-mono text-[11px] text-muted-foreground/80">
+                  {formatWorkspaceRelativePath(fileChange!.filePath, workspaceRoot)}
+                </div>
+              ) : null}
+              <pre className="cursor-text whitespace-pre-wrap break-words px-2 py-1 font-mono text-[11px] leading-relaxed text-muted-foreground select-text">
+                {fileChange!.content}
               </pre>
             </div>
           ) : null}
