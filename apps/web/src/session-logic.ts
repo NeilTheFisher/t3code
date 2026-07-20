@@ -66,6 +66,19 @@ export interface WorkLogSubagentTranscriptItem {
   toolName?: string;
 }
 
+/** Preview data extracted from a file_change tool payload (Edit/Write inputs + provider patch). */
+export interface WorkLogFileChangePreview {
+  filePath?: string;
+  /** Edit tool: text replaced. */
+  oldString?: string;
+  /** Edit tool: replacement text. */
+  newString?: string;
+  /** Write tool: full content written. */
+  content?: string;
+  /** Provider-supplied unified patch (e.g. OpenCode metadata.filediff.patch). */
+  patch?: string;
+}
+
 export interface WorkLogEntry {
   id: string;
   createdAt: string;
@@ -90,6 +103,8 @@ export interface WorkLogEntry {
   subagentReport?: string;
   /** Nested subagent conversation grouped from `subagent.item` activities. */
   subagentTranscript?: ReadonlyArray<WorkLogSubagentTranscriptItem>;
+  /** Edit/Write inputs and provider patch for inline before/after preview. */
+  fileChange?: WorkLogFileChangePreview;
 }
 
 interface DerivedWorkLogEntry extends WorkLogEntry {
@@ -815,6 +830,12 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
       entry.toolData = data.item;
     }
   }
+  if (itemType === "file_change") {
+    const fileChange = extractFileChangePreview(payload);
+    if (fileChange) {
+      entry.fileChange = fileChange;
+    }
+  }
   if (itemType === "collab_agent_tool_call") {
     const data = asRecord(payload?.data);
     const input = asRecord(data?.input);
@@ -924,6 +945,7 @@ function mergeDerivedWorkLogEntries(
   const resultToolUseId = next.resultToolUseId ?? previous.resultToolUseId;
   const subagentPrompt = next.subagentPrompt ?? previous.subagentPrompt;
   const subagentReport = next.subagentReport ?? previous.subagentReport;
+  const fileChange = mergeFileChangePreview(previous.fileChange, next.fileChange);
   return {
     ...previous,
     ...next,
@@ -942,6 +964,27 @@ function mergeDerivedWorkLogEntries(
     ...(resultToolUseId ? { resultToolUseId } : {}),
     ...(subagentPrompt ? { subagentPrompt } : {}),
     ...(subagentReport ? { subagentReport } : {}),
+    ...(fileChange ? { fileChange } : {}),
+  };
+}
+
+function mergeFileChangePreview(
+  previous: WorkLogFileChangePreview | undefined,
+  next: WorkLogFileChangePreview | undefined,
+): WorkLogFileChangePreview | undefined {
+  if (!previous) return next;
+  if (!next) return previous;
+  const filePath = next.filePath ?? previous.filePath;
+  const oldString = next.oldString ?? previous.oldString;
+  const newString = next.newString ?? previous.newString;
+  const content = next.content ?? previous.content;
+  const patch = next.patch ?? previous.patch;
+  return {
+    ...(filePath ? { filePath } : {}),
+    ...(oldString !== undefined ? { oldString } : {}),
+    ...(newString !== undefined ? { newString } : {}),
+    ...(content !== undefined ? { content } : {}),
+    ...(patch ? { patch } : {}),
   };
 }
 
@@ -1192,6 +1235,59 @@ function extractToolCommand(payload: Record<string, unknown> | null): {
 
 function extractToolTitle(payload: Record<string, unknown> | null): string | null {
   return asTrimmedString(payload?.title);
+}
+
+/**
+ * Pull Edit/Write inputs and any provider-supplied patch out of a file_change
+ * payload. Handles both adapter shapes:
+ * - OpenCode: `data.state.input.{filePath,oldString,newString,content}` and
+ *   `data.state.metadata.filediff.patch` (or `metadata.diff`)
+ * - Claude:   `data.input.{file_path,old_string,new_string,content}`
+ */
+function extractFileChangePreview(
+  payload: Record<string, unknown> | null,
+): WorkLogFileChangePreview | null {
+  const data = asRecord(payload?.data);
+  const state = asRecord(data?.state);
+  const stateInput = asRecord(state?.input);
+  const dataInput = asRecord(data?.input);
+  const input = stateInput ?? dataInput;
+
+  const filePath = input
+    ? (asTrimmedString(input.filePath) ?? asTrimmedString(input.file_path) ?? undefined)
+    : undefined;
+  const oldString =
+    typeof input?.oldString === "string"
+      ? input.oldString
+      : typeof input?.old_string === "string"
+        ? input.old_string
+        : undefined;
+  const newString =
+    typeof input?.newString === "string"
+      ? input.newString
+      : typeof input?.new_string === "string"
+        ? input.new_string
+        : undefined;
+  const content = typeof input?.content === "string" ? input.content : undefined;
+
+  const metadata = asRecord(state?.metadata);
+  const filediff = asRecord(metadata?.filediff);
+  const patch =
+    (typeof filediff?.patch === "string" && filediff.patch.trim().length > 0
+      ? filediff.patch
+      : undefined) ??
+    (typeof metadata?.diff === "string" && metadata.diff.trim().length > 0
+      ? metadata.diff
+      : undefined);
+
+  if (!filePath && !oldString && !newString && !content && !patch) return null;
+  return {
+    ...(filePath ? { filePath } : {}),
+    ...(oldString !== undefined ? { oldString } : {}),
+    ...(newString !== undefined ? { newString } : {}),
+    ...(content !== undefined ? { content } : {}),
+    ...(patch ? { patch } : {}),
+  };
 }
 
 function extractToolCallId(payload: Record<string, unknown> | null): string | null {
