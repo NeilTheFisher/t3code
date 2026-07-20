@@ -50,6 +50,9 @@ export const AssetResource = Schema.Union([
   Schema.TaggedStruct("native-app-icon", {
     app: ToolActivityNativeAppReference,
   }),
+  Schema.TaggedStruct("external-file", {
+    path: TrimmedNonEmptyString.check(Schema.isMaxLength(ASSET_PATH_MAX_LENGTH)),
+  }),
   // An upload a pull request body points at on GitHub. A private repository serves these only
   // to a request that carries a credential, which the client has none of, so the server fetches
   // them with the `gh` credential the repository at `cwd` authenticates with.
@@ -292,6 +295,29 @@ export class AssetSigningKeyLoadError extends Schema.TaggedError<AssetSigningKey
   }
 }
 
+export class AssetExternalFileNotFoundError extends Schema.TaggedError<AssetExternalFileNotFoundError>()(
+  "AssetExternalFileNotFoundError",
+  {
+    resource: AssetResource,
+  },
+) {
+  override get message(): string {
+    return "External file was not found.";
+  }
+}
+
+export class AssetExternalFileInspectionError extends Schema.TaggedError<AssetExternalFileInspectionError>()(
+  "AssetExternalFileInspectionError",
+  {
+    resource: AssetResource,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return "Failed to inspect the external file.";
+  }
+}
+
 export class AssetGitHubMediaUrlValidationError extends Schema.TaggedError<AssetGitHubMediaUrlValidationError>()(
   "AssetGitHubMediaUrlValidationError",
   {},
@@ -316,5 +342,7 @@ export const AssetAccessError = Schema.Union([
   AssetProjectFaviconNotFoundError,
   AssetGitHubMediaUrlValidationError,
   AssetSigningKeyLoadError,
+  AssetExternalFileNotFoundError,
+  AssetExternalFileInspectionError,
 ]);
 export type AssetAccessError = typeof AssetAccessError.Type;
