@@ -1115,6 +1115,7 @@ function ChatViewContent(props: ChatViewProps) {
   const [localServerErrorsByThreadKey, setLocalServerErrorsByThreadKey] = useState<
     Record<string, string | null>
   >({});
+  const [dismissedServerErrors, setDismissedServerErrors] = useState<Set<string>>(new Set());
   const [isConnecting, _setIsConnecting] = useState(false);
   const [isRevertingCheckpoint, setIsRevertingCheckpoint] = useState(false);
   const [maximizedRightPanelThreadKey, setMaximizedRightPanelThreadKey] = useState<string | null>(
@@ -1244,8 +1245,28 @@ function ChatViewContent(props: ChatViewProps) {
   const isServerThread = routeKind === "server" && serverThread !== null;
   const activeThread = isServerThread ? serverThread : localDraftThread;
   const threadError = isServerThread
-    ? (localServerError ?? serverThread?.session?.lastError ?? null)
+    ? (() => {
+        const localErr = localServerError;
+        if (localErr !== null) return localErr;
+        const serverErr = serverThread?.session?.lastError ?? null;
+        if (serverErr !== null && !dismissedServerErrors.has(serverErr)) return serverErr;
+        return null;
+      })()
     : localDraftError;
+  const serverLastError = serverThread?.session?.lastError ?? null;
+  const prevServerErrorRef = useRef(serverLastError);
+  useEffect(() => {
+    const prev = prevServerErrorRef.current;
+    prevServerErrorRef.current = serverLastError;
+    if (serverLastError !== null && serverLastError !== prev) {
+      setDismissedServerErrors((prevSet) => {
+        if (prevSet.size === 0) return prevSet;
+        const next = new Set(prevSet);
+        next.clear();
+        return next;
+      });
+    }
+  }, [serverLastError]);
   const runtimeMode = composerRuntimeMode ?? activeThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE;
   const interactionMode =
     composerInteractionMode ?? activeThread?.interactionMode ?? DEFAULT_INTERACTION_MODE;
@@ -2389,6 +2410,17 @@ function ChatViewContent(props: ChatViewProps) {
             [routeThreadKey]: nextError,
           };
         });
+        if (nextError === null) {
+          const serverErr = serverThread.session?.lastError ?? null;
+          if (serverErr !== null) {
+            setDismissedServerErrors((prev) => {
+              if (prev.has(serverErr)) return prev;
+              const next = new Set(prev);
+              next.add(serverErr);
+              return next;
+            });
+          }
+        }
         return;
       }
       const localDraftErrorKey = draftId ?? targetThreadId;

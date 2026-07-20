@@ -100,9 +100,9 @@ function errorDescriptionClampClass(type: unknown, description: unknown): string
 }
 
 /** Dismiss-only: circular control overlapping the card corner (iOS notification–style). */
-const toastCornerDismissClass = "absolute z-20 -top-1.5 -right-1.5";
+const toastCornerDismissClass = "absolute z-30 -top-1 -right-1";
 const toastCornerOrbClass = cn(
-  "inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full border border-border/60 bg-popover/92 text-muted-foreground shadow-sm outline-none backdrop-blur-sm",
+  "inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-full border border-border/60 bg-popover/92 text-muted-foreground shadow-sm outline-none backdrop-blur-sm",
   "transition-[color,background-color,box-shadow] hover:bg-popover hover:text-foreground",
   "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
 );
@@ -660,24 +660,26 @@ function Toasts({ position }: { position: ToastPosition }) {
                 dismissAfterVisibleMs={toast.data?.dismissAfterVisibleMs}
                 toastId={toast.id}
               />
-              <div className={toastCornerDismissClass}>
+              <div className={cn(toastCornerDismissClass, "pointer-events-auto")}>
                 <button
                   aria-label="Dismiss notification"
                   className={toastCornerOrbClass}
                   data-slot="toast-close"
-                  onClick={() =>
-                    handleToastDismissClick(toastManager, toast.id, toast.data?.onClose)
-                  }
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleToastDismissClick(toastManager, toast.id, toast.data?.onClose);
+                  }}
+                  onPointerDown={(e) => e.stopPropagation()}
                   type="button"
                 >
-                  <XIcon className="size-3" strokeWidth={2.25} />
+                  <XIcon className="size-3.5" strokeWidth={2.25} />
                 </button>
               </div>
               <Toast.Content
                 className={cn(
                   // `overflow-x: clip` avoids the CSS quirk where pairing `hidden` + `y: visible`
                   // forces `y` to `auto`. Expandable detail panels can extend below without being cut off.
-                  "pointer-events-auto min-h-0 overflow-y-visible pl-3.5 text-sm transition-opacity duration-250 [overflow-x:clip] data-expanded:opacity-100",
+                  "pointer-events-auto min-h-10 overflow-y-visible pl-3.5 text-sm transition-opacity duration-250 [overflow-x:clip] data-expanded:opacity-100",
                   stackedActionLayout
                     ? "flex flex-col gap-2 py-2.5 pr-3.5"
                     : cn("py-3", "flex items-center justify-between gap-1.5", inlineContentEndPad),
@@ -753,26 +755,28 @@ function AnchoredToasts() {
                     </Toast.Content>
                   ) : (
                     <>
-                      <div className={toastCornerDismissClass}>
+                      <div className={cn(toastCornerDismissClass, "pointer-events-auto")}>
                         <button
                           aria-label="Dismiss notification"
                           className={toastCornerOrbClass}
                           data-slot="toast-close"
-                          onClick={() =>
+                          onClick={(e) => {
+                            e.stopPropagation();
                             handleToastDismissClick(
                               anchoredToastManager,
                               toast.id,
                               toast.data?.onClose,
-                            )
-                          }
+                            );
+                          }}
+                          onPointerDown={(e) => e.stopPropagation()}
                           type="button"
                         >
-                          <XIcon className="size-3" strokeWidth={2.25} />
+                          <XIcon className="size-3.5" strokeWidth={2.25} />
                         </button>
                       </div>
                       <Toast.Content
                         className={cn(
-                          "pointer-events-auto min-h-0 overflow-y-visible pl-3.5 text-sm [overflow-x:clip]",
+                          "pointer-events-auto min-h-10 overflow-y-visible pl-3.5 text-sm [overflow-x:clip]",
                           stackedActionLayout
                             ? "flex flex-col gap-2 py-2.5 pr-3.5"
                             : cn(
