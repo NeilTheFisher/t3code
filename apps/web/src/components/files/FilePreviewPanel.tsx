@@ -19,6 +19,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isBrowserPreviewFile, openFileInPreview } from "~/browser/openFileInPreview";
 import { useAssetUrlState } from "~/assets/assetUrls";
 import ChatMarkdown from "~/components/ChatMarkdown";
+import { ExpandedImageDialog } from "~/components/chat/ExpandedImageDialog";
 import { OpenInPicker } from "~/components/chat/OpenInPicker";
 import { useClientSettings } from "~/hooks/useSettings";
 import { useTheme } from "~/hooks/useTheme";
@@ -121,12 +122,55 @@ function WorkspaceImagePreview(props: {
   readonly absolutePath: string;
   readonly alt: string;
 }) {
-  const assetUrl = useAssetUrlState(props.environmentId, {
-    _tag: "workspace-file",
-    threadId: props.threadRef.threadId,
-    path: props.absolutePath,
-  });
+  const enableExternalFilePreview = useClientSettings(
+    (settings) => settings.enableExternalFilePreview,
+  );
+  const [useExternalFallback, setUseExternalFallback] = useState(false);
+  const [expandedImage, setExpandedImage] = useState<{
+    src: string;
+    name: string;
+  } | null>(null);
+
+  const workspaceResource = useMemo(
+    () => ({
+      _tag: "workspace-file" as const,
+      threadId: props.threadRef.threadId,
+      path: props.absolutePath,
+    }),
+    [props.threadRef.threadId, props.absolutePath],
+  );
+
+  const externalResource = useMemo(
+    () => ({
+      _tag: "external-file" as const,
+      path: props.absolutePath,
+    }),
+    [props.absolutePath],
+  );
+
+  const workspaceAssetUrl = useAssetUrlState(props.environmentId, workspaceResource);
+  const externalAssetUrl = useAssetUrlState(
+    props.environmentId,
+    useExternalFallback ? externalResource : workspaceResource,
+  );
+
+  const assetUrl = useExternalFallback ? externalAssetUrl : workspaceAssetUrl;
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (enableExternalFilePreview && !useExternalFallback && workspaceAssetUrl._tag === "Failure") {
+      setUseExternalFallback(true);
+    }
+  }, [enableExternalFilePreview, useExternalFallback, workspaceAssetUrl._tag]);
+
+  const handleImageClick = useCallback(() => {
+    if (assetUrl._tag === "Success") {
+      setExpandedImage({
+        src: assetUrl.url,
+        name: props.alt,
+      });
+    }
+  }, [assetUrl, props.alt]);
 
   if (assetUrl._tag === "Failure" || (assetUrl._tag === "Success" && failedUrl === assetUrl.url)) {
     return (
@@ -136,19 +180,34 @@ function WorkspaceImagePreview(props: {
     );
   }
 
-  return assetUrl._tag === "Success" ? (
-    <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4">
-      <img
-        className="max-h-full max-w-full object-contain"
-        src={assetUrl.url}
-        alt={props.alt}
-        onError={() => setFailedUrl(assetUrl.url)}
-      />
-    </div>
-  ) : (
-    <div className="flex min-h-0 flex-1 items-center justify-center text-muted-foreground">
-      <LoaderCircle className="size-5 animate-spin" />
-    </div>
+  return (
+    <>
+      {assetUrl._tag === "Success" ? (
+        <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4">
+          <img
+            className="max-h-full max-w-full cursor-zoom-in object-contain"
+            src={assetUrl.url}
+            alt={props.alt}
+            onError={() => setFailedUrl(assetUrl.url)}
+            onClick={handleImageClick}
+          />
+        </div>
+      ) : (
+        <div className="flex min-h-0 flex-1 items-center justify-center text-muted-foreground">
+          <LoaderCircle className="size-5 animate-spin" />
+        </div>
+      )}
+      {expandedImage && (
+        <ExpandedImageDialog
+          key={expandedImage.src}
+          preview={{
+            images: [expandedImage],
+            index: 0,
+          }}
+          onClose={() => setExpandedImage(null)}
+        />
+      )}
+    </>
   );
 }
 
