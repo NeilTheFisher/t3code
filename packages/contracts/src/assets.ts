@@ -44,6 +44,9 @@ export const AssetResource = Schema.Union([
   Schema.TaggedStruct("native-app-icon", {
     app: ToolActivityNativeAppReference,
   }),
+  Schema.TaggedStruct("external-file", {
+    path: TrimmedNonEmptyString.check(Schema.isMaxLength(ASSET_PATH_MAX_LENGTH)),
+  }),
 ]);
 export type AssetResource = typeof AssetResource.Type;
 
@@ -277,6 +280,29 @@ export class AssetSigningKeyLoadError extends Schema.TaggedError<AssetSigningKey
   }
 }
 
+export class AssetExternalFileNotFoundError extends Schema.TaggedError<AssetExternalFileNotFoundError>()(
+  "AssetExternalFileNotFoundError",
+  {
+    resource: AssetResource,
+  },
+) {
+  override get message(): string {
+    return "External file was not found.";
+  }
+}
+
+export class AssetExternalFileInspectionError extends Schema.TaggedError<AssetExternalFileInspectionError>()(
+  "AssetExternalFileInspectionError",
+  {
+    resource: AssetResource,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return "Failed to inspect the external file.";
+  }
+}
+
 export const AssetAccessError = Schema.Union([
   AssetWorkspaceContextNotFoundError,
   AssetWorkspaceContextResolutionError,
@@ -291,5 +317,7 @@ export const AssetAccessError = Schema.Union([
   AssetProjectFaviconInspectionError,
   AssetProjectFaviconNotFoundError,
   AssetSigningKeyLoadError,
+  AssetExternalFileNotFoundError,
+  AssetExternalFileInspectionError,
 ]);
 export type AssetAccessError = typeof AssetAccessError.Type;
