@@ -1736,7 +1736,35 @@ export function GeneralSettingsPanel() {
         />
 
         <SettingsRow
-          {...searchableSetting("hide-whitespace-changes")}
+<SettingsRow
+          title="External file preview"
+          description="Allow viewing files from outside the workspace, such as temporary files or images from other directories."
+          resetAction={
+            settings.enableExternalFilePreview !==
+            DEFAULT_UNIFIED_SETTINGS.enableExternalFilePreview ? (
+              <SettingResetButton
+                label="external file preview"
+                onClick={() =>
+                  updateSettings({
+                    enableExternalFilePreview: DEFAULT_UNIFIED_SETTINGS.enableExternalFilePreview,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.enableExternalFilePreview}
+              onCheckedChange={(checked) =>
+                updateSettings({ enableExternalFilePreview: Boolean(checked) })
+              }
+              aria-label="Enable external file preview"
+            />
+          }
+        />
+
+        <SettingsRow
+          title="Hide whitespace changes"
           description="Set whether the diff panel ignores whitespace-only edits by default."
           resetAction={
             settings.diffIgnoreWhitespace !== DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace ? (
