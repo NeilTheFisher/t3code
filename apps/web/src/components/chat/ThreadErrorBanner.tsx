@@ -1,6 +1,5 @@
 import { memo } from "react";
 import { Alert, AlertAction, AlertDescription } from "../ui/alert";
-import { Button } from "../ui/button";
 import { CircleAlertIcon, XIcon } from "lucide-react";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
@@ -55,9 +54,18 @@ export const ThreadErrorBanner = memo(function ThreadErrorBanner({
         </AlertDescription>
         {onDismiss && (
           <AlertAction>
-            <Button variant="ghost" size="icon-xs" aria-label="Dismiss error" onClick={onDismiss}>
-              <XIcon className="text-destructive" />
-            </Button>
+            <button
+              type="button"
+              className="inline-flex items-center justify-center rounded-md p-1 text-destructive hover:bg-destructive/10"
+              aria-label="Dismiss error"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onDismiss();
+              }}
+            >
+              <XIcon className="size-3.5" />
+            </button>
           </AlertAction>
         )}
       </Alert>
