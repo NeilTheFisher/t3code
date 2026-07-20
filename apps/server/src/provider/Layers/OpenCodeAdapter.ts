@@ -453,6 +453,33 @@ function toToolLifecycleItemType(toolName: string): ToolLifecycleItemType {
   return "dynamic_tool_call";
 }
 
+function isOpenCodeTodoTool(toolName: string): boolean {
+  return toolName.toLowerCase().includes("todowrite");
+}
+
+function extractPlanStepsFromOpenCodeTodos(
+  input: Record<string, unknown>,
+): Array<{ step: string; status: "pending" | "inProgress" | "completed" }> | null {
+  const todos = input.todos;
+  if (!Array.isArray(todos) || todos.length === 0) {
+    return null;
+  }
+  return todos
+    .filter((t): t is Record<string, unknown> => t !== null && typeof t === "object")
+    .map((todo) => ({
+      step:
+        typeof todo.content === "string" && todo.content.trim().length > 0
+          ? todo.content.trim()
+          : "Task",
+      status:
+        todo.status === "completed"
+          ? "completed"
+          : todo.status === "in_progress"
+            ? "inProgress"
+            : "pending",
+    }));
+}
+
 function mapPermissionToRequestType(
   permission: string,
 ): "command_execution_approval" | "file_read_approval" | "file_change_approval" | "unknown" {
@@ -1913,6 +1940,27 @@ export function makeOpenCodeAdapter(
             };
             appendTurnItem(context, turnId, part);
             yield* emit(runtimeEvent);
+
+            // Emit plan update when todowrite tool input is parsed
+            if (isOpenCodeTodoTool(part.tool)) {
+              const input = part.state.input;
+              if (input && typeof input === "object") {
+                const planSteps = extractPlanStepsFromOpenCodeTodos(
+                  input as Record<string, unknown>,
+                );
+                if (planSteps && planSteps.length > 0) {
+                  yield* emit({
+                    ...(yield* buildEventBase({
+                      threadId: context.session.threadId,
+                      turnId,
+                      raw: event,
+                    })),
+                    type: "turn.plan.updated",
+                    payload: { plan: planSteps },
+                  });
+                }
+              }
+            }
           }
           break;
         }
