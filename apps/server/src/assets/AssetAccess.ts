@@ -1,6 +1,8 @@
 import type { AssetResource } from "@t3tools/contracts";
 import {
   AssetAttachmentNotFoundError,
+  AssetExternalFileInspectionError,
+  AssetExternalFileNotFoundError,
   AssetPreviewTypeValidationError,
   AssetProjectFaviconInspectionError,
   AssetProjectFaviconNotFoundError,
@@ -100,6 +102,12 @@ const AssetClaimsSchema = Schema.Union([
     version: Schema.Literal(1),
     kind: Schema.Literal("project-favicon-external"),
     filePath: Schema.String,
+    expiresAt: Schema.Number,
+  }),
+  Schema.Struct({
+    version: Schema.Literal(1),
+    kind: Schema.Literal("external-file"),
+    absolutePath: Schema.String,
     expiresAt: Schema.Number,
   }),
 ]);
@@ -424,6 +432,45 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
       }
       break;
     }
+    case "external-file": {
+      const absolutePath = input.resource.path;
+      const info = yield* optionOnNotFound(fileSystem.stat(absolutePath)).pipe(
+        Effect.tapError((cause) =>
+          Effect.logError("Failed to inspect external file.", {
+            path: absolutePath,
+            cause,
+          }),
+        ),
+        Effect.orElseSucceed(() => Option.none()),
+      );
+      if (Option.isNone(info)) {
+        return yield* new AssetExternalFileNotFoundError({
+          resource: input.resource,
+        });
+      }
+      if (info.value.type !== "File") {
+        return yield* new AssetExternalFileNotFoundError({
+          resource: input.resource,
+        });
+      }
+      const canonicalFile = yield* fileSystem.realPath(absolutePath).pipe(
+        Effect.mapError(
+          (cause) =>
+            new AssetExternalFileInspectionError({
+              resource: input.resource,
+              cause,
+            }),
+        ),
+      );
+      claims = {
+        version: 1,
+        kind: "external-file",
+        absolutePath: canonicalFile,
+        expiresAt,
+      };
+      fileName = path.basename(absolutePath);
+      break;
+    }
   }
 
   const secretStore = yield* ServerSecretStore.ServerSecretStore;
@@ -520,6 +567,22 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
     );
     return faviconPath === claims.filePath
       ? ({ kind: "file", path: faviconPath } satisfies ResolvedAsset)
+      : null;
+  }
+
+  if (claims.kind === "external-file") {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const info = yield* optionOnNotFound(fileSystem.stat(claims.absolutePath)).pipe(
+      Effect.tapError((cause) =>
+        Effect.logError("Failed to inspect external file asset.", {
+          path: claims.absolutePath,
+          cause,
+        }),
+      ),
+      Effect.orElseSucceed(() => Option.none()),
+    );
+    return Option.isSome(info) && info.value.type === "File"
+      ? ({ kind: "file", path: claims.absolutePath } satisfies ResolvedAsset)
       : null;
   }
 
