@@ -38,6 +38,7 @@ import { type TurnDiffSummary } from "../../types";
 import { summarizeTurnDiffStats } from "../../lib/turnDiffTree";
 import {
   getRenderablePatch,
+  getRenderablePatchFromContents,
   resolveDiffThemeName,
   resolveFileDiffPath,
 } from "../../lib/diffRendering";
@@ -2205,14 +2206,26 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
     workEntry.itemType === "file_change" || workEntry.requestKind === "file-change";
   const fileChange = isFileChange ? workEntry.fileChange : undefined;
   const renderablePatch = useMemo(() => {
-    if (!expanded || !fileChange?.patch) return null;
-    // OpenCode's filediff.patch is partial (hunks in source-file coordinates),
-    // so compact the hunk offsets or the virtualizer renders the hunk thousands
-    // of lines below the fold — i.e. an empty box.
-    return getRenderablePatch(fileChange.patch, `inline-diff:${workEntry.id}`, {
-      compactPartialHunkOffsets: true,
-    });
-  }, [expanded, fileChange?.patch, workEntry.id]);
+    if (!expanded || !fileChange) return null;
+    if (fileChange.patch) {
+      // OpenCode's filediff.patch is partial (hunks in source-file coordinates),
+      // so compact the hunk offsets or the virtualizer renders the hunk thousands
+      // of lines below the fold — i.e. an empty box.
+      return getRenderablePatch(fileChange.patch, `inline-diff:${workEntry.id}`, {
+        compactPartialHunkOffsets: true,
+      });
+    }
+    // Claude edits carry only old_string/new_string — synthesize a real diff.
+    if (fileChange.oldString !== undefined && fileChange.newString !== undefined) {
+      return getRenderablePatchFromContents(
+        fileChange.oldString,
+        fileChange.newString,
+        fileChange.filePath ?? "edit.txt",
+        `inline-edit:${workEntry.id}`,
+      );
+    }
+    return null;
+  }, [expanded, fileChange, workEntry.id]);
   const showEditFallback =
     expanded &&
     isFileChange &&
