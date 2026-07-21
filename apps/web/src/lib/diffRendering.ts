@@ -1,3 +1,4 @@
+import { parseDiffFromFile } from "@pierre/diffs";
 import { parsePatchFiles } from "@pierre/diffs/utils/parsePatchFiles";
 import type { FileDiffMetadata } from "@pierre/diffs/types";
 
@@ -81,6 +82,42 @@ interface RenderablePatchOptions {
    * for the "N unmodified lines" separator.
    */
   compactPartialHunkOffsets?: boolean;
+  /**
+   * Pierre only allows expanding unmodified regions when a diff carries full
+   * file contents (isPartial=false); patch-parsed diffs never do. When a
+   * patch was generated with full context (git diff -U999999), its single
+   * hunk holds the whole file, so rebuild the diff from those contents to
+   * make unmodified regions expandable.
+   */
+  upgradeFullContextFiles?: boolean;
+}
+
+function upgradeFullContextFile(file: FileDiffMetadata): FileDiffMetadata {
+  if (!file.isPartial || file.hunks.length !== 1) return file;
+  const [hunk] = file.hunks;
+  if (!hunk || hunk.deletionStart > 1 || hunk.additionStart > 1) return file;
+  try {
+    const oldName = file.prevName ?? file.name ?? "";
+    const newName = file.name ?? oldName;
+    if (!newName) return file;
+    const upgraded = parseDiffFromFile(
+      {
+        // Parsed partial lines keep their trailing newlines, so plain concat
+        // reconstructs the exact file contents.
+        name: oldName || newName,
+        contents: file.deletionLines.join(""),
+        ...(file.cacheKey ? { cacheKey: `${file.cacheKey}:full-old` } : {}),
+      },
+      {
+        name: newName,
+        contents: file.additionLines.join(""),
+        ...(file.cacheKey ? { cacheKey: `${file.cacheKey}:full-new` } : {}),
+      },
+    );
+    return upgraded.hunks.length > 0 ? upgraded : file;
+  } catch {
+    return file;
+  }
 }
 
 export function compactPartialHunkOffsets(file: FileDiffMetadata): FileDiffMetadata {
@@ -175,11 +212,16 @@ export function getRenderablePatch(
       normalizedPatch,
       buildPatchCacheKey(normalizedPatch, cacheScope),
     );
-    const parsedFiles = parsedPatches.flatMap((parsedPatch) =>
-      options.compactPartialHunkOffsets
-        ? parsedPatch.files.map(compactPartialHunkOffsets)
-        : parsedPatch.files,
-    );
+    const parsedFiles = parsedPatches.flatMap((parsedPatch) => {
+      let patchFiles = parsedPatch.files;
+      if (options.upgradeFullContextFiles) {
+        patchFiles = patchFiles.map(upgradeFullContextFile);
+      }
+      if (options.compactPartialHunkOffsets) {
+        patchFiles = patchFiles.map(compactPartialHunkOffsets);
+      }
+      return patchFiles;
+    });
     const binaryPaths = extractBinaryPatchPaths(normalizedPatch);
     const files: FileDiffMetadata[] = [];
     const binaryFiles: FileDiffMetadata[] = [];
@@ -205,6 +247,31 @@ export function getRenderablePatch(
       text: normalizedPatch,
       reason: "Failed to parse patch. Showing raw patch.",
     };
+  }
+}
+
+/**
+ * Synthesize a renderable diff from before/after text (e.g. Claude Edit
+ * old_string/new_string, which carry no provider patch). Line numbers are
+ * relative to the snippet, not the source file.
+ */
+export function getRenderablePatchFromContents(
+  oldContents: string,
+  newContents: string,
+  name: string,
+  cacheScope = "inline-edit",
+): RenderablePatch | null {
+  if (oldContents === newContents) return null;
+  try {
+    const cacheKey = buildPatchCacheKey(`${name} ${oldContents}  ${newContents}`, cacheScope);
+    const fileDiff = parseDiffFromFile(
+      { name, contents: oldContents, cacheKey: `${cacheKey}:old` },
+      { name, contents: newContents, cacheKey: `${cacheKey}:new` },
+    );
+    if (fileDiff.hunks.length === 0) return null;
+    return { kind: "files", files: [fileDiff], binaryFiles: [] };
+  } catch {
+    return null;
   }
 }
 
