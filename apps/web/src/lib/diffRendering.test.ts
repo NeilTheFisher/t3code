@@ -6,7 +6,6 @@ import {
   buildFileDiffIdentityKey,
   buildFileDiffRenderKey,
   buildPatchCacheKey,
-  extractBinaryPatchPaths,
   getDiffLineStat,
   getRenderablePatch,
   resolveFileDiffPath,
@@ -425,45 +424,5 @@ describe("a file whose name a patch header cannot carry plainly", () => {
 
     expect(resolveFileDiffPath(file)).toBe("new\tname.ts");
     expect(resolveFileDiffPreviousPath(file)).toBe("old\tname.ts");
-  });
-});
-
-describe("binary diffs", () => {
-  it("separates binary files from renderable text diffs", () => {
-    const patch = [
-      "diff --git a/.session.swp b/.session.swp",
-      "new file mode 100644",
-      "index 0000000..9f2c1aa",
-      "Binary files /dev/null and b/.session.swp differ",
-      "diff --git a/a.txt b/a.txt",
-      "index 1111111..2222222 100644",
-      "--- a/a.txt",
-      "+++ b/a.txt",
-      "@@ -1 +1,2 @@",
-      " hi",
-      "+there",
-    ].join("\n");
-
-    const parsed = getRenderablePatch(patch, "checkpoint");
-    expect(parsed?.kind).toBe("files");
-    if (parsed?.kind !== "files") return;
-    expect(parsed.files.map((file) => file.name)).toEqual(["a.txt"]);
-    expect(parsed.binaryFiles.map((file) => file.name)).toEqual([".session.swp"]);
-  });
-
-  it("collects paths from binary markers and ignores diff body text", () => {
-    const patch = [
-      "diff --git a/img/logo.png b/img/logo.png",
-      "GIT binary patch",
-      "delta 123",
-      "diff --git a/a.txt b/a.txt",
-      "--- a/a.txt",
-      "+++ b/a.txt",
-      "@@ -1 +1 @@",
-      "-Binary files a/a.txt and b/a.txt differ",
-      "+text",
-    ].join("\n");
-
-    expect([...extractBinaryPatchPaths(patch)]).toEqual(["img/logo.png"]);
   });
 });

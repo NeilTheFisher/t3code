@@ -45,8 +45,9 @@ import {
 import { PREFERRED_HIGHLIGHTER } from "../lib/syntaxHighlighting";
 import { areAllDiffFilesCollapsed, toggleAllDiffFiles } from "../lib/diffCollapse";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
-import { useWorkspaceMutationRefresh } from "../hooks/useWorkspaceMutationRefresh";
-import { useProject, useThread } from "../state/entities";
+import { deriveWorkLogEntries } from "../session-logic";
+import { buildExternalTurnFileChanges, combineTurnPatches } from "../lib/turnFileChanges";
+import { useProject, useThread, useThreadActivities } from "../state/entities";
 import { resolveThreadRouteRef } from "../threadRoutes";
 import { useClientSettings, useUpdateClientSettings } from "../hooks/useSettings";
 import { formatShortTimestamp } from "../timestampFormat";
@@ -386,7 +387,24 @@ export default function DiffPanel({
   ];
   const gitDiff = selectedGitSource?.diff;
 
-  const selectedPatch = selectedTurn ? activeCheckpointDiff.data?.diff : gitDiff;
+  const threadActivities = useThreadActivities(routeThreadRef ?? null);
+  const workLogEntries = useMemo(() => deriveWorkLogEntries(threadActivities), [threadActivities]);
+  // Checkpoint diffs only see the workspace repo; edits the agent made in other
+  // folders/repos are reconstructed from the turn's Edit/Write tool calls so
+  // they still show up in the turn view.
+  const externalTurnChanges = useMemo(
+    () =>
+      selectedTurn
+        ? buildExternalTurnFileChanges(workLogEntries, selectedTurn.turnId, activeCwd)
+        : null,
+    [activeCwd, selectedTurn, workLogEntries],
+  );
+
+  const selectedPatch = selectedTurn
+    ? activeCheckpointDiff.isPending
+      ? undefined
+      : combineTurnPatches(activeCheckpointDiff.data?.diff, externalTurnChanges?.patch ?? "")
+    : gitDiff;
   const isSelectedPatchTruncated = !selectedTurn && selectedGitSource?.truncated === true;
   const isLoadingSelectedPatch = selectedTurn
     ? activeCheckpointDiff.isPending
@@ -398,6 +416,7 @@ export default function DiffPanel({
     () =>
       getRenderablePatch(selectedPatch, `diff-panel:${resolvedTheme}`, {
         compactPartialHunkOffsets: selectedTurnId === null,
+        upgradeFullContextFiles: true,
       }),
     [resolvedTheme, selectedPatch, selectedTurnId],
   );
@@ -916,10 +935,26 @@ export default function DiffPanel({
                 This preview exceeds the size limit. Changes shown are incomplete.
                 {selectedGitSource?.files ? " Totals include all changes." : ""}              </p>
             )}
+            {selectedTurn &&
+              externalTurnChanges !== null &&
+              externalTurnChanges.filePaths.length > 0 && (
+                <p className="shrink-0 border-b border-border/70 bg-muted/40 px-3 py-1.5 text-[11px] text-muted-foreground">
+                  {externalTurnChanges.filePaths.length === 1
+                    ? "1 file changed in this turn is outside this workspace; its diff is"
+                    : `${externalTurnChanges.filePaths.length} files changed in this turn are outside this workspace; their diffs are`}{" "}
+                  reconstructed from tool calls and may be approximate.
+                </p>
+              )}
             {selectedPatchError && !renderablePatch && (
               <div className="px-3">
                 <p className="mb-2 text-2xs text-error/80">{selectedPatchError}</p>
               </div>
+            )}
+            {!selectedTurn && selectedGitSource?.error && (
+              <p className="shrink-0 border-b border-border/70 bg-destructive/10 px-3 py-1.5 text-[11px] text-destructive">
+                Git diff failed for this scope, so the result below may be empty or incomplete:{" "}
+                {selectedGitSource.error}
+              </p>
             )}
             {!renderablePatch ? (
               isLoadingSelectedPatch ? (

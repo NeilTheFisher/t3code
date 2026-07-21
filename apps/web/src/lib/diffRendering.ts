@@ -1,5 +1,6 @@
-import { parsePatchFiles } from "@pierre/diffs/utils/parsePatchFiles";
 import { parseDiffFromFile } from "@pierre/diffs";
+import { parsePatchFiles } from "@pierre/diffs/utils/parsePatchFiles";
+import { applyPatch, createTwoFilesPatch, parsePatch, reversePatch } from "diff";
 import type { FileDiffMetadata } from "@pierre/diffs/types";
 import { unquoteGitPatchPath } from "@t3tools/shared/gitPatchPath";
 
@@ -62,6 +63,26 @@ export interface DiffLineStat {
   deletions: number;
 }
 
+export function expandPartialPatchWithCurrentFile(
+  patch: string,
+  filePath: string,
+  currentContents: string,
+): string | null {
+  const [parsedPatch, ...extraPatches] = parsePatch(patch);
+  if (!parsedPatch || extraPatches.length > 0) return null;
+  const oldContents = applyPatch(currentContents, reversePatch(parsedPatch));
+  if (oldContents === false) return null;
+  return createTwoFilesPatch(
+    `a/${filePath}`,
+    `b/${filePath}`,
+    oldContents,
+    currentContents,
+    undefined,
+    undefined,
+    { context: Number.POSITIVE_INFINITY },
+  );
+}
+
 export function getDiffLineStat(files: ReadonlyArray<FileDiffMetadata>): DiffLineStat {
   return files.reduce<DiffLineStat>(
     (total, file) => {
@@ -85,6 +106,42 @@ interface RenderablePatchOptions {
    * for the "N unmodified lines" separator.
    */
   compactPartialHunkOffsets?: boolean;
+  /**
+   * Pierre only allows expanding unmodified regions when a diff carries full
+   * file contents (isPartial=false); patch-parsed diffs never do. When a
+   * patch was generated with full context (git diff -U999999), its single
+   * hunk holds the whole file, so rebuild the diff from those contents to
+   * make unmodified regions expandable.
+   */
+  upgradeFullContextFiles?: boolean;
+}
+
+function upgradeFullContextFile(file: FileDiffMetadata): FileDiffMetadata {
+  if (!file.isPartial || file.hunks.length !== 1) return file;
+  const [hunk] = file.hunks;
+  if (!hunk || hunk.deletionStart > 1 || hunk.additionStart > 1) return file;
+  try {
+    const oldName = file.prevName ?? file.name ?? "";
+    const newName = file.name ?? oldName;
+    if (!newName) return file;
+    const upgraded = parseDiffFromFile(
+      {
+        // Parsed partial lines keep their trailing newlines, so plain concat
+        // reconstructs the exact file contents.
+        name: oldName || newName,
+        contents: file.deletionLines.join(""),
+        ...(file.cacheKey ? { cacheKey: `${file.cacheKey}:full-old` } : {}),
+      },
+      {
+        name: newName,
+        contents: file.additionLines.join(""),
+        ...(file.cacheKey ? { cacheKey: `${file.cacheKey}:full-new` } : {}),
+      },
+    );
+    return upgraded.hunks.length > 0 ? upgraded : file;
+  } catch {
+    return file;
+  }
 }
 
 function hideWhitespaceChanges(file: FileDiffMetadata): FileDiffMetadata {
@@ -238,6 +295,9 @@ export function getRenderablePatch(
     const binaryFiles: FileDiffMetadata[] = [];
     for (const sourceFile of sourceFiles) {
       let file = sourceFile;
+      if (options.upgradeFullContextFiles) {
+        file = upgradeFullContextFile(file);
+      }
       if (options.ignoreWhitespace) {
         file = hideWhitespaceChanges(file);
       }
@@ -265,6 +325,31 @@ export function getRenderablePatch(
       text: normalizedPatch,
       reason: "Failed to parse patch. Showing raw patch.",
     };
+  }
+}
+
+/**
+ * Synthesize a renderable diff from before/after text (e.g. Claude Edit
+ * old_string/new_string, which carry no provider patch). Line numbers are
+ * relative to the snippet, not the source file.
+ */
+export function getRenderablePatchFromContents(
+  oldContents: string,
+  newContents: string,
+  name: string,
+  cacheScope = "inline-edit",
+): RenderablePatch | null {
+  if (oldContents === newContents) return null;
+  try {
+    const cacheKey = buildPatchCacheKey(`${name} ${oldContents}  ${newContents}`, cacheScope);
+    const fileDiff = parseDiffFromFile(
+      { name, contents: oldContents, cacheKey: `${cacheKey}:old` },
+      { name, contents: newContents, cacheKey: `${cacheKey}:new` },
+    );
+    if (fileDiff.hunks.length === 0) return null;
+    return { kind: "files", files: [fileDiff], binaryFiles: [], sourceFiles: [fileDiff] };
+  } catch {
+    return null;
   }
 }
 
