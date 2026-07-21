@@ -882,7 +882,7 @@ function summarizeToolRequest(toolName: string, input: Record<string, unknown>):
 function titleForTool(itemType: CanonicalItemType): string {
   switch (itemType) {
     case "command_execution":
-      return "Command run";
+      return "Bash";
     case "file_change":
       return "File change";
     case "mcp_tool_call":
