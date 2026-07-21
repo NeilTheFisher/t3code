@@ -873,7 +873,14 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         cwd: input.cwd,
         args: [
           "diff",
-          ...(input.format === "numstat" ? ["--numstat", "-z"] : ["--patch"]),
+          ...(input.format === "numstat"
+            ? ["--numstat", "-z"]
+            : [
+                "--patch",
+                // Full context so the web diff viewer holds complete file contents
+                // and can expand unmodified regions (partial patches can't).
+                "--unified=999999",
+              ]),
           "--no-color",
           "--no-ext-diff",
           "--no-textconv",
