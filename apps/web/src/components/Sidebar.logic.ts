@@ -1,5 +1,5 @@
 import * as React from "react";
-import { MAX_SIDEBAR_THREAD_PREVIEW_COUNT } from "@t3tools/contracts/settings";
+import type { ContextMenuItem } from "@t3tools/contracts";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
 import {
   getThreadSortTimestamp,
@@ -44,6 +44,55 @@ type LogicalSidebarProject = SidebarProject & {
 };
 
 export type ThreadTraversalDirection = "previous" | "next";
+
+export async function archiveSelectedThreadEntries<
+  TEntry extends { readonly threadKey: string },
+  TResult extends { readonly _tag: "Success" | "Failure" },
+>(input: {
+  entries: readonly TEntry[];
+  archive: (entry: TEntry, onArchived: () => void) => Promise<TResult>;
+}): Promise<{
+  archivedThreadKeys: readonly string[];
+  mutationFailure: Extract<TResult, { readonly _tag: "Failure" }> | null;
+  followupFailures: readonly Extract<TResult, { readonly _tag: "Failure" }>[];
+}> {
+  const archivedThreadKeys: string[] = [];
+  const followupFailures: Extract<TResult, { readonly _tag: "Failure" }>[] = [];
+
+  for (const entry of input.entries) {
+    let didArchive = false;
+    const result = await input.archive(entry, () => {
+      didArchive = true;
+    });
+    if (didArchive || result._tag === "Success") {
+      archivedThreadKeys.push(entry.threadKey);
+    }
+    if (result._tag === "Success") continue;
+    const failure = result as Extract<TResult, { readonly _tag: "Failure" }>;
+    if (didArchive) {
+      followupFailures.push(failure);
+      continue;
+    }
+    return { archivedThreadKeys, mutationFailure: failure, followupFailures };
+  }
+
+  return { archivedThreadKeys, mutationFailure: null, followupFailures };
+}
+
+export function buildMultiSelectThreadContextMenuItems(input: {
+  count: number;
+  hasRunningThread: boolean;
+}): readonly ContextMenuItem<"mark-unread" | "archive" | "delete">[] {
+  return [
+    { id: "mark-unread", label: `Mark unread (${input.count})` },
+    {
+      id: "archive",
+      label: `Archive (${input.count})`,
+      disabled: input.hasRunningThread,
+    },
+    { id: "delete", label: `Delete (${input.count})`, destructive: true },
+  ];
+}
 
 export interface ThreadStatusPill {
   label:
@@ -593,70 +642,19 @@ export function resolveProjectStatusIndicator(
   return highestPriorityStatus;
 }
 
-export const SIDEBAR_RECENT_THREAD_WINDOW_MS = 2 * 60 * 60 * 1000;
-
-export function threadNeedsAttention(thread: ThreadStatusInput): boolean {
-  return resolveThreadStatusPill({ thread }) !== null;
-}
-
-// `getThreadSortTimestamp("updated_at")` prefers the latest user message, so a
-// thread whose agent finished recently but whose prompt is hours old would not
-// count as recent activity without also considering `updatedAt`.
-function getThreadActivityTimestamp(thread: ThreadSortInput): number {
-  return Math.max(
-    getThreadSortTimestamp(thread, "updated_at"),
-    toSortableTimestamp(thread.updatedAt) ?? Number.NEGATIVE_INFINITY,
-  );
-}
-
-// The preview limit is a floor, not a ceiling: beyond the first N threads,
-// folding keeps visible the active thread, any thread that still needs the
-// user's attention (it has a status pill: pending approval/input, running,
-// plan ready, or unseen completion), and threads with activity inside the
-// recency window. Recent-but-quiet threads are capped so a busy afternoon of
-// launches doesn't unfold the whole list; attention and active threads are
-// never dropped by the cap.
-export function getVisibleThreadsForProject<T extends ThreadSortInput>(input: {
+export function getVisibleThreadsForProject<T extends Pick<Thread, "id">>(input: {
   threads: readonly T[];
-  getThreadKey: (thread: T) => string;
-  activeThreadKey: string | undefined;
+  activeThreadId: T["id"] | undefined;
   isThreadListExpanded: boolean;
   previewLimit: number;
-  nowMs: number;
-  needsAttention: (thread: T) => boolean;
 }): {
   hasHiddenThreads: boolean;
   visibleThreads: T[];
   hiddenThreads: T[];
 } {
-  const { activeThreadKey, getThreadKey, isThreadListExpanded, previewLimit, threads } = input;
+  const { activeThreadId, isThreadListExpanded, previewLimit, threads } = input;
+  const hasHiddenThreads = threads.length > previewLimit;
 
-  const visibleThreadKeys = new Set<string>();
-  for (const thread of threads.slice(0, previewLimit)) {
-    visibleThreadKeys.add(getThreadKey(thread));
-  }
-  for (const thread of threads) {
-    const threadKey = getThreadKey(thread);
-    if (threadKey === activeThreadKey || input.needsAttention(thread)) {
-      visibleThreadKeys.add(threadKey);
-    }
-  }
-
-  const maxAutoShownThreads = Math.max(previewLimit, MAX_SIDEBAR_THREAD_PREVIEW_COUNT);
-  const recencyCutoffMs = input.nowMs - SIDEBAR_RECENT_THREAD_WINDOW_MS;
-  const recentHiddenThreads = threads
-    .filter(
-      (thread) =>
-        !visibleThreadKeys.has(getThreadKey(thread)) &&
-        getThreadActivityTimestamp(thread) >= recencyCutoffMs,
-    )
-    .sort((a, b) => getThreadActivityTimestamp(b) - getThreadActivityTimestamp(a));
-  for (const thread of recentHiddenThreads) {
-    if (visibleThreadKeys.size >= maxAutoShownThreads) break;
-    visibleThreadKeys.add(getThreadKey(thread));
-  }
-
-  const hasHiddenThreads = visibleThreadKeys.size < threads.length;
   if (!hasHiddenThreads || isThreadListExpanded) {
     return {
       hasHiddenThreads,
@@ -665,10 +663,30 @@ export function getVisibleThreadsForProject<T extends ThreadSortInput>(input: {
     };
   }
 
+  const previewThreads = threads.slice(0, previewLimit);
+  if (!activeThreadId || previewThreads.some((thread) => thread.id === activeThreadId)) {
+    return {
+      hasHiddenThreads: true,
+      hiddenThreads: threads.slice(previewLimit),
+      visibleThreads: previewThreads,
+    };
+  }
+
+  const activeThread = threads.find((thread) => thread.id === activeThreadId);
+  if (!activeThread) {
+    return {
+      hasHiddenThreads: true,
+      hiddenThreads: threads.slice(previewLimit),
+      visibleThreads: previewThreads,
+    };
+  }
+
+  const visibleThreadIds = new Set([...previewThreads, activeThread].map((thread) => thread.id));
+
   return {
     hasHiddenThreads: true,
-    hiddenThreads: threads.filter((thread) => !visibleThreadKeys.has(getThreadKey(thread))),
-    visibleThreads: threads.filter((thread) => visibleThreadKeys.has(getThreadKey(thread))),
+    hiddenThreads: threads.filter((thread) => !visibleThreadIds.has(thread.id)),
+    visibleThreads: threads.filter((thread) => visibleThreadIds.has(thread.id)),
   };
 }
 
@@ -716,6 +734,25 @@ export function getProjectSortTimestamp(
   return toSortableTimestamp(project.updatedAt ?? project.createdAt) ?? Number.NEGATIVE_INFINITY;
 }
 
+function sortProjectsByActivity<TProject extends SidebarProject>(
+  projects: readonly TProject[],
+  sortOrder: SidebarProjectSortOrder,
+  getProjectThreads: (project: TProject) => readonly ThreadSortInput[],
+  compareTies: (left: TProject, right: TProject) => number,
+): TProject[] {
+  if (sortOrder === "manual") {
+    return [...projects];
+  }
+
+  return [...projects].toSorted((left, right) => {
+    const rightTimestamp = getProjectSortTimestamp(right, getProjectThreads(right), sortOrder);
+    const leftTimestamp = getProjectSortTimestamp(left, getProjectThreads(left), sortOrder);
+    const byTimestamp =
+      rightTimestamp === leftTimestamp ? 0 : rightTimestamp > leftTimestamp ? 1 : -1;
+    return byTimestamp || compareTies(left, right);
+  });
+}
+
 export function sortProjectsForSidebar<
   TProject extends SidebarProject,
   TThread extends Pick<Thread, "projectId" | "createdAt" | "updatedAt"> & ThreadSortInput,
@@ -724,10 +761,6 @@ export function sortProjectsForSidebar<
   threads: readonly TThread[],
   sortOrder: SidebarProjectSortOrder,
 ): TProject[] {
-  if (sortOrder === "manual") {
-    return [...projects];
-  }
-
   const threadsByProjectId = new Map<string, TThread[]>();
   for (const thread of threads) {
     const existing = threadsByProjectId.get(thread.projectId) ?? [];

@@ -737,8 +737,21 @@ export default function FilePreviewPanel({
   const openPreview = useAtomCommand(previewEnvironment.open, {
     reportFailure: false,
   });
-  const isImage = relativePath !== null && isWorkspaceImagePreviewPath(relativePath);
-  const file = useProjectFileQuery(environmentId, cwd, relativePath, !isImage);
+  const enableExternalFilePreview = useClientSettings(
+    (settings) => settings.enableExternalFilePreview,
+  );
+  const isExternalAbsolutePath =
+    relativePath !== null &&
+    enableExternalFilePreview &&
+    (relativePath.startsWith("/") || /^[A-Za-z]:[\\/]/.test(relativePath));
+  const isImage =
+    relativePath !== null && (isWorkspaceImagePreviewPath(relativePath) || isExternalAbsolutePath);
+  const file = useProjectFileQuery(
+    environmentId,
+    cwd,
+    isExternalAbsolutePath ? null : relativePath,
+    !isImage,
+  );
   const [explorerOpen, setExplorerOpen] = useState(initialExplorerOpen);
   // Reading markdown rendered is a preference, not a property of one file. Keeping
   // it on the panel meant a thread switch dropped it and forced source back.
