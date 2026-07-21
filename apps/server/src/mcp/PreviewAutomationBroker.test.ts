@@ -19,6 +19,7 @@ import * as Deferred from "effect/Deferred";
 import * as Fiber from "effect/Fiber";
 import * as Result from "effect/Result";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 
 import * as PreviewAutomationBroker from "./PreviewAutomationBroker.ts";
 
@@ -453,8 +454,92 @@ it.effect("rejects calls when no connected host exists", () =>
       threadId: scope.threadId,
       providerSessionId: scope.providerSessionId,
       providerInstanceId: scope.providerInstanceId,
+      availability: "no-host-connected",
     });
   }),
+);
+
+it.effect("diagnoses hosts connected for other environments or missing operations", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const broker = yield* makeBroker;
+      const otherEnvironment = requestsFrom(
+        yield* broker.connect(
+          makeHost({
+            clientId: "client-other",
+            environmentId: EnvironmentId.make("environment-2"),
+          }),
+        ),
+      );
+      yield* Stream.runDrain(otherEnvironment).pipe(Effect.forkScoped);
+      yield* Effect.yieldNow;
+
+      const mismatch = yield* broker
+        .invoke<void>({ scope, operation: "status", input: {} })
+        .pipe(Effect.flip);
+      expect(mismatch).toBeInstanceOf(PreviewAutomationNoAvailableHostError);
+      expect(mismatch).toMatchObject({ availability: "environment-mismatch" });
+
+      const statusOnly = requestsFrom(
+        yield* broker.connect(makeHost({ supportedOperations: ["status"] })),
+      );
+      yield* Stream.runDrain(statusOnly).pipe(Effect.forkScoped);
+      yield* Effect.yieldNow;
+
+      const unsupported = yield* broker
+        .invoke<void>({ scope, operation: "navigate", input: {} })
+        .pipe(Effect.flip);
+      expect(unsupported).toBeInstanceOf(PreviewAutomationNoAvailableHostError);
+      expect(unsupported).toMatchObject({ availability: "operation-unsupported" });
+    }),
+  ),
+);
+
+it.effect("waits for a host to connect within the grace window", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const broker = yield* makeBroker;
+      const fiber = yield* broker
+        .invoke<{ available: boolean }>({
+          scope,
+          operation: "status",
+          input: {},
+          waitForHostMs: 5_000,
+        })
+        .pipe(Effect.forkScoped);
+      yield* TestClock.adjust("1 second");
+
+      const requests = requestsFrom(yield* broker.connect(makeHost()));
+      yield* Stream.runForEach(requests, (request) =>
+        broker.respond({
+          clientId: "client-1",
+          connectionId: request.connectionId,
+          requestId: request.requestId,
+          ok: true,
+          result: { available: true },
+        }),
+      ).pipe(Effect.forkScoped);
+      yield* TestClock.adjust("1 second");
+
+      const result = yield* Fiber.join(fiber);
+      expect(result).toEqual({ available: true });
+    }),
+  ),
+);
+
+it.effect("fails with a diagnosis when no host connects before the grace window ends", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const broker = yield* makeBroker;
+      const fiber = yield* broker
+        .invoke<void>({ scope, operation: "status", input: {}, waitForHostMs: 5_000 })
+        .pipe(Effect.flip, Effect.forkScoped);
+      yield* TestClock.adjust("6 seconds");
+      const error = yield* Fiber.join(fiber);
+      expect(error).toBeInstanceOf(PreviewAutomationNoAvailableHostError);
+      expect(error).toMatchObject({ availability: "no-host-connected" });
+    }),
+  ),
 );
 
 it.effect("does not create host state from focus updates without a live stream", () =>
