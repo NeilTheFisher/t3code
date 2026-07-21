@@ -2213,6 +2213,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
       // of lines below the fold — i.e. an empty box.
       return getRenderablePatch(fileChange.patch, `inline-diff:${workEntry.id}`, {
         compactPartialHunkOffsets: true,
+        upgradeFullContextFiles: true,
       });
     }
     // Claude edits carry only old_string/new_string — synthesize a real diff.
@@ -2369,7 +2370,9 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
           onClick={stopRowToggle}
           onPointerDown={stopRowToggle}
         >
-          {expandedBody ? (
+          {/* The raw tool-input dump just duplicates the rendered diff/content
+              preview below, so hide it whenever a preview is available. */}
+          {expandedBody && !renderablePatch && !showEditFallback && !showWriteContent ? (
             <pre className="max-h-64 cursor-text overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-muted-foreground select-text">
               {expandedBody}
             </pre>
