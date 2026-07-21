@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
-import { buildPatchCacheKey, extractBinaryPatchPaths, getRenderablePatch } from "./diffRendering";
+import {
+  buildPatchCacheKey,
+  extractBinaryPatchPaths,
+  getRenderablePatch,
+  getRenderablePatchFromContents,
+} from "./diffRendering";
 
 describe("buildPatchCacheKey", () => {
   it("returns a stable cache key for identical content", () => {
@@ -129,6 +134,68 @@ describe("getRenderablePatch", () => {
     const parsed = getRenderablePatch(patch, "checkpoint");
     if (parsed?.kind !== "files") return;
     expect(parsed.binaryFiles).toHaveLength(0);
+  });
+});
+
+describe("getRenderablePatch upgradeFullContextFiles", () => {
+  const fullContextPatch = [
+    "diff --git a/x.ts b/x.ts",
+    "--- a/x.ts",
+    "+++ b/x.ts",
+    "@@ -1,6 +1,6 @@",
+    " line1",
+    " line2",
+    "-old3",
+    "+new3",
+    " line4",
+    " line5",
+    " line6",
+  ].join("\n");
+
+  it("rebuilds full-context patches into expandable non-partial diffs", () => {
+    const parsed = getRenderablePatch(fullContextPatch, "t", { upgradeFullContextFiles: true });
+    expect(parsed?.kind).toBe("files");
+    if (parsed?.kind !== "files") return;
+    const [file] = parsed.files;
+    expect(file!.isPartial).toBe(false);
+    expect(file!.deletionLines.join("")).toBe("line1\nline2\nold3\nline4\nline5\nline6");
+    expect(file!.additionLines.join("")).toBe("line1\nline2\nnew3\nline4\nline5\nline6");
+  });
+
+  it("leaves mid-file partial patches untouched", () => {
+    const midFilePatch = [
+      "--- a/y.ts",
+      "+++ b/y.ts",
+      "@@ -100,3 +100,3 @@",
+      " a",
+      "-b",
+      "+c",
+      " d",
+    ].join("\n");
+    const parsed = getRenderablePatch(midFilePatch, "t", { upgradeFullContextFiles: true });
+    if (parsed?.kind !== "files") return;
+    expect(parsed.files[0]!.isPartial).toBe(true);
+  });
+});
+
+describe("getRenderablePatchFromContents", () => {
+  it("synthesizes a renderable non-partial diff from before/after text", () => {
+    const oldText = ["const a = 1;", "foo();", "return a;"].join("\n");
+    const newText = ["const a = 1;", "bar();", "return a;"].join("\n");
+
+    const parsed = getRenderablePatchFromContents(oldText, newText, "/repo/src/app.ts");
+    expect(parsed?.kind).toBe("files");
+    if (parsed?.kind !== "files") return;
+    expect(parsed.files).toHaveLength(1);
+    const [file] = parsed.files;
+    expect(file!.name).toBe("/repo/src/app.ts");
+    expect(file!.isPartial).toBe(false);
+    expect(file!.hunks.length).toBeGreaterThan(0);
+    expect(file!.hunks[0]!.unifiedLineStart).toBe(0);
+  });
+
+  it("returns null when contents are identical", () => {
+    expect(getRenderablePatchFromContents("same", "same", "x.ts")).toBeNull();
   });
 });
 
