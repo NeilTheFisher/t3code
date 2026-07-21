@@ -1112,11 +1112,16 @@ function extractToolCommand(payload: Record<string, unknown> | null): {
   const itemInput = asRecord(item?.input);
   const itemType = asTrimmedString(payload?.itemType);
   const detail = asTrimmedString(payload?.detail);
+  const dataInput = asRecord(data?.input);
+  const stateInput = asRecord(asRecord(data?.state)?.input);
   const candidates: unknown[] = [
     item?.command,
     itemInput?.command,
     itemResult?.command,
     data?.command,
+    dataInput?.command,
+    dataInput?.cmd,
+    stateInput?.command,
     itemType === "command_execution" && detail ? stripTrailingExitCode(detail).output : null,
   ];
 
