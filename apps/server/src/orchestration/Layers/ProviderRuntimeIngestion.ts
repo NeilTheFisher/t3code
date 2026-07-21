@@ -470,13 +470,15 @@ export function runtimeEventToActivities(
     }
 
     case "runtime.error": {
+      const errorMessage =
+        event.payload.message === "Aborted" ? "Interrupted" : event.payload.message;
       return [
         {
           id: event.eventId,
           createdAt: event.createdAt,
           tone: "error",
           kind: "runtime.error",
-          summary: "Runtime error",
+          summary: truncateDetail(errorMessage, 120),
           payload: {
             message: truncateDetail(event.payload.message),
           },
@@ -1968,7 +1970,7 @@ const make = Effect.gen(function* () {
                 : {}),
               runtimeMode: thread.session?.runtimeMode ?? "full-access",
               activeTurnId: eventTurnId ?? null,
-              lastError: runtimeErrorMessage,
+              lastError: runtimeErrorMessage === "Aborted" ? "Interrupted" : runtimeErrorMessage,
               updatedAt: now,
             },
             createdAt: now,
