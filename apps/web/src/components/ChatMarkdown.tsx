@@ -1107,12 +1107,25 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
   }, [onOpen, targetPath]);
 
   const handleOpenInFilePreview = useCallback(() => {
-    if (!threadRef || !workspaceRelativePath) {
+    if (!threadRef) {
       handleOpenInEditor();
       return;
     }
-    useRightPanelStore.getState().openFile(threadRef, workspaceRelativePath, line);
-  }, [handleOpenInEditor, line, threadRef, workspaceRelativePath]);
+    if (workspaceRelativePath) {
+      useRightPanelStore.getState().openFile(threadRef, workspaceRelativePath, line);
+      return;
+    }
+    const settings = getClientSettings();
+    if (
+      settings.enableExternalFilePreview &&
+      targetPath &&
+      (targetPath.startsWith("/") || /^[A-Za-z]:[\\/]/.test(targetPath))
+    ) {
+      useRightPanelStore.getState().openFile(threadRef, targetPath, line);
+      return;
+    }
+    handleOpenInEditor();
+  }, [handleOpenInEditor, line, threadRef, workspaceRelativePath, targetPath]);
 
   const handleOpenInBrowser = useCallback(() => {
     if (!onOpenInBrowser) {
