@@ -346,6 +346,7 @@ type ChatViewProps =
       threadId: ThreadId;
       onDiffPanelOpen?: () => void;
       reserveTitleBarControlInset?: boolean;
+      forceExpandedMobileComposer?: boolean;
       routeKind: "server";
       draftId?: never;
     }
@@ -354,6 +355,7 @@ type ChatViewProps =
       threadId: ThreadId;
       onDiffPanelOpen?: () => void;
       reserveTitleBarControlInset?: boolean;
+      forceExpandedMobileComposer?: boolean;
       routeKind: "draft";
       draftId: DraftId;
     };
@@ -375,6 +377,8 @@ function useLocalDispatchState(input: {
   threadError: string | null | undefined;
 }) {
   const [localDispatch, setLocalDispatch] = useState<LocalDispatchSnapshot | null>(null);
+  const latestUserMessageId =
+    input.activeThread?.messages.findLast((message) => message.role === "user")?.id ?? null;
 
   const resetLocalDispatch = useCallback(() => {
     setLocalDispatch(null);
@@ -386,6 +390,7 @@ function useLocalDispatchState(input: {
         localDispatch,
         phase: input.phase,
         latestTurn: input.activeLatestTurn,
+        latestUserMessageId,
         session: input.activeThread?.session ?? null,
         hasPendingApproval: input.activePendingApproval !== null,
         hasPendingUserInput: input.activePendingUserInput !== null,
@@ -398,6 +403,7 @@ function useLocalDispatchState(input: {
       input.activeThread?.session,
       input.phase,
       input.threadError,
+      latestUserMessageId,
       localDispatch,
     ],
   );
@@ -993,6 +999,7 @@ function ChatViewContent(props: ChatViewProps) {
     routeKind,
     onDiffPanelOpen,
     reserveTitleBarControlInset = true,
+    forceExpandedMobileComposer = false,
   } = props;
   const draftId = routeKind === "draft" ? props.draftId : null;
   const routeThreadRef = useMemo(
@@ -2320,6 +2327,9 @@ function ChatViewContent(props: ChatViewProps) {
     terminalUiLaunchContext?.threadId === activeThreadId ? terminalUiLaunchContext : null;
   // Default true while loading to avoid toolbar flicker.
   const isGitRepo = gitStatusQuery.data?.isRepo ?? true;
+  const initialDiffPanelGitScope =
+    gitStatusQuery.data?.hasWorkingTreeChanges === true ? "unstaged" : "branch";
+  const diffPanelGitStatusResolutionKey = gitStatusQuery.data ? "resolved" : "pending";
   const terminalShortcutLabelOptions = useMemo(
     () => ({
       context: {
@@ -5149,7 +5159,12 @@ function ChatViewContent(props: ChatViewProps) {
       />
     ) : activeRightPanelSurface?.kind === "diff" ? (
       <Suspense fallback={null}>
-        <DiffPanel mode="embedded" composerDraftTarget={composerDraftTarget} />
+        <DiffPanel
+          key={`${activeThreadKey}:${diffPanelGitStatusResolutionKey}`}
+          mode="embedded"
+          composerDraftTarget={composerDraftTarget}
+          initialGitScope={initialDiffPanelGitScope}
+        />
       </Suspense>
     ) : activeRightPanelSurface?.kind === "plan" ? (
       <PlanSidebar
@@ -5340,6 +5355,8 @@ function ChatViewContent(props: ChatViewProps) {
                       activeThread={activeThread}
                       isServerThread={isServerThread}
                       isLocalDraftThread={isLocalDraftThread}
+                      forceExpandedOnMobile={false}
+                      projectSelectionRequired={isLocalDraftThread && activeProject === null}
                       phase={phase}
                       isConnecting={isConnecting}
                       isSendBusy={isSendBusy}
