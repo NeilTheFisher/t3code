@@ -1005,8 +1005,12 @@ export function makeOpenCodeAdapter(
               context.childSessionParentCallIds.set(metadataSessionId, part.callID);
             }
             const itemType = toToolLifecycleItemType(part.tool);
+            // For command executions OpenCode sets state.title to the command
+            // itself; use the tool name so the command stays in the preview,
+            // matching the Claude adapter's presentation.
             const title =
-              part.state.status === "running" || part.state.status === "completed"
+              itemType !== "command_execution" &&
+              (part.state.status === "running" || part.state.status === "completed")
                 ? (part.state.title ?? part.tool)
                 : part.tool;
             const detail = detailFromToolPart(part);
