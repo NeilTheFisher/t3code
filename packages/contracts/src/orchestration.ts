@@ -428,6 +428,10 @@ export const OrchestrationThreadShell = Schema.Struct({
   hasPendingApprovals: Schema.Boolean,
   hasPendingUserInput: Schema.Boolean,
   hasActionableProposedPlan: Schema.Boolean,
+  // True while background work spawned by the thread (e.g. parallel subagent
+  // tasks) is still running after the parent turn has ended. Defaults to
+  // false so older servers/snapshots decode cleanly.
+  hasPendingBackgroundTasks: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
 });
 export type OrchestrationThreadShell = typeof OrchestrationThreadShell.Type;
 
