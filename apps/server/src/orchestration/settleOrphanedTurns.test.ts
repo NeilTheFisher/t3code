@@ -72,6 +72,7 @@ const makeShell = (input: {
   hasPendingApprovals: false,
   hasPendingUserInput: false,
   hasActionableProposedPlan: false,
+  hasPendingBackgroundTasks: false,
 });
 
 const makeSnapshot = (

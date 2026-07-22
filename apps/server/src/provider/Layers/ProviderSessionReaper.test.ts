@@ -106,6 +106,7 @@ function makeReadModel(
       hasPendingApprovals: false,
       hasPendingUserInput: false,
       hasActionableProposedPlan: false,
+      hasPendingBackgroundTasks: false,
       latestTurn: null,
       messages: [],
       session: thread.session,

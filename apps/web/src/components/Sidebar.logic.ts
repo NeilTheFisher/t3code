@@ -98,6 +98,7 @@ export interface ThreadStatusPill {
   label:
     | "Working"
     | "Connecting"
+    | "Waiting"
     | "Completed"
     | "Pending Approval"
     | "Awaiting Input"
@@ -108,10 +109,11 @@ export interface ThreadStatusPill {
 }
 
 const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
-  "Pending Approval": 5,
-  "Awaiting Input": 4,
-  Working: 3,
-  Connecting: 3,
+  "Pending Approval": 6,
+  "Awaiting Input": 5,
+  Working: 4,
+  Connecting: 4,
+  Waiting: 3,
   "Plan Ready": 2,
   Completed: 1,
 };
@@ -120,6 +122,7 @@ type ThreadStatusInput = Pick<
   SidebarThreadSummary,
   | "hasActionableProposedPlan"
   | "hasPendingApprovals"
+  | "hasPendingBackgroundTasks"
   | "hasPendingUserInput"
   | "interactionMode"
   | "latestTurn"
@@ -573,6 +576,22 @@ export function resolveThreadStatusPill(input: {
   if (thread.session?.status === "starting") {
     return {
       label: "Connecting",
+      colorClass: "text-sky-600 dark:text-sky-300/80",
+      dotClass: "bg-sky-500 dark:bg-sky-300/80",
+      pulse: true,
+    };
+  }
+
+  // The parent turn has ended but background subagent tasks it spawned are
+  // still running — the agent will pick the thread back up when they finish.
+  // Only shown while the session is alive-but-idle so a stopped/errored
+  // session can't get stuck on "Waiting" if a task never reports completion.
+  if (
+    thread.hasPendingBackgroundTasks &&
+    (thread.session?.status === "ready" || thread.session?.status === "idle")
+  ) {
+    return {
+      label: "Waiting",
       colorClass: "text-sky-600 dark:text-sky-300/80",
       dotClass: "bg-sky-500 dark:bg-sky-300/80",
       pulse: true,
