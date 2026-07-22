@@ -199,6 +199,63 @@ function derivePendingUserInputCountFromActivities(
   return openRequestIds.size;
 }
 
+// Background work is reported via paired task.started / task.completed
+// activities sharing a taskId. A started task with no terminal activity is
+// still running — even after the parent turn has completed, which is exactly
+// the "waiting on subagents" window the sidebar needs to surface.
+//
+// A ScheduleWakeup tool call in the latest turn counts too: the agent has
+// scheduled itself to resume, so the thread is waiting rather than done.
+// Scoping to the latest turn means the flag clears naturally when the wakeup
+// fires and a new turn starts.
+function derivePendingBackgroundTaskCount(input: {
+  readonly activities: ReadonlyArray<ProjectionThreadActivity>;
+  readonly latestTurnId: string | null;
+}): number {
+  const openTaskIds = new Set<string>();
+  let latestTurnHasScheduledWakeup = false;
+  const ordered = [...input.activities].toSorted(
+    (left, right) =>
+      left.createdAt.localeCompare(right.createdAt) ||
+      left.activityId.localeCompare(right.activityId),
+  );
+
+  for (const activity of ordered) {
+    const payload =
+      typeof activity.payload === "object" && activity.payload !== null
+        ? (activity.payload as Record<string, unknown>)
+        : null;
+
+    if (activity.kind === "task.started" || activity.kind === "task.completed") {
+      const taskId = typeof payload?.taskId === "string" ? payload.taskId : null;
+      if (taskId === null) {
+        continue;
+      }
+      if (activity.kind === "task.started") {
+        openTaskIds.add(taskId);
+      } else {
+        openTaskIds.delete(taskId);
+      }
+      continue;
+    }
+
+    if (
+      activity.kind === "tool.completed" &&
+      input.latestTurnId !== null &&
+      activity.turnId === input.latestTurnId
+    ) {
+      const detail = typeof payload?.detail === "string" ? payload.detail : "";
+      if (detail.startsWith("ScheduleWakeup:")) {
+        // `ScheduleWakeup {stop: true}` ends a loop instead of scheduling one.
+        latestTurnHasScheduledWakeup =
+          !detail.includes('\\"stop\\":true') && !detail.includes('"stop":true');
+      }
+    }
+  }
+
+  return openTaskIds.size + (latestTurnHasScheduledWakeup ? 1 : 0);
+}
+
 function deriveHasActionableProposedPlan(input: {
   readonly latestTurnId: string | null;
   readonly proposedPlans: ReadonlyArray<ProjectionThreadProposedPlan>;
@@ -610,6 +667,10 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         latestTurnId: existingRow.value.latestTurnId,
         proposedPlans,
       });
+      const pendingBackgroundTaskCount = derivePendingBackgroundTaskCount({
+        activities,
+        latestTurnId: existingRow.value.latestTurnId,
+      });
 
       yield* projectionThreadRepository.upsert({
         ...existingRow.value,
@@ -617,6 +678,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         pendingApprovalCount,
         pendingUserInputCount,
         hasActionableProposedPlan: hasActionableProposedPlan ? 1 : 0,
+        pendingBackgroundTaskCount,
       });
     });
 
@@ -652,6 +714,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             pendingApprovalCount: 0,
             pendingUserInputCount: 0,
             hasActionableProposedPlan: 0,
+            pendingBackgroundTaskCount: 0,
             deletedAt: null,
           });
           return;

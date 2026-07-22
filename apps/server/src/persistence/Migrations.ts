@@ -49,13 +49,14 @@ import Migration0033 from "./Migrations/033_ProjectionThreadsSettled.ts";
 import Migration0034 from "./Migrations/034_ProjectionThreadsSnoozed.ts";
 import Migration0035 from "./Migrations/035_ProjectionThreadTitleRegeneration.ts";
 import Migration0036 from "./Migrations/036_ProjectionThreadsPinned.ts";
-import Migration0037 from "./Migrations/037_ProjectionTurnsKeysetIndex.ts";
-import Migration0038 from "./Migrations/038_ProjectionThreadsPinOrderKey.ts";
-import Migration0039 from "./Migrations/039_ProjectionProjectsDefaultThreadEnvMode.ts";
-import Migration0040 from "./Migrations/040_ProjectionProjectFaviconPath.ts";
-import Migration0041 from "./Migrations/041_AuthSessionClientConnection.ts";
-import Migration0042 from "./Migrations/042_ProjectionThreadLinkedPullRequest.ts";
-import Migration0043 from "./Migrations/043_ProjectionThreadsUnsettledAt.ts";
+import Migration0037 from "./Migrations/037_ProjectionThreadPendingBackgroundTasks.ts";
+import Migration0038 from "./Migrations/037_ProjectionTurnsKeysetIndex.ts";
+import Migration0039 from "./Migrations/038_ProjectionThreadsPinOrderKey.ts";
+import Migration0040 from "./Migrations/039_ProjectionProjectsDefaultThreadEnvMode.ts";
+import Migration0041 from "./Migrations/040_ProjectionProjectFaviconPath.ts";
+import Migration0042 from "./Migrations/041_AuthSessionClientConnection.ts";
+import Migration0043 from "./Migrations/042_ProjectionThreadLinkedPullRequest.ts";
+import Migration0044 from "./Migrations/043_ProjectionThreadsUnsettledAt.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -103,14 +104,27 @@ export const migrationEntries = [
   [33, "ProjectionThreadsSettled", Migration0033],
   [34, "ProjectionThreadsSnoozed", Migration0034],
   [35, "ProjectionThreadTitleRegeneration", Migration0035],
-  [36, "ProjectionThreadsPinned", Migration0036],
-  [37, "ProjectionTurnsKeysetIndex", Migration0037],
-  [38, "ProjectionThreadsPinOrderKey", Migration0038],
-  [39, "ProjectionProjectsDefaultThreadEnvMode", Migration0039],
-  [40, "ProjectionProjectFaviconPath", Migration0040],
-  [41, "AuthSessionClientConnection", Migration0041],
-  [42, "ProjectionThreadLinkedPullRequest", Migration0042],
-  [43, "ProjectionThreadsUnsettledAt", Migration0043],
+  // Migration 36 shipped in the personal fork before upstream assigned the
+  // same id to pinned threads. Keep that id for existing fork databases and
+  // reserve 37 because an earlier rebase build briefly used it for the same
+  // fork migration. Run upstream's idempotent pinned-thread migration at 38.
+  // Upstream later added its own keyset-index migration at 37, but fork
+  // databases already ran pinned threads at 38, so the keyset index (a
+  // distinct upstream migration) is applied at 39. Upstream's subsequent
+  // migrations (38 PinOrderKey, 39 DefaultThreadEnvMode, 40 FaviconPath, and
+  // 41 AuthSessionClientConnection) were never run on fork databases, so they
+  // are appended at 40-43. Upstream later added 42 LinkedPullRequest and 43
+  // UnsettledAt; they are appended at 44-45 to avoid skipping on fork DBs
+  // where ids 42-43 are already consumed.
+  [36, "ProjectionThreadPendingBackgroundTasks", Migration0037],
+  [38, "ProjectionThreadsPinned", Migration0036],
+  [39, "ProjectionTurnsKeysetIndex", Migration0038],
+  [40, "ProjectionThreadsPinOrderKey", Migration0039],
+  [41, "ProjectionProjectsDefaultThreadEnvMode", Migration0040],
+  [42, "ProjectionProjectFaviconPath", Migration0041],
+  [43, "AuthSessionClientConnection", Migration0042],
+  [44, "ProjectionThreadLinkedPullRequest", Migration0043],
+  [45, "ProjectionThreadsUnsettledAt", Migration0044],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
