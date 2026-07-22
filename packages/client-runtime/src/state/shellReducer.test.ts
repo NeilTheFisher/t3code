@@ -43,6 +43,7 @@ const stubThread = {
   hasPendingApprovals: false,
   hasPendingUserInput: false,
   hasActionableProposedPlan: false,
+  hasPendingBackgroundTasks: false,
   session: null,
 } as const;
 
