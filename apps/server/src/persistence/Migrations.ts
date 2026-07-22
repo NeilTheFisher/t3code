@@ -48,20 +48,21 @@ import Migration0033 from "./Migrations/033_ProjectionThreadsSettled.ts";
 import Migration0034 from "./Migrations/034_ProjectionThreadsSnoozed.ts";
 import Migration0035 from "./Migrations/035_ProjectionThreadTitleRegeneration.ts";
 import Migration0036 from "./Migrations/036_ProjectionThreadsPinned.ts";
-import Migration0037 from "./Migrations/037_ProjectionTurnsKeysetIndex.ts";
-import Migration0038 from "./Migrations/038_ProjectionThreadsPinOrderKey.ts";
-import Migration0039 from "./Migrations/039_ProjectionProjectsDefaultThreadEnvMode.ts";
-import Migration0040 from "./Migrations/040_ProjectionProjectFaviconPath.ts";
-import Migration0041 from "./Migrations/041_AuthSessionClientConnection.ts";
-import Migration0042 from "./Migrations/042_ProjectionThreadLinkedPullRequest.ts";
-import Migration0043 from "./Migrations/043_ProjectionThreadsUnsettledAt.ts";
-import Migration0044 from "./Migrations/044_ClearAutomaticProjectModelDefaults.ts";
-import Migration0045 from "./Migrations/045_ProjectionProjectsAutoPull.ts";
-import Migration0046 from "./Migrations/046_RepairAutomaticSettlementTimestamps.ts";
-import Migration0047 from "./Migrations/047_ProjectionProjectIcon.ts";
-import Migration0048 from "./Migrations/048_ProjectionThreadBranchPullRequest.ts";
-import Migration0049 from "./Migrations/049_ProjectionThreadsActiveOrderKey.ts";
-import Migration0050 from "./Migrations/050_ProjectionThreadPullRequests.ts";
+import Migration0037 from "./Migrations/037_ProjectionThreadPendingBackgroundTasks.ts";
+import Migration0038 from "./Migrations/037_ProjectionTurnsKeysetIndex.ts";
+import Migration0039 from "./Migrations/038_ProjectionThreadsPinOrderKey.ts";
+import Migration0040 from "./Migrations/039_ProjectionProjectsDefaultThreadEnvMode.ts";
+import Migration0041 from "./Migrations/040_ProjectionProjectFaviconPath.ts";
+import Migration0042 from "./Migrations/041_AuthSessionClientConnection.ts";
+import Migration0043 from "./Migrations/042_ProjectionThreadLinkedPullRequest.ts";
+import Migration0044 from "./Migrations/043_ProjectionThreadsUnsettledAt.ts";
+import Migration0045 from "./Migrations/044_ClearAutomaticProjectModelDefaults.ts";
+import Migration0046 from "./Migrations/045_ProjectionProjectsAutoPull.ts";
+import Migration0047 from "./Migrations/046_RepairAutomaticSettlementTimestamps.ts";
+import Migration0048 from "./Migrations/047_ProjectionProjectIcon.ts";
+import Migration0049 from "./Migrations/048_ProjectionThreadBranchPullRequest.ts";
+import Migration0050 from "./Migrations/049_ProjectionThreadsActiveOrderKey.ts";
+import Migration0051 from "./Migrations/050_ProjectionThreadPullRequests.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -109,61 +110,38 @@ const migrationEntries = [
   [33, "ProjectionThreadsSettled", Migration0033],
   [34, "ProjectionThreadsSnoozed", Migration0034],
   [35, "ProjectionThreadTitleRegeneration", Migration0035],
-  [36, "ProjectionThreadsPinned", Migration0036],
-  [37, "ProjectionTurnsKeysetIndex", Migration0037],
-  [38, "ProjectionThreadsPinOrderKey", Migration0038],
-  [39, "ProjectionProjectsDefaultThreadEnvMode", Migration0039],
-  [40, "ProjectionProjectFaviconPath", Migration0040],
-  [41, "AuthSessionClientConnection", Migration0041],
-  [42, "ProjectionThreadLinkedPullRequest", Migration0042],
-  [43, "ProjectionThreadsUnsettledAt", Migration0043],
-  [44, "ClearAutomaticProjectModelDefaults", Migration0044],
-  [45, "ProjectionProjectsAutoPull", Migration0045],
-  [46, "RepairAutomaticSettlementTimestamps", Migration0046],
-  [47, "ProjectionProjectIcon", Migration0047],
-  [48, "ProjectionThreadBranchPullRequest", Migration0048],
-  [49, "ProjectionThreadsActiveOrderKey", Migration0049],
-  [50, "ProjectionThreadPullRequests", Migration0050],
-] as const;
-
-export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
-
-const makeMigrationLoader = (throughId?: number) =>
-  Migrator.fromRecord(
-    Object.fromEntries(
-      migrationEntries
-        .filter(([id]) => throughId === undefined || id <= throughId)
-        .map(([id, name, migration]) => [`${id}_${name}`, migration]),
-    ),
-  );
-
-/**
- * Migrator run function - no schema dumping needed
- * Uses the base Migrator.make without platform dependencies
- */
-const run = Migrator.make({});
-
-export interface RunMigrationsOptions {
-  readonly toMigrationInclusive?: number | undefined;
-}
-
-/**
- * Run all pending migrations.
- *
- * Creates the migrations tracking table (effect_sql_migrations) if it doesn't exist,
- * then runs any migrations with ID greater than the latest recorded migration.
- *
- * Returns array of [id, name] tuples for migrations that were run.
- *
- * @returns Effect containing array of executed migrations
- */
-export const runMigrations = Effect.fn("runMigrations")(function* ({
-  toMigrationInclusive,
-}: RunMigrationsOptions = {}) {
-  const executedMigrations = yield* run({ loader: makeMigrationLoader(toMigrationInclusive) });
-  const migrations = executedMigrations.map(([id, name]) => `${id}_${name}`);
-  yield* migrations.length === 0
-    ? Effect.logDebug("Database schema is current")
-    : Effect.log("Migrations ran successfully").pipe(Effect.annotateLogs({ migrations }));
-  return executedMigrations;
-});
+  // Migration 36 shipped in the personal fork before upstream assigned the
+  // same id to pinned threads. Keep that id for existing fork databases and
+  // reserve 37 because an earlier rebase build briefly used it for the same
+  // fork migration. Run upstream's idempotent pinned-thread migration at 38.
+  // Upstream later added its own keyset-index migration at 37, but fork
+  // databases already ran pinned threads at 38, so the keyset index (a
+  // distinct upstream migration) is applied at 39. Upstream's subsequent
+  // migrations (38 PinOrderKey, 39 DefaultThreadEnvMode, 40 FaviconPath, and
+  // 41 AuthSessionClientConnection) were never run on fork databases, so they
+  // are appended at 40-43. Upstream later added 42 LinkedPullRequest and 43
+  // UnsettledAt; they are appended at 44-45 to avoid skipping on fork DBs
+  // where ids 42-43 are already consumed. Upstream's 44-49 (ClearAutomatic-
+  // ProjectModelDefaults, ProjectsAutoPull, RepairAutomaticSettlement-
+  // Timestamps, ProjectIcon, ThreadBranchPullRequest, ThreadsActiveOrderKey)
+  // are appended at 46-51 for the same reason: fork databases have already
+  // consumed ids up to 45.
+  [36, "ProjectionThreadPendingBackgroundTasks", Migration0037],
+  [38, "ProjectionThreadsPinned", Migration0036],
+  [39, "ProjectionTurnsKeysetIndex", Migration0038],
+  [40, "ProjectionThreadsPinOrderKey", Migration0039],
+  [41, "ProjectionProjectsDefaultThreadEnvMode", Migration0040],
+  [42, "ProjectionProjectFaviconPath", Migration0041],
+  [43, "AuthSessionClientConnection", Migration0042],
+  [44, "ProjectionThreadLinkedPullRequest", Migration0043],
+  [45, "ProjectionThreadsUnsettledAt", Migration0044],
+  [46, "ClearAutomaticProjectModelDefaults", Migration0045],
+  [47, "ProjectionProjectsAutoPull", Migration0046],
+  [48, "RepairAutomaticSettlementTimestamps", Migration0047],
+  [49, "ProjectionProjectIcon", Migration0048],
+  [50, "ProjectionThreadBranchPullRequest", Migration0049],
+  [51, "ProjectionThreadsActiveOrderKey", Migration0050],
+  // Upstream later added 50 ThreadPullRequests; with fork ids consumed
+  // through 51 (ThreadsActiveOrderKey), it runs at 52 so fork databases
+  // pick it up.
+  [52, "ProjectionThreadPullRequests", Migration0051],
