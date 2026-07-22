@@ -122,6 +122,7 @@ export interface ThreadStatusPill {
     | "Working"
     | "Monitoring"
     | "Connecting"
+    | "Waiting"
     | "Completed"
     | "Pending Approval"
     | "Awaiting Input"
@@ -148,6 +149,7 @@ type ThreadStatusInput = Pick<
   SidebarThreadSummary,
   | "hasActionableProposedPlan"
   | "hasPendingApprovals"
+  | "hasPendingBackgroundTasks"
   | "hasPendingUserInput"
   | "interactionMode"
   | "latestTurn"
