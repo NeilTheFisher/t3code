@@ -408,6 +408,8 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   compact: boolean;
   activeContextWindow: ReturnType<typeof deriveLatestContextWindowSnapshot>;
   activeThreadProviderDisplayName: string | null;
+  activeProviderUsageLimits: ServerProvider["usageLimits"] | undefined;
+  timestampFormat: UnifiedSettings["timestampFormat"];
   isPreparingWorktree: boolean;
   pendingAction: {
     questionIndex: number;
@@ -435,6 +437,8 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
         <ContextWindowMeter
           usage={props.activeContextWindow}
           providerDisplayName={props.activeThreadProviderDisplayName}
+          providerUsageLimits={props.activeProviderUsageLimits}
+          timestampFormat={props.timestampFormat}
         />
       ) : null}
       {props.isPreparingWorktree ? (
@@ -954,6 +958,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
     return formatProviderDisplayName(activeThreadModelSelection.instanceId);
   }, [providerStatuses, activeThreadModelSelection]);
+  const activeThreadProviderInstanceId =
+    activeThread?.session?.providerInstanceId ?? activeThreadModelSelection?.instanceId;
+  const activeProviderUsageLimits = settings.showProviderUsageInContextPopover
+    ? providerStatuses.find((provider) => provider.instanceId === activeThreadProviderInstanceId)
+        ?.usageLimits
+    : undefined;
 
   // ------------------------------------------------------------------
   // Composer-local state
@@ -3149,6 +3159,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   compact={isComposerPrimaryActionsCompact}
                   activeContextWindow={activeContextWindow}
                   activeThreadProviderDisplayName={activeThreadProviderDisplayName}
+                  activeProviderUsageLimits={activeProviderUsageLimits}
+                  timestampFormat={settings.timestampFormat}
                   pendingAction={pendingPrimaryAction}
                   isRunning={phase === "running"}
                   showPlanFollowUpPrompt={pendingUserInputs.length === 0 && showPlanFollowUpPrompt}
