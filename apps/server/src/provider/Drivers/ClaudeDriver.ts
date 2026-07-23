@@ -12,13 +12,14 @@
  *
  * @module provider/Drivers/ClaudeDriver
  */
-import { ClaudeSettings, ProviderDriverKind } from "@t3tools/contracts";
+import { ClaudeSettings, type ServerProvider, ProviderDriverKind } from "@t3tools/contracts";
 import * as Cache from "effect/Cache";
 import * as Duration from "effect/Duration";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import { HttpClient } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
@@ -37,6 +38,7 @@ import {
   checkClaudeProviderStatus,
   makePendingClaudeProvider,
   probeClaudeCapabilities,
+  probeClaudeUsageLimits,
 } from "../Layers/ClaudeProvider.ts";
 import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
 import { resolveClaudeModelCatalog } from "../ClaudeModelCatalog.ts";
@@ -71,6 +73,30 @@ const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
 
 const DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
 const CAPABILITIES_PROBE_TTL = Duration.minutes(5);
+
+interface RetainedClaudeUsage {
+  readonly accountIdentity: string;
+  readonly usageLimits: NonNullable<ServerProvider["usageLimits"]>;
+}
+
+export function resolveRetainedClaudeUsage(
+  previous: RetainedClaudeUsage | undefined,
+  accountIdentity: string | undefined,
+  next: ServerProvider["usageLimits"] | undefined,
+): {
+  readonly retained: RetainedClaudeUsage | undefined;
+  readonly usageLimits: ServerProvider["usageLimits"] | undefined;
+} {
+  if (!accountIdentity) {
+    return { retained: undefined, usageLimits: next };
+  }
+  if (next) {
+    return { retained: { accountIdentity, usageLimits: next }, usageLimits: next };
+  }
+  return previous?.accountIdentity === accountIdentity
+    ? { retained: previous, usageLimits: previous.usageLimits }
+    : { retained: undefined, usageLimits: undefined };
+}
 
 function isClaudeNativeCommandPath(commandPath: string): boolean {
   const normalized = normalizeCommandPath(commandPath);
@@ -193,6 +219,16 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         cwd,
         processEnv,
       );
+      const lastAvailableUsageRef = yield* Ref.make<RetainedClaudeUsage | undefined>(undefined);
+      const usageProbeCache = yield* Cache.make({
+        capacity: 2,
+        timeToLive: CAPABILITIES_PROBE_TTL,
+        lookup: () =>
+          probeClaudeUsageLimits(effectiveConfig, processEnv, cwd).pipe(
+            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+            Effect.provideService(Path.Path, path),
+          ),
+      });
 
       // Start the TTL-gated refresh without delaying provider readiness. The
       // next check observes a remote manifest after the background fetch lands.
@@ -212,6 +248,22 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
                     Effect.provideService(HttpClient.HttpClient, httpClient),
                     Effect.provideService(FileSystem.FileSystem, fileSystem),
                     Effect.provideService(Path.Path, path),
+                  ),
+                (accountIdentity) =>
+                  Cache.get(
+                    usageProbeCache,
+                    `${capabilitiesCacheKey}:${accountIdentity ?? "unknown"}`,
+                  ).pipe(
+                    Effect.flatMap((usageLimits) =>
+                      Ref.modify(lastAvailableUsageRef, (previous) => {
+                        const resolved = resolveRetainedClaudeUsage(
+                          previous,
+                          accountIdentity,
+                          usageLimits,
+                        );
+                        return [resolved.usageLimits, resolved.retained] as const;
+                      }),
+                    ),
                   ),
               ),
             ),

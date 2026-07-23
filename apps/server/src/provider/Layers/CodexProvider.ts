@@ -40,6 +40,7 @@ import {
 } from "../providerSnapshot.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
 import { makeUnavailableUsageLimits } from "../providerUsageLimits.ts";
+import { usageLimitsFromCodexRateLimits } from "../providerUsageLimits.ts";
 import {
   codexRateLimitsFailureMessage,
   codexRateLimitsToLimits,
