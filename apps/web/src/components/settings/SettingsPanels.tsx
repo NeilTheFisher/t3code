@@ -535,6 +535,10 @@ export function useSettingsRestore(onRestored?: () => void) {
         : []),
       ...(settings.wordWrap !== DEFAULT_UNIFIED_SETTINGS.wordWrap ? ["Word wrap"] : []),
       ...getChangedTypographySettingLabels(settings),
+      ...(settings.showProviderUsageInContextPopover !==
+         DEFAULT_UNIFIED_SETTINGS.showProviderUsageInContextPopover
+        ? ["Provider usage in chat"]
+        : []),
       ...(settings.diffIgnoreWhitespace !== DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace
         ? ["Diff whitespace changes"]
         : []),
@@ -634,6 +638,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.sidebarThreadPreviewCount,
       settings.showSkillsInSlashMenu,
       settings.timestampFormat,
+      settings.showProviderUsageInContextPopover,
       settings.wordWrap,
       followSystem,
       theme,
@@ -708,6 +713,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       diffColorScheme: DEFAULT_UNIFIED_SETTINGS.diffColorScheme,
       timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
       wordWrap: DEFAULT_UNIFIED_SETTINGS.wordWrap,
+      showProviderUsageInContextPopover: DEFAULT_UNIFIED_SETTINGS.showProviderUsageInContextPopover,
       diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
       diffLayout: DEFAULT_UNIFIED_SETTINGS.diffLayout,
       proactivePanelsEnabled: DEFAULT_UNIFIED_SETTINGS.proactivePanelsEnabled,
@@ -2502,6 +2508,34 @@ export function GeneralSettingsPanel() {
                 updateSettings({ continueThreadsAfterServerUpdate: Boolean(checked) })
               }
               aria-label="Continue threads after restarts"
+            />
+          }
+        />
+
+        <SettingsRow
+          title="Provider usage in chat"
+          description="Show the active provider's subscription limits in the context window popover."
+          resetAction={
+            settings.showProviderUsageInContextPopover !==
+            DEFAULT_UNIFIED_SETTINGS.showProviderUsageInContextPopover ? (
+              <SettingResetButton
+                label="provider usage in chat"
+                onClick={() =>
+                  updateSettings({
+                    showProviderUsageInContextPopover:
+                      DEFAULT_UNIFIED_SETTINGS.showProviderUsageInContextPopover,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.showProviderUsageInContextPopover}
+              onCheckedChange={(checked) =>
+                updateSettings({ showProviderUsageInContextPopover: Boolean(checked) })
+              }
+              aria-label="Show provider usage in context window popover"
             />
           }
         />

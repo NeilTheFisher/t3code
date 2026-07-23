@@ -491,6 +491,16 @@ describe("ClientSettings pull request merge methods", () => {
   });
 });
 
+describe("ClientSettings provider usage", () => {
+  it("keeps context-popover usage opt-in", () => {
+    expect(decodeClientSettings({}).showProviderUsageInContextPopover).toBe(false);
+    expect(
+      decodeClientSettings({ showProviderUsageInContextPopover: true })
+        .showProviderUsageInContextPopover,
+    ).toBe(true);
+  });
+});
+
 describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
   it("defaults text generation to Luna at low reasoning effort", () => {
     expect(DEFAULT_SERVER_SETTINGS.textGenerationModelSelection).toEqual({
