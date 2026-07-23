@@ -508,6 +508,10 @@ export function useSettingsRestore(onRestored?: () => void) {
         : []),
       ...(settings.wordWrap !== DEFAULT_UNIFIED_SETTINGS.wordWrap ? ["Word wrap"] : []),
       ...getChangedTypographySettingLabels(settings),
+      ...(settings.showProviderUsageInContextPopover !==
+         DEFAULT_UNIFIED_SETTINGS.showProviderUsageInContextPopover
+        ? ["Provider usage in chat"]
+        : []),
       ...(settings.diffIgnoreWhitespace !== DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace
         ? ["Diff whitespace changes"]
         : []),
@@ -587,6 +591,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.sidebarThreadPreviewCount,
       settings.showSkillsInSlashMenu,
       settings.timestampFormat,
+      settings.showProviderUsageInContextPopover,
       settings.wordWrap,
       followSystem,
       theme,
@@ -660,6 +665,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       appearanceContrast: DEFAULT_UNIFIED_SETTINGS.appearanceContrast,
       timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
       wordWrap: DEFAULT_UNIFIED_SETTINGS.wordWrap,
+      showProviderUsageInContextPopover: DEFAULT_UNIFIED_SETTINGS.showProviderUsageInContextPopover,
       diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
       showSkillsInSlashMenu: DEFAULT_UNIFIED_SETTINGS.showSkillsInSlashMenu,
       environmentIdentificationMode: DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode,
@@ -2178,6 +2184,34 @@ export function GeneralSettingsPanel() {
                 updateSettings({ enableProviderUpdateChecks: Boolean(checked) })
               }
               aria-label="Check provider versions"
+            />
+          }
+        />
+
+        <SettingsRow
+          title="Provider usage in chat"
+          description="Show the active provider's subscription limits in the context window popover."
+          resetAction={
+            settings.showProviderUsageInContextPopover !==
+            DEFAULT_UNIFIED_SETTINGS.showProviderUsageInContextPopover ? (
+              <SettingResetButton
+                label="provider usage in chat"
+                onClick={() =>
+                  updateSettings({
+                    showProviderUsageInContextPopover:
+                      DEFAULT_UNIFIED_SETTINGS.showProviderUsageInContextPopover,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.showProviderUsageInContextPopover}
+              onCheckedChange={(checked) =>
+                updateSettings({ showProviderUsageInContextPopover: Boolean(checked) })
+              }
+              aria-label="Show provider usage in context window popover"
             />
           }
         />

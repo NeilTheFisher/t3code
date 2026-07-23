@@ -1,8 +1,11 @@
 import { Button } from "../ui/button";
 import { type ContextWindowSnapshot, formatContextWindowTokens } from "~/lib/contextWindow";
+import type { ServerProviderUsageLimits } from "@t3tools/contracts";
+import type { TimestampFormat } from "@t3tools/contracts/settings";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { formatContextWindowCompactionMessage } from "./ContextWindowMeter.logic";
 import { Minimize2Icon } from "lucide-react";
+import { ProviderUsageRows } from "../providerUsage/ProviderUsageRows";
 
 function formatPercentage(value: number | null): string | null {
   if (value === null || !Number.isFinite(value)) {
@@ -17,6 +20,8 @@ function formatPercentage(value: number | null): string | null {
 export function ContextWindowMeter(props: {
   usage: ContextWindowSnapshot;
   modelDisplayName?: string | null;
+  providerUsageLimits?: ServerProviderUsageLimits | undefined;
+  timestampFormat?: TimestampFormat | undefined;
   onCompact?: (() => void) | undefined;
   compactDisabled?: boolean | undefined;
   compactDisabledReason?: string | null | undefined;
@@ -153,6 +158,16 @@ export function ContextWindowMeter(props: {
                 </div>
               ) : null}
             </>
+          ) : null}
+          {props.providerUsageLimits ? (
+            <div className="mt-1 grid gap-2.5 border-t border-border/60 pt-2.5">
+              <div className="font-medium text-muted-foreground text-xs">Provider limits</div>
+              <ProviderUsageRows
+                usageLimits={props.providerUsageLimits}
+                timestampFormat={props.timestampFormat ?? "locale"}
+                compact
+              />
+            </div>
           ) : null}
         </div>
       </PopoverPopup>

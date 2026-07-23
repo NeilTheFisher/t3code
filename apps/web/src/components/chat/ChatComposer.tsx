@@ -501,6 +501,8 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   compact: boolean;
   activeContextWindow: ContextWindowSnapshot | null;
   activeThreadModelDisplayName: string | null;
+  activeProviderUsageLimits: ServerProvider["usageLimits"] | undefined;
+  timestampFormat: UnifiedSettings["timestampFormat"];
   isPreparingWorktree: boolean;
   pendingAction: {
     questionIndex: number;
@@ -532,6 +534,8 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
         <ContextWindowMeter
           usage={props.activeContextWindow}
           modelDisplayName={props.activeThreadModelDisplayName}
+          providerUsageLimits={props.activeProviderUsageLimits}
+          timestampFormat={props.timestampFormat}
           onCompact={props.onCompactContext}
           compactDisabled={props.compactDisabled}
           compactDisabledReason={props.compactDisabledReason}
@@ -1190,6 +1194,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     () => resolveContextWindowModelDisplayName(activeThreadModelSelection, modelOptionsByInstance),
     [activeThreadModelSelection, modelOptionsByInstance],
   );
+  const activeThreadProviderInstanceId =
+    activeThread?.session?.providerInstanceId ?? activeThreadModelSelection?.instanceId;
+  const activeProviderUsageLimits = settings.showProviderUsageInContextPopover
+    ? providerStatuses.find((provider) => provider.instanceId === activeThreadProviderInstanceId)
+        ?.usageLimits
+    : undefined;
 
   // ------------------------------------------------------------------
   // Composer-local state
@@ -4225,6 +4235,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     compact={isComposerPrimaryActionsCompact}
                     activeContextWindow={activeContextWindow}
                     activeThreadModelDisplayName={activeThreadModelDisplayName}
+                    activeProviderUsageLimits={activeProviderUsageLimits}
+                    timestampFormat={settings.timestampFormat}
                     pendingAction={pendingPrimaryAction}
                     isRunning={phase === "running"}
                     showPlanFollowUpPrompt={
