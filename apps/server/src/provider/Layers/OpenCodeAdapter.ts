@@ -1265,13 +1265,17 @@ export function makeOpenCodeAdapter(
       }
     });
 
+    // The context window only drives the cosmetic context circle, so every
+    // lookup failure degrades to `undefined` rather than failing the turn —
+    // custom models and older runtimes may not expose `provider.list` at all.
     const resolveModelContextWindow = (
       modelSlug: string | undefined,
       client: OpencodeClient,
-    ): Effect.Effect<number | undefined, OpenCodeRuntimeError> =>
+    ): Effect.Effect<number | undefined> =>
       Effect.gen(function* () {
         const parsed = parseOpenCodeModelSlug(modelSlug);
         if (!parsed) return undefined;
+        if (typeof client.provider?.list !== "function") return undefined;
         const providerList = yield* runOpenCodeSdk("provider.list", () => client.provider.list());
         const providerData = providerList.data;
         if (!providerData) return undefined;
@@ -1279,7 +1283,7 @@ export function makeOpenCodeAdapter(
         if (!provider) return undefined;
         const model = provider.models?.[parsed.modelID];
         return model?.limit?.context;
-      });
+      }).pipe(Effect.orElseSucceed(() => undefined));
 
     const startSession: OpenCodeAdapterShape["startSession"] = Effect.fn("startSession")(
       function* (input) {
