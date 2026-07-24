@@ -103,6 +103,11 @@ interface OpenCodeSessionContext {
   activeTurnId: TurnId | undefined;
   activeAgent: string | undefined;
   activeVariant: string | undefined;
+  accumulatedInputTokens: number;
+  accumulatedOutputTokens: number;
+  accumulatedReasoningTokens: number;
+  accumulatedCacheReadTokens: number;
+  modelContextWindow: number | undefined;
   /**
    * One-shot guard flipped by `stopOpenCodeContext` / `emitUnexpectedExit`.
    * The session lifecycle is owned by `sessionScope`; this Ref exists only
@@ -818,6 +823,45 @@ export function makeOpenCodeAdapter(
         },
       });
 
+      function* emitTokenUsage(
+        tokens: NonNullable<typeof part.tokens>,
+      ): Generator<any, void, unknown> {
+        const inputTokens = tokens.input!;
+        const outputTokens = tokens.output!;
+        const reasoningTokens = tokens.reasoning ?? 0;
+        context.accumulatedInputTokens += inputTokens;
+        context.accumulatedOutputTokens += outputTokens;
+        context.accumulatedReasoningTokens += reasoningTokens;
+        context.accumulatedCacheReadTokens += tokens.cache?.read ?? 0;
+
+        yield* emit({
+          ...(yield* buildEventBase({
+            threadId: context.session.threadId,
+            turnId,
+            raw: event,
+          })),
+          type: "thread.token-usage.updated",
+          payload: {
+            usage: {
+              usedTokens: context.accumulatedInputTokens + context.accumulatedOutputTokens,
+              ...(context.modelContextWindow !== undefined
+                ? { maxTokens: context.modelContextWindow }
+                : {}),
+              inputTokens: context.accumulatedInputTokens,
+              outputTokens: context.accumulatedOutputTokens,
+              reasoningOutputTokens: context.accumulatedReasoningTokens,
+              cachedInputTokens: context.accumulatedCacheReadTokens,
+              lastUsedTokens: inputTokens + outputTokens,
+              lastInputTokens: inputTokens,
+              lastOutputTokens: outputTokens,
+              lastReasoningOutputTokens: reasoningTokens,
+              lastCachedInputTokens: tokens.cache?.read ?? 0,
+              compactsAutomatically: true,
+            },
+          },
+        });
+      }
+
       switch (event.type) {
         case "message.updated": {
           context.messageRoleById.set(event.properties.info.id, event.properties.info.role);
@@ -963,6 +1007,14 @@ export function makeOpenCodeAdapter(
                 }
               }
             }
+          }
+
+          if (
+            part.type === "step-finish" &&
+            part.tokens?.input !== undefined &&
+            part.tokens?.output !== undefined
+          ) {
+            yield* emitTokenUsage(part.tokens!);
           }
           break;
         }
@@ -1213,6 +1265,22 @@ export function makeOpenCodeAdapter(
       }
     });
 
+    const resolveModelContextWindow = (
+      modelSlug: string | undefined,
+      client: OpencodeClient,
+    ): Effect.Effect<number | undefined, OpenCodeRuntimeError> =>
+      Effect.gen(function* () {
+        const parsed = parseOpenCodeModelSlug(modelSlug);
+        if (!parsed) return undefined;
+        const providerList = yield* runOpenCodeSdk("provider.list", () => client.provider.list());
+        const providerData = providerList.data;
+        if (!providerData) return undefined;
+        const provider = providerData.all.find((p) => p.id === parsed.providerID);
+        if (!provider) return undefined;
+        const model = provider.models?.[parsed.modelID];
+        return model?.limit?.context;
+      });
+
     const startSession: OpenCodeAdapterShape["startSession"] = Effect.fn("startSession")(
       function* (input) {
         const binaryPath = openCodeSettings.binaryPath;
@@ -1324,6 +1392,13 @@ export function makeOpenCodeAdapter(
           return raceWinner.session;
         }
 
+        // Resolve the model's context window (max tokens) from the OpenCode
+        // provider list so the context circle can show percentage/fill.
+        const modelContextWindow: number | undefined = yield* resolveModelContextWindow(
+          input.modelSelection?.model,
+          started.client,
+        );
+
         const createdAt = yield* nowIso;
         const session: ProviderSession = {
           provider: PROVIDER,
@@ -1357,6 +1432,11 @@ export function makeOpenCodeAdapter(
           activeTurnId: undefined,
           activeAgent: undefined,
           activeVariant: undefined,
+          accumulatedInputTokens: 0,
+          accumulatedOutputTokens: 0,
+          accumulatedReasoningTokens: 0,
+          accumulatedCacheReadTokens: 0,
+          modelContextWindow,
           stopped: yield* Ref.make(false),
           sessionScope: started.sessionScope,
         };
