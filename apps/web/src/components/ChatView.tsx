@@ -6142,9 +6142,6 @@ function ChatViewContent(props: ChatViewProps) {
                 activeTurnStartedAt={activeWorkStartedAt}
                 listRef={legendListRef}
                 timelineEntries={timelineEntries}
-                hasMoreOlder={hasMoreOlderActivities}
-                loadingOlder={loadingOlderActivities}
-                onLoadOlder={loadOlderActivities}
                 latestTurn={activeLatestTurn}
                 runningTurnId={
                   activeThread.session?.status === "running"
