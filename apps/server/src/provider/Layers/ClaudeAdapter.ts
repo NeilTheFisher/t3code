@@ -731,7 +731,8 @@ function readClaudeResumeState(resumeCursor: unknown): ClaudeResumeState | undef
   };
 }
 
-function classifyToolItemType(toolName: string): CanonicalItemType {
+/** Exported for tests; the substring matching below is easy to regress. */
+export function classifyToolItemType(toolName: string): CanonicalItemType {
   const normalized = toolName.toLowerCase();
   if (normalized.includes("agent")) {
     return "collab_agent_tool_call";
@@ -752,14 +753,14 @@ function classifyToolItemType(toolName: string): CanonicalItemType {
   ) {
     return "command_execution";
   }
+  // Only verbs that imply a file on their own. Bare "create"/"delete"/"replace"
+  // used to land here too, which mislabelled unrelated tools (TaskCreate) as
+  // file changes; those still match once paired with "file".
   if (
     normalized.includes("edit") ||
     normalized.includes("write") ||
     normalized.includes("file") ||
-    normalized.includes("patch") ||
-    normalized.includes("replace") ||
-    normalized.includes("create") ||
-    normalized.includes("delete")
+    normalized.includes("patch")
   ) {
     return "file_change";
   }
