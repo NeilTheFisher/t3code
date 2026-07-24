@@ -29,6 +29,9 @@ describe("mergeEnvironmentSettings", () => {
           enabled: true,
         },
       },
+    };
+    const clientSettings = {
+      ...DEFAULT_CLIENT_SETTINGS,
       favorites: [
         {
           provider: ProviderInstanceId.make("codex_remote"),
@@ -36,13 +39,10 @@ describe("mergeEnvironmentSettings", () => {
         },
       ],
     };
-    const clientSettings = {
-      ...DEFAULT_CLIENT_SETTINGS,
-    };
 
     const settings = mergeEnvironmentSettings(serverSettings, clientSettings);
 
     expect(settings.providerInstances).toBe(serverSettings.providerInstances);
-    expect(settings.favorites).toBe(serverSettings.favorites);
+    expect(settings.favorites).toBe(clientSettings.favorites);
   });
 });
