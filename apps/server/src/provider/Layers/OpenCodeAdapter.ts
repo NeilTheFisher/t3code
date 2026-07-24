@@ -8,6 +8,7 @@ import {
   type ProviderSession,
   RuntimeItemId,
   RuntimeRequestId,
+  RuntimeTaskId,
   ThreadId,
   type ToolLifecycleItemType,
   type TurnTokenUsage,
@@ -35,6 +36,7 @@ import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+import { extractToolFileChanges } from "./DiffUtils.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import {
   ProviderAdapterProcessError,
@@ -183,11 +185,6 @@ type OpenCodeSubscribedEvent =
     ? TEvent
     : never;
 
-type OpenCodeSessionStatusEvent = Extract<
-  OpenCodeSubscribedEvent,
-  { readonly type: "session.status" }
->;
-
 const OpenCodeSessionStatusMap = Schema.Record(
   Schema.String,
   Schema.Struct({ type: Schema.String }),
@@ -200,7 +197,20 @@ interface OpenCodeCancellation {
   readonly completion: Deferred.Deferred<void, ProviderAdapterRequestError>;
   acknowledged?: boolean;
   turnSettled?: boolean;
-  deferredIdleEvent?: OpenCodeSessionStatusEvent;
+  // Raw deferred idle signal (`session.status {type:"idle"}` or the separate
+  // `session.idle` event newer CLIs emit). Only ever fed back into
+  // `scheduleIdleReconciliation`, which accepts unknown payloads.
+  deferredIdleEvent?: unknown;
+}
+
+/**
+ * Background watch that settles a session which a turnless busy event
+ * re-armed to running back to ready once OpenCode's own session status
+ * reports idle. Mirrors the turn-level idle reconciliation polling; without
+ * it a missed idle event would leave the re-armed session running forever.
+ */
+interface OpenCodeSessionLivenessWatch {
+  fiber?: Fiber.Fiber<void, never>;
 }
 
 interface OpenCodeIdleReconciliation {
@@ -343,6 +353,14 @@ interface OpenCodeSessionContext {
   readonly directory: string;
   openCodeSessionId: string;
   readonly relatedSessionIds: Set<string>;
+  /**
+   * Child (subagent) sessions spawned by the parent's `task` tool, keyed by
+   * child session id. The value links back to the parent tool call and
+   * carries the task metadata needed to emit the Agents-surface lifecycle
+   * (`task.started`/`task.progress`/`task.updated`/`task.completed`) and to
+   * tag the child's items with `parentItemId`.
+   */
+  readonly childTasks: Map<string, OpenCodeChildTaskState>;
   readonly resolvedRequestIds: Set<string>;
   readonly autoRepliedRequestIds: Set<string>;
   readonly emittedTerminalRequestIds: Set<string>;
@@ -357,11 +375,17 @@ interface OpenCodeSessionContext {
   activeTurnId: TurnId | undefined;
   activeAgent: string | undefined;
   activeVariant: string | undefined;
+  accumulatedInputTokens: number;
+  accumulatedOutputTokens: number;
+  accumulatedReasoningTokens: number;
+  accumulatedCacheReadTokens: number;
+  modelContextWindow: number | undefined;
   cancellation: OpenCodeCancellation | undefined;
   interruptedTurnId: TurnId | undefined;
   reconcileIdleStatus: boolean;
   awaitingBusyAfterInterruption: boolean;
   pendingIdleReconciliation: OpenCodeIdleReconciliation | undefined;
+  sessionLivenessWatch: OpenCodeSessionLivenessWatch | undefined;
   pendingRequestRecovery: OpenCodePendingRequestRecovery | undefined;
   promptGeneration: number;
   promptAdmission: OpenCodePromptAdmission | undefined;
@@ -494,10 +518,47 @@ const toProcessError = (threadId: ThreadId, cause: unknown): ProviderAdapterProc
     cause,
   });
 
+interface OpenCodeChildTaskState {
+  readonly parentCallId: string;
+  readonly description: string | undefined;
+  readonly role: string | undefined;
+  readonly title: string | undefined;
+  taskStarted: boolean;
+  taskCompleted: boolean;
+}
+
+function openCodeTaskToolChildSessionId(part: Extract<Part, { type: "tool" }>): string | undefined {
+  if (part.tool.toLowerCase() !== "task") {
+    return undefined;
+  }
+  const sessionID = part.state.status === "pending" ? undefined : part.state.metadata?.sessionID;
+  return typeof sessionID === "string" && sessionID.trim().length > 0 ? sessionID : undefined;
+}
+
+function openCodeTaskToolInput(part: Extract<Part, { type: "tool" }>): Record<string, unknown> {
+  return part.state.status === "pending" ? {} : (part.state.input ?? {});
+}
+
+function openCodeTaskDescription(input: Record<string, unknown>): string | undefined {
+  return trimText(typeof input.description === "string" ? input.description : undefined);
+}
+
+function openCodeTaskRole(input: Record<string, unknown>): string | undefined {
+  const subagentType =
+    typeof input.subagent_type === "string" && input.subagent_type.trim().length > 0
+      ? input.subagent_type.trim()
+      : undefined;
+  if (subagentType) {
+    return subagentType;
+  }
+  return trimText(typeof input.agent === "string" ? input.agent : undefined);
+}
+
 type EventBaseInput = {
   readonly threadId: ThreadId;
   readonly turnId?: TurnId | undefined;
   readonly itemId?: string | undefined;
+  readonly parentItemId?: string | undefined;
   readonly requestId?: string | undefined;
   readonly createdAt?: string | undefined;
   readonly raw?: unknown;
@@ -536,33 +597,6 @@ function toToolLifecycleItemType(toolName: string): ToolLifecycleItemType {
     return "collab_agent_tool_call";
   }
   return "dynamic_tool_call";
-}
-
-function isOpenCodeTodoTool(toolName: string): boolean {
-  return toolName.toLowerCase().includes("todowrite");
-}
-
-function extractPlanStepsFromOpenCodeTodos(
-  input: Record<string, unknown>,
-): Array<{ step: string; status: "pending" | "inProgress" | "completed" }> | null {
-  const todos = input.todos;
-  if (!Array.isArray(todos) || todos.length === 0) {
-    return null;
-  }
-  return todos
-    .filter((t): t is Record<string, unknown> => t !== null && typeof t === "object")
-    .map((todo) => ({
-      step:
-        typeof todo.content === "string" && todo.content.trim().length > 0
-          ? todo.content.trim()
-          : "Task",
-      status:
-        todo.status === "completed"
-          ? "completed"
-          : todo.status === "in_progress"
-            ? "inProgress"
-            : "pending",
-    }));
 }
 
 function mapPermissionToRequestType(
@@ -682,7 +716,7 @@ export function mergeOpenCodeAssistantText(
   };
 }
 
-function appendOpenCodeAssistantTextDelta(
+export function appendOpenCodeAssistantTextDelta(
   previousText: string,
   delta: string,
 ): {
@@ -693,6 +727,14 @@ function appendOpenCodeAssistantTextDelta(
     nextText: previousText + delta,
     deltaToEmit: delta,
   };
+}
+
+export function extractOpenCodeToolFileChanges(
+  toolName: string,
+  input: Record<string, unknown>,
+): Array<{ path: string; diff: string }> | undefined {
+  const result = extractToolFileChanges(toolName, input);
+  return result && result.length > 0 ? result : undefined;
 }
 
 const isoFromEpochMs = (value: number) =>
@@ -1063,6 +1105,7 @@ export function makeOpenCodeAdapter(
           createdAt,
           ...(input.turnId ? { turnId: input.turnId } : {}),
           ...(input.itemId ? { itemId: RuntimeItemId.make(input.itemId) } : {}),
+          ...(input.parentItemId ? { parentItemId: RuntimeItemId.make(input.parentItemId) } : {}),
           ...(input.requestId ? { requestId: RuntimeRequestId.make(input.requestId) } : {}),
           ...(input.raw !== undefined
             ? {
@@ -1299,6 +1342,216 @@ export function makeOpenCodeAdapter(
         ),
       );
       pending.fiber = yield* reconcile.pipe(Effect.forkIn(context.sessionScope));
+    });
+
+    const cancelSessionLivenessWatch = Effect.fn("cancelSessionLivenessWatch")(function* (
+      context: OpenCodeSessionContext,
+    ) {
+      const pending = context.sessionLivenessWatch;
+      context.sessionLivenessWatch = undefined;
+      if (pending?.fiber) {
+        yield* Fiber.interrupt(pending.fiber);
+      }
+    });
+
+    /**
+     * Poll OpenCode's session status until it reports idle, then settle a
+     * session that a turnless busy event re-armed to running back to ready.
+     * This is the way out for the busy re-arm: without it a missed idle
+     * event would leave the projection running forever. Mirrors the polling
+     * of {@link scheduleIdleReconciliation}, minus turn completion — a
+     * turnless watch never owns turn lifecycle state.
+     */
+    const scheduleSessionLivenessWatch = Effect.fn("scheduleSessionLivenessWatch")(function* (
+      context: OpenCodeSessionContext,
+    ) {
+      if (context.sessionLivenessWatch !== undefined) {
+        return;
+      }
+      const pending: OpenCodeSessionLivenessWatch = {};
+      context.sessionLivenessWatch = pending;
+      const watch = Effect.gen(function* () {
+        // Give the ordered event stream a beat to deliver the matching idle
+        // event before the first poll; polling immediately could observe a
+        // stale idle and undo the re-arm the busy event just performed.
+        yield* Effect.sleep("250 millis");
+        let retryCount = 0;
+        while (context.sessionLivenessWatch === pending) {
+          if (
+            context.activeTurnId !== undefined ||
+            context.pendingIdleReconciliation !== undefined ||
+            (yield* Ref.get(context.stopped)) ||
+            sessions.get(context.session.threadId) !== context
+          ) {
+            context.sessionLivenessWatch = undefined;
+            return;
+          }
+          const result = yield* runOpenCodeSdk("session.status", (signal) =>
+            context.client.session.status(undefined, { signal }),
+          ).pipe(
+            Effect.timeout("1 second"),
+            Effect.retry({ times: 1 }),
+            Effect.match({
+              onFailure: (cause) => ({ type: "unknown" as const, cause }),
+              onSuccess: (response) => {
+                const data = Option.getOrUndefined(decodeOpenCodeSessionStatusMap(response.data));
+                if (data === undefined) {
+                  return { type: "unknown" as const, cause: undefined };
+                }
+                const status = data[context.openCodeSessionId];
+                if (status === undefined || status.type === "idle") {
+                  return { type: "idle" as const };
+                }
+                if (status.type === "busy" || status.type === "retry") {
+                  return { type: "busy" as const };
+                }
+                return { type: "unknown" as const, cause: undefined };
+              },
+            }),
+          );
+          if (
+            result.type === "idle" &&
+            context.sessionLivenessWatch === pending &&
+            context.activeTurnId === undefined &&
+            context.pendingIdleReconciliation === undefined &&
+            context.session.status === "running" &&
+            sessions.get(context.session.threadId) === context
+          ) {
+            context.sessionLivenessWatch = undefined;
+            applyProviderSessionUpdate(
+              context,
+              { status: "ready" },
+              { clearActiveTurnId: true },
+              yield* nowIso,
+            );
+            yield* emit({
+              ...(yield* buildEventBase({ threadId: context.session.threadId })),
+              type: "session.state.changed",
+              payload: { state: "ready" },
+            });
+            return;
+          }
+          if (result.type === "idle") {
+            // Idle per the poll, but turn machinery or teardown took over
+            // settle. The watch has nothing left to arbitrate.
+            context.sessionLivenessWatch = undefined;
+            return;
+          }
+          const delayMs = Math.min(250 * 2 ** retryCount, 5_000);
+          retryCount += 1;
+          yield* Effect.sleep(`${delayMs} millis`);
+        }
+      }).pipe(
+        Effect.catchCause(() => Effect.void),
+        Effect.ensuring(
+          Effect.sync(() => {
+            if (context.sessionLivenessWatch === pending) {
+              context.sessionLivenessWatch = undefined;
+            }
+          }),
+        ),
+      );
+      pending.fiber = yield* watch.pipe(Effect.forkIn(context.sessionScope));
+    });
+
+    /**
+     * A `session.status` busy/retry event with no tracked turn: OpenCode is
+     * (still) working after a terminal event already closed the T3 turn — a
+     * user-stop abort the CLI ignored, a spurious idle that completed the
+     * turn mid-run, or a failed prompt whose cleanup abort did not take.
+     * Re-arm the session to running (turn receipts were already emitted, so
+     * there is no turn to re-adopt) and start the liveness watch that
+     * settles it back to ready. Residual risk: a single stray busy event
+     * emitted after a genuinely settled turn flips the session to running
+     * until the watch observes idle (or an idle event arrives).
+     */
+    const scheduleSessionBusyReconciliation = Effect.fn("scheduleSessionBusyReconciliation")(
+      function* (context: OpenCodeSessionContext) {
+        if (
+          context.activeTurnId !== undefined ||
+          context.pendingIdleReconciliation !== undefined ||
+          (yield* Ref.get(context.stopped)) ||
+          sessions.get(context.session.threadId) !== context
+        ) {
+          return;
+        }
+        context.awaitingBusyAfterInterruption = false;
+        const updatedAt = yield* nowIso;
+        // Re-check after the yield: sendTurn may have adopted a new turn in
+        // the interim, and that turn owns the session state.
+        if (
+          context.activeTurnId !== undefined ||
+          context.pendingIdleReconciliation !== undefined ||
+          (yield* Ref.get(context.stopped)) ||
+          sessions.get(context.session.threadId) !== context
+        ) {
+          return;
+        }
+        if (context.session.status !== "running" || context.session.activeTurnId !== undefined) {
+          applyProviderSessionUpdate(
+            context,
+            { status: "running" },
+            { clearActiveTurnId: true },
+            updatedAt,
+          );
+          yield* emit({
+            ...(yield* buildEventBase({ threadId: context.session.threadId })),
+            type: "session.state.changed",
+            payload: { state: "running" },
+          });
+        }
+        yield* scheduleSessionLivenessWatch(context);
+      },
+    );
+
+    /**
+     * Shared settle decision for the two idle signals OpenCode emits: the
+     * `session.status {type:"idle"}` flip and the separate `session.idle`
+     * event (declared since SDK 1.15; newer CLIs emit it instead of, or
+     * alongside, the status flip). Payload shapes differ across versions, so
+     * only the raw event is carried — completion always keys off the
+     * adapter's tracked active turn. A turnless idle may only settle a
+     * session that a turnless busy re-armed to running; it must never touch
+     * a turn's lifecycle state.
+     */
+    const settleOpenCodeIdleSignal = Effect.fn("settleOpenCodeIdleSignal")(function* (
+      context: OpenCodeSessionContext,
+      turnId: TurnId | undefined,
+      raw: unknown,
+    ) {
+      if (turnId === undefined) {
+        if (
+          context.activeTurnId === undefined &&
+          context.pendingIdleReconciliation === undefined &&
+          context.session.status === "running"
+        ) {
+          yield* updateProviderSession(context, { status: "ready" }, { clearActiveTurnId: true });
+          yield* emit({
+            ...(yield* buildEventBase({ threadId: context.session.threadId })),
+            type: "session.state.changed",
+            payload: { state: "ready" },
+          });
+        }
+        return;
+      }
+      if (context.cancellation?.turnId === turnId) {
+        context.cancellation.deferredIdleEvent = raw;
+        return;
+      }
+      if (context.promptAdmission?.turnId === turnId) {
+        context.promptAdmission.idleDuringAdmission = { turnId, raw };
+        context.promptAdmission.idleObservedAfterMessage = context.promptAdmission.messageObserved;
+        yield* schedulePromptAdmissionRecovery(context, raw);
+        return;
+      }
+      if (context.awaitingBusyAfterInterruption) {
+        return;
+      }
+      if (context.reconcileIdleStatus) {
+        yield* scheduleIdleReconciliation(context, turnId, raw);
+        return;
+      }
+      yield* completeOpenCodeTurn(context, turnId, context.promptGeneration, raw);
     });
 
     const failPromptAdmissionRecovery = Effect.fn("failPromptAdmissionRecovery")(function* (
@@ -1640,6 +1893,60 @@ export function makeOpenCodeAdapter(
       yield* Scope.close(context.sessionScope, Exit.void);
     });
 
+    /**
+     * Feed the context-window circle from step-finish token counts. Usage
+     * accumulates across the session; `usedTokens` is the current context
+     * size (prompt + latest output + cache reads), clamped to the model's
+     * context limit when known. OpenCode compacts automatically, so the
+     * circle is cosmetic.
+     */
+    const emitTokenUsage = Effect.fn("emitTokenUsage")(function* (
+      context: OpenCodeSessionContext,
+      tokens: OpenCodeStepUsage["tokens"],
+      turnId: TurnId | undefined,
+      raw: unknown,
+    ) {
+      const inputTokens = tokens.input;
+      const outputTokens = tokens.output;
+      const reasoningTokens = tokens.reasoning ?? 0;
+      context.accumulatedInputTokens += inputTokens;
+      context.accumulatedOutputTokens += outputTokens;
+      context.accumulatedReasoningTokens += reasoningTokens;
+      context.accumulatedCacheReadTokens += tokens.cache.read;
+
+      const contextTokens = inputTokens + outputTokens + tokens.cache.read;
+      const maxTokens = context.modelContextWindow;
+      const usedTokens =
+        maxTokens !== undefined ? Math.min(contextTokens, maxTokens) : contextTokens;
+      const totalProcessedTokens = context.accumulatedInputTokens + context.accumulatedOutputTokens;
+
+      yield* emit({
+        ...(yield* buildEventBase({
+          threadId: context.session.threadId,
+          turnId,
+          raw,
+        })),
+        type: "thread.token-usage.updated",
+        payload: {
+          usage: {
+            usedTokens,
+            ...(maxTokens !== undefined ? { maxTokens } : {}),
+            ...(totalProcessedTokens > usedTokens ? { totalProcessedTokens } : {}),
+            inputTokens: context.accumulatedInputTokens,
+            outputTokens: context.accumulatedOutputTokens,
+            reasoningOutputTokens: context.accumulatedReasoningTokens,
+            cachedInputTokens: context.accumulatedCacheReadTokens,
+            lastUsedTokens: inputTokens + outputTokens,
+            lastInputTokens: inputTokens,
+            lastOutputTokens: outputTokens,
+            lastReasoningOutputTokens: reasoningTokens,
+            lastCachedInputTokens: tokens.cache.read,
+            compactsAutomatically: true,
+          },
+        },
+      });
+    });
+
     /** Emit content.delta and item.completed events for an assistant text part. */
     const emitAssistantTextDelta = Effect.fn("emitAssistantTextDelta")(function* (
       context: OpenCodeSessionContext,
@@ -1753,6 +2060,244 @@ export function makeOpenCodeAdapter(
         sessionId = response.data.parentID;
       }
       return false;
+    });
+
+    // Records a `task`-tool child session and emits its `task.started` row for
+    // the Agents surface. Idempotent per child session: the parent re-emits
+    // the running task part on every update, but the lifecycle starts once.
+    const registerOpenCodeChildTask = Effect.fn("registerOpenCodeChildTask")(function* (
+      context: OpenCodeSessionContext,
+      parentCallId: string,
+      childSessionId: string,
+      input: Record<string, unknown>,
+      title: string | undefined,
+      turnId: TurnId | undefined,
+      raw: unknown,
+    ) {
+      addRelatedOpenCodeSession(context, childSessionId);
+      let child = context.childTasks.get(childSessionId);
+      if (!child) {
+        child = {
+          parentCallId,
+          description: openCodeTaskDescription(input),
+          role: openCodeTaskRole(input),
+          title,
+          taskStarted: false,
+          taskCompleted: false,
+        };
+        context.childTasks.set(childSessionId, child);
+      }
+      if (child.taskStarted) {
+        return;
+      }
+      child.taskStarted = true;
+      yield* emit({
+        ...(yield* buildEventBase({
+          threadId: context.session.threadId,
+          turnId,
+          raw,
+        })),
+        type: "task.started",
+        payload: {
+          taskId: RuntimeTaskId.make(childSessionId),
+          ...(child.description ? { description: child.description } : {}),
+          taskType: "local_agent",
+          ...(child.role ? { role: child.role } : {}),
+          ...(child.title ? { title: child.title } : {}),
+          toolUseId: parentCallId,
+          timelineBypass: true,
+        },
+      });
+    });
+
+    // Settles the child task lifecycle when its parent `task` tool part
+    // reaches a terminal state. Terminal exactly once; late duplicates are
+    // ignored so a re-emitted completed part cannot reopen the row.
+    const settleOpenCodeChildTask = Effect.fn("settleOpenCodeChildTask")(function* (
+      context: OpenCodeSessionContext,
+      childSessionId: string,
+      status: "completed" | "failed",
+      summary: string | undefined,
+      turnId: TurnId | undefined,
+      raw: unknown,
+    ) {
+      const child = context.childTasks.get(childSessionId);
+      if (!child || child.taskCompleted) {
+        return;
+      }
+      child.taskCompleted = true;
+      yield* emit({
+        ...(yield* buildEventBase({
+          threadId: context.session.threadId,
+          turnId,
+          raw,
+        })),
+        type: "task.completed",
+        payload: {
+          taskId: RuntimeTaskId.make(childSessionId),
+          status,
+          ...(summary ? { summary } : {}),
+          taskType: "local_agent",
+          ...(child.role ? { role: child.role } : {}),
+          ...(child.title ? { title: child.title } : {}),
+          toolUseId: child.parentCallId,
+          timelineBypass: true,
+        },
+      });
+    });
+
+    // Routes events from a known child session into Agents-surface runtime
+    // events: the child's items become `parentItemId`-tagged `item.updated`
+    // rows (the panel re-homes them under the owning agent) and its
+    // tool/status transitions drive the live task lifecycle.
+    const handleChildSessionEvent = Effect.fn("handleChildSessionEvent")(function* (
+      context: OpenCodeSessionContext,
+      event: OpenCodeSubscribedEvent,
+      childSessionId: string,
+      turnId: TurnId | undefined,
+    ) {
+      const child = context.childTasks.get(childSessionId);
+      switch (event.type) {
+        case "message.part.updated": {
+          const part = event.properties.part;
+          if (part.type === "tool" && part.tool.toLowerCase() === "task") {
+            // A nested subagent spawned from inside the child: link it so its
+            // own events attribute to this nested call.
+            const nestedChildId = openCodeTaskToolChildSessionId(part);
+            if (nestedChildId !== undefined) {
+              const nestedTitle =
+                part.state.status === "running" || part.state.status === "completed"
+                  ? (part.state.title ?? part.tool)
+                  : part.tool;
+              yield* registerOpenCodeChildTask(
+                context,
+                part.callID,
+                nestedChildId,
+                openCodeTaskToolInput(part),
+                nestedTitle,
+                turnId,
+                event,
+              );
+            }
+            if (child === undefined) {
+              return;
+            }
+          } else if (child === undefined) {
+            // Unknown provenance (e.g. the parent task part was missed): the
+            // panel cannot attribute the item, so drop it rather than leaking
+            // child content into the parent timeline.
+            return;
+          }
+          const parentItemId = child.parentCallId;
+          if (part.type === "text" || part.type === "reasoning") {
+            if (part.text.trim().length === 0) {
+              return;
+            }
+            yield* emit({
+              ...(yield* buildEventBase({
+                threadId: context.session.threadId,
+                turnId,
+                itemId: part.id,
+                parentItemId,
+                createdAt: part.time !== undefined ? isoFromEpochMs(part.time.start) : undefined,
+                raw: event,
+              })),
+              type: "item.updated",
+              payload: {
+                itemType: "assistant_message",
+                ...(part.time?.end !== undefined
+                  ? { status: "completed" as const }
+                  : { status: "inProgress" as const }),
+                detail: part.text,
+              },
+            });
+            return;
+          }
+          if (part.type === "tool") {
+            const itemType = toToolLifecycleItemType(part.tool);
+            const title =
+              part.state.status === "running" || part.state.status === "completed"
+                ? (part.state.title ?? part.tool)
+                : part.tool;
+            const detail = detailFromToolPart(part);
+            yield* emit({
+              ...(yield* buildEventBase({
+                threadId: context.session.threadId,
+                turnId,
+                itemId: part.callID,
+                parentItemId,
+                createdAt: toolStateCreatedAt(part),
+                raw: event,
+              })),
+              type: "item.updated",
+              payload: {
+                itemType,
+                ...(part.state.status === "error"
+                  ? { status: "failed" as const }
+                  : part.state.status === "completed"
+                    ? { status: "completed" as const }
+                    : { status: "inProgress" as const }),
+                ...(title ? { title } : {}),
+                ...(detail ? { detail } : {}),
+              },
+            });
+            if (part.state.status === "running") {
+              const nested = context.childTasks.get(childSessionId);
+              yield* emit({
+                ...(yield* buildEventBase({
+                  threadId: context.session.threadId,
+                  turnId,
+                  raw: event,
+                })),
+                type: "task.progress",
+                payload: {
+                  taskId: RuntimeTaskId.make(childSessionId),
+                  description: nested?.description ?? nested?.title ?? childSessionId,
+                  lastToolName: part.tool,
+                  taskType: "local_agent",
+                  ...(nested?.role ? { role: nested.role } : {}),
+                  toolUseId: parentItemId,
+                  timelineBypass: true,
+                },
+              });
+            }
+            return;
+          }
+          return;
+        }
+
+        case "session.status":
+        case "session.idle": {
+          if (child === undefined || child.taskCompleted) {
+            return;
+          }
+          const idle = event.type === "session.idle" || event.properties.status.type === "idle";
+          if (!idle) {
+            return;
+          }
+          yield* emit({
+            ...(yield* buildEventBase({
+              threadId: context.session.threadId,
+              turnId,
+              raw: event,
+            })),
+            type: "task.updated",
+            payload: {
+              taskId: RuntimeTaskId.make(childSessionId),
+              status: "idle",
+              taskType: "local_agent",
+              ...(child.role ? { role: child.role } : {}),
+              ...(child.title ? { title: child.title } : {}),
+              toolUseId: child.parentCallId,
+              timelineBypass: true,
+            },
+          });
+          return;
+        }
+
+        default:
+          return;
+      }
     });
 
     const openPermissionRequest = Effect.fn("openPermissionRequest")(function* (
@@ -2287,6 +2832,20 @@ export function makeOpenCodeAdapter(
         payloadSessionId !== undefined &&
         isOpenCodeChildRequestEvent(event) &&
         (context.relatedSessionIds.has(payloadSessionId) || isKnownPendingTerminalEvent);
+      // Child (subagent) session content never enters the parent timeline:
+      // route it into `parentItemId`-tagged subagent items and the live task
+      // lifecycle instead. Child approval/question flows stay on the existing
+      // child-request path. This must precede the parent/child-request gate
+      // below, which would otherwise drop every other child event.
+      if (
+        payloadSessionId !== undefined &&
+        payloadSessionId !== context.openCodeSessionId &&
+        context.relatedSessionIds.has(payloadSessionId) &&
+        !isOpenCodeChildRequestEvent(event)
+      ) {
+        yield* handleChildSessionEvent(context, event, payloadSessionId, context.activeTurnId);
+        return;
+      }
       if (!isParentEvent && !isChildRequestEvent) {
         return;
       }
@@ -2516,6 +3075,13 @@ export function makeOpenCodeAdapter(
                 ? (part.state.title ?? part.tool)
                 : part.tool;
             const detail = detailFromToolPart(part);
+            const fileChanges =
+              part.state.status === "completed" && itemType === "file_change"
+                ? extractOpenCodeToolFileChanges(
+                    part.tool,
+                    part.state.input as Record<string, unknown>,
+                  )
+                : undefined;
             const payload = {
               itemType,
               ...(part.state.status === "error"
@@ -2532,6 +3098,7 @@ export function makeOpenCodeAdapter(
                   ? { command: part.state.input.command }
                   : {}),
                 ...(itemType === "file_change" ? { input: part.state.input } : {}),
+                ...(fileChanges ? { changes: fileChanges } : {}),
                 ...(part.state.status === "completed" &&
                 (itemType === "command_execution" || itemType === "mcp_tool_call")
                   ? { result: part.state.output }
@@ -2556,26 +3123,38 @@ export function makeOpenCodeAdapter(
             };
             yield* emit(runtimeEvent);
 
-            // Emit plan update when todowrite tool input is parsed
-            if (isOpenCodeTodoTool(part.tool)) {
-              const input = part.state.input;
-              if (input && typeof input === "object") {
-                const planSteps = extractPlanStepsFromOpenCodeTodos(
-                  input as Record<string, unknown>,
+            // The `task` tool spawns a child (subagent) session: link it to
+            // this tool call and drive the Agents-surface task lifecycle.
+            if (isParentEvent) {
+              const taskChildId = openCodeTaskToolChildSessionId(part);
+              if (taskChildId !== undefined) {
+                yield* registerOpenCodeChildTask(
+                  context,
+                  part.callID,
+                  taskChildId,
+                  openCodeTaskToolInput(part),
+                  title,
+                  turnId,
+                  event,
                 );
-                if (planSteps && planSteps.length > 0) {
-                  yield* emit({
-                    ...(yield* buildEventBase({
-                      threadId: context.session.threadId,
-                      turnId,
-                      raw: event,
-                    })),
-                    type: "turn.plan.updated",
-                    payload: { plan: planSteps },
-                  });
+                if (part.state.status === "completed" || part.state.status === "error") {
+                  yield* settleOpenCodeChildTask(
+                    context,
+                    taskChildId,
+                    part.state.status === "completed" ? "completed" : "failed",
+                    trimText(
+                      part.state.status === "completed" ? part.state.output : part.state.error,
+                    ),
+                    turnId,
+                    event,
+                  );
                 }
               }
             }
+          }
+
+          if (part.type === "step-finish") {
+            yield* emitTokenUsage(context, part.tokens, turnId, event);
           }
           break;
         }
@@ -2637,6 +3216,11 @@ export function makeOpenCodeAdapter(
         case "session.status": {
           if (event.properties.status.type === "busy" || event.properties.status.type === "retry") {
             if (turnId === undefined) {
+              // One-way-door fix: after a terminal event cleared the active
+              // turn (user-stop abort, spurious idle, prompt failure),
+              // OpenCode can keep working. Re-arm the session to running via
+              // the session-state path instead of dropping the event.
+              yield* scheduleSessionBusyReconciliation(context);
               break;
             }
             yield* cancelIdleReconciliation(context);
@@ -2667,27 +3251,19 @@ export function makeOpenCodeAdapter(
             break;
           }
 
-          if (event.properties.status.type === "idle" && turnId) {
-            if (context.cancellation?.turnId === turnId) {
-              context.cancellation.deferredIdleEvent = event;
-              break;
-            }
-            if (context.promptAdmission?.turnId === turnId) {
-              context.promptAdmission.idleDuringAdmission = { turnId, raw: event };
-              context.promptAdmission.idleObservedAfterMessage =
-                context.promptAdmission.messageObserved;
-              yield* schedulePromptAdmissionRecovery(context, event);
-              break;
-            }
-            if (context.awaitingBusyAfterInterruption) {
-              break;
-            }
-            if (context.reconcileIdleStatus) {
-              yield* scheduleIdleReconciliation(context, turnId, event);
-              break;
-            }
-            yield* completeOpenCodeTurn(context, turnId, context.promptGeneration, event);
+          if (event.properties.status.type === "idle") {
+            yield* settleOpenCodeIdleSignal(context, turnId, event);
           }
+          break;
+        }
+
+        case "session.idle": {
+          // Newer OpenCode CLIs emit a dedicated `session.idle` event that is
+          // distinct from `session.status {type:"idle"}` (SDK 1.15 types them
+          // separately). Route it through the same completion decision and
+          // tolerate payload shapes that carry extra fields (e.g. a turn id)
+          // — completion keys off the adapter's tracked active turn.
+          yield* settleOpenCodeIdleSignal(context, turnId, event);
           break;
         }
 
@@ -2876,6 +3452,28 @@ export function makeOpenCodeAdapter(
       );
     });
 
+    // The context window only drives the cosmetic context circle, so every
+    // lookup failure degrades to `undefined` rather than failing the turn —
+    // custom models and older runtimes may not expose `provider.list` at all.
+    const resolveModelContextWindow = (
+      modelSlug: string | undefined,
+      client: OpencodeClient,
+    ): Effect.Effect<number | undefined> =>
+      Effect.gen(function* () {
+        const parsed = parseOpenCodeModelSlug(modelSlug);
+        if (!parsed) return undefined;
+        if (typeof client.provider?.list !== "function") return undefined;
+        const providerList = yield* runOpenCodeSdk("provider.list", (signal) =>
+          client.provider.list(undefined, { signal }),
+        );
+        const providerData = providerList.data;
+        if (!providerData) return undefined;
+        const provider = providerData.all.find((p) => p.id === parsed.providerID);
+        if (!provider) return undefined;
+        const model = provider.models?.[parsed.modelID];
+        return model?.limit?.context;
+      }).pipe(Effect.orElseSucceed(() => undefined));
+
     const startSession: OpenCodeAdapterShape["startSession"] = Effect.fn("startSession")(
       function* (input) {
         const binaryPath = openCodeSettings.binaryPath;
@@ -3031,6 +3629,11 @@ export function makeOpenCodeAdapter(
           return startedExit.value;
         });
 
+        const modelContextWindow: number | undefined = yield* resolveModelContextWindow(
+          input.modelSelection?.model,
+          started.client,
+        );
+
         const createdAt = yield* nowIso;
         const session: ProviderSession = {
           provider: PROVIDER,
@@ -3058,6 +3661,7 @@ export function makeOpenCodeAdapter(
           directory,
           openCodeSessionId: started.openCodeSession.id,
           relatedSessionIds: new Set([started.openCodeSession.id]),
+          childTasks: new Map(),
           resolvedRequestIds: new Set(),
           autoRepliedRequestIds: new Set(),
           emittedTerminalRequestIds: new Set(),
@@ -3070,11 +3674,17 @@ export function makeOpenCodeAdapter(
           activeTurnId: undefined,
           activeAgent: undefined,
           activeVariant: undefined,
+          accumulatedInputTokens: 0,
+          accumulatedOutputTokens: 0,
+          accumulatedReasoningTokens: 0,
+          accumulatedCacheReadTokens: 0,
+          modelContextWindow,
           cancellation: undefined,
           interruptedTurnId: undefined,
           reconcileIdleStatus: false,
           awaitingBusyAfterInterruption: false,
           pendingIdleReconciliation: undefined,
+          sessionLivenessWatch: undefined,
           pendingRequestRecovery: undefined,
           promptGeneration: 0,
           promptAdmission: undefined,
@@ -3248,6 +3858,21 @@ export function makeOpenCodeAdapter(
           context.promptGeneration = promptGeneration;
           context.promptAdmission = promptAdmission;
 
+          // Update the context window limit when the model changes so the
+          // context circle reflects the new model's capacity. This is cosmetic
+          // (the provider handles real compaction) but avoids showing a stale
+          // percentage after a mid-session model switch.
+          const newModelSlug = modelSelection?.model;
+          if (newModelSlug !== undefined && newModelSlug !== context.session.model) {
+            const updatedContextWindow = yield* resolveModelContextWindow(
+              newModelSlug,
+              context.client,
+            );
+            if (updatedContextWindow !== undefined) {
+              context.modelContextWindow = updatedContextWindow;
+            }
+          }
+
           context.activeTurnId = turnId;
           if (steeringTurnId === undefined) {
             context.turnTokenUsage = makeOpenCodeTurnTokenUsageAccumulator();
@@ -3261,6 +3886,9 @@ export function makeOpenCodeAdapter(
           if (pendingIdleReconciliation?.fiber) {
             yield* Fiber.interrupt(pendingIdleReconciliation.fiber);
           }
+          // The turnless busy-reconciliation watch is inert once a turn owns
+          // the session state; stop it so it cannot outlive the turn either.
+          yield* cancelSessionLivenessWatch(context);
           yield* updateProviderSession(
             context,
             {
