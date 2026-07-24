@@ -49,7 +49,11 @@ import {
 import { ProviderAdapterProcessError, ProviderAdapterValidationError } from "../Errors.ts";
 import type { ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
 import type { ClaudeScopedLimitNames } from "./claudeUsageLimits.ts";
-import { makeClaudeAdapter, type ClaudeAdapterLiveOptions } from "./ClaudeAdapter.ts";
+import {
+  classifyToolItemType,
+  makeClaudeAdapter,
+  type ClaudeAdapterLiveOptions,
+} from "./ClaudeAdapter.ts";
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
 const encodeUnknownJsonString = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
@@ -308,6 +312,25 @@ async function readPromptMessages(
 const THREAD_ID = ThreadId.make("thread-claude-1");
 const RESUME_THREAD_ID = ThreadId.make("thread-claude-resume");
 const SYNTHETIC_SUBAGENT_MODEL = "claude-synthetic-subagent[expanded]";
+
+describe("classifyToolItemType", () => {
+  it("classifies real file tools as file changes", () => {
+    for (const name of ["Edit", "Write", "MultiEdit", "NotebookEdit", "apply_patch"]) {
+      assert.equal(classifyToolItemType(name), "file_change");
+    }
+  });
+
+  it("does not treat non-file tools that merely create or delete as file changes", () => {
+    for (const name of ["TaskCreate", "TaskUpdate", "CronDelete"]) {
+      assert.equal(classifyToolItemType(name), "dynamic_tool_call");
+    }
+  });
+
+  it("still classifies commands and subagents", () => {
+    assert.equal(classifyToolItemType("Bash"), "command_execution");
+    assert.equal(classifyToolItemType("Agent"), "collab_agent_tool_call");
+  });
+});
 
 describe("ClaudeAdapterLive", () => {
   it.effect("returns validation error for non-claude provider on startSession", () => {
