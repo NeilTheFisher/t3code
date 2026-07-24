@@ -253,7 +253,7 @@ function itemTitle(itemType: CanonicalItemType, item?: CodexLifecycleItem): stri
     case "plan":
       return "Plan";
     case "command_execution":
-      return "Ran command";
+      return "Bash";
     case "file_change":
       return "File change";
     case "mcp_tool_call":
