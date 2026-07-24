@@ -10,7 +10,6 @@ import * as Arr from "effect/Array";
 import { shallow } from "zustand/vanilla/shallow";
 import { isBackgroundTaskActivity } from "@t3tools/client-runtime/state/subagentRuntime";
 import {
-  commandDetailRepeatsCommand,
   extractCommandOutputText,
   extractWorkLogToolLifecycleStatus,
   isWorktreeSetupActivity,
@@ -1244,24 +1243,16 @@ function extractToolDetail(
     ? extractToolCommand(payload)
     : { command: null, rawCommand: null };
   const command = commandPreview.command;
+  const normalizedCommand = normalizePreviewForComparison(command);
+  const normalizedUnwrappedDetail =
+    commandTool && command
+      ? normalizePreviewForComparison(unwrapKnownShellCommandWrapper(detail ?? ""))
+      : null;
+  const detailMatchesCommand =
+    normalizedCommand !== null &&
+    (normalizedCommand === normalizedDetail || normalizedCommand === normalizedUnwrappedDetail);
 
-  if (commandTool && command) {
-    const output = extractToolOutput(payload);
-    if (output) return output;
-  }
-
-  const data = asRecord(payload?.data);
-  const repeatsCommand =
-    detail !== null &&
-    commandDetailRepeatsCommand({
-      detail,
-      command,
-      rawCommand: commandPreview.rawCommand,
-      toolName: data?.toolName,
-      data,
-    });
-
-  if (detail && normalizedHeading !== normalizedDetail && (!commandTool || !repeatsCommand)) {
+  if (detail && normalizedHeading !== normalizedDetail && (!commandTool || !detailMatchesCommand)) {
     return detail;
   }
 
