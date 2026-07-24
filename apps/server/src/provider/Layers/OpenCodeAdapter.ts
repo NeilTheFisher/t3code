@@ -347,16 +347,11 @@ interface OpenCodeSessionContext {
   activeTurnId: TurnId | undefined;
   activeAgent: string | undefined;
   activeVariant: string | undefined;
-  cancellation: OpenCodeCancellation | undefined;
-  interruptedTurnId: TurnId | undefined;
-  reconcileIdleStatus: boolean;
-  awaitingBusyAfterInterruption: boolean;
-  pendingIdleReconciliation: OpenCodeIdleReconciliation | undefined;
-  pendingRequestRecovery: OpenCodePendingRequestRecovery | undefined;
-  promptGeneration: number;
-  promptAdmission: OpenCodePromptAdmission | undefined;
-  readonly promptSemaphore: Semaphore.Semaphore;
-  readonly firstConnection: Deferred.Deferred<void, ProviderAdapterRequestError>;
+  accumulatedInputTokens: number;
+  accumulatedOutputTokens: number;
+  accumulatedReasoningTokens: number;
+  accumulatedCacheReadTokens: number;
+  modelContextWindow: number | undefined;
   /**
    * One-shot guard flipped by `stopOpenCodeContext` / `emitUnexpectedExit`.
    * The session lifecycle is owned by `sessionScope`; this Ref exists only
@@ -1766,16 +1761,43 @@ export function makeOpenCodeAdapter(
         },
       });
 
-      const suppressInterruptedParentOutput =
-        isParentEvent &&
-        ((context.activeTurnId === undefined &&
-          (context.interruptedTurnId !== undefined || context.reconcileIdleStatus)) ||
-          context.awaitingBusyAfterInterruption) &&
-        (event.type === "message.part.delta" ||
-          event.type === "message.part.updated" ||
-          (event.type === "message.updated" && event.properties.info.role === "assistant"));
-      if (suppressInterruptedParentOutput) {
-        return;
+      function* emitTokenUsage(
+        tokens: NonNullable<typeof part.tokens>,
+      ): Generator<any, void, unknown> {
+        const inputTokens = tokens.input!;
+        const outputTokens = tokens.output!;
+        const reasoningTokens = tokens.reasoning ?? 0;
+        context.accumulatedInputTokens += inputTokens;
+        context.accumulatedOutputTokens += outputTokens;
+        context.accumulatedReasoningTokens += reasoningTokens;
+        context.accumulatedCacheReadTokens += tokens.cache?.read ?? 0;
+
+        yield* emit({
+          ...(yield* buildEventBase({
+            threadId: context.session.threadId,
+            turnId,
+            raw: event,
+          })),
+          type: "thread.token-usage.updated",
+          payload: {
+            usage: {
+              usedTokens: context.accumulatedInputTokens + context.accumulatedOutputTokens,
+              ...(context.modelContextWindow !== undefined
+                ? { maxTokens: context.modelContextWindow }
+                : {}),
+              inputTokens: context.accumulatedInputTokens,
+              outputTokens: context.accumulatedOutputTokens,
+              reasoningOutputTokens: context.accumulatedReasoningTokens,
+              cachedInputTokens: context.accumulatedCacheReadTokens,
+              lastUsedTokens: inputTokens + outputTokens,
+              lastInputTokens: inputTokens,
+              lastOutputTokens: outputTokens,
+              lastReasoningOutputTokens: reasoningTokens,
+              lastCachedInputTokens: tokens.cache?.read ?? 0,
+              compactsAutomatically: true,
+            },
+          },
+        });
       }
 
       switch (event.type) {
@@ -1961,6 +1983,14 @@ export function makeOpenCodeAdapter(
                 }
               }
             }
+          }
+
+          if (
+            part.type === "step-finish" &&
+            part.tokens?.input !== undefined &&
+            part.tokens?.output !== undefined
+          ) {
+            yield* emitTokenUsage(part.tokens!);
           }
           break;
         }
@@ -2193,6 +2223,22 @@ export function makeOpenCodeAdapter(
       }
     });
 
+    const resolveModelContextWindow = (
+      modelSlug: string | undefined,
+      client: OpencodeClient,
+    ): Effect.Effect<number | undefined, OpenCodeRuntimeError> =>
+      Effect.gen(function* () {
+        const parsed = parseOpenCodeModelSlug(modelSlug);
+        if (!parsed) return undefined;
+        const providerList = yield* runOpenCodeSdk("provider.list", () => client.provider.list());
+        const providerData = providerList.data;
+        if (!providerData) return undefined;
+        const provider = providerData.all.find((p) => p.id === parsed.providerID);
+        if (!provider) return undefined;
+        const model = provider.models?.[parsed.modelID];
+        return model?.limit?.context;
+      });
+
     const startSession: OpenCodeAdapterShape["startSession"] = Effect.fn("startSession")(
       function* (input) {
         const binaryPath = openCodeSettings.binaryPath;
@@ -2345,6 +2391,31 @@ export function makeOpenCodeAdapter(
           return startedExit.value;
         });
 
+        // Guard against a concurrent startSession call that may have raced
+        // and already inserted a session while we were awaiting async work.
+        const raceWinner = sessions.get(input.threadId);
+        if (raceWinner) {
+          // Another call won the race — clean up. Only abort the remote
+          // session if we created it here; a resumed one is shared upstream
+          // state the winner is now using.
+          if (started.created) {
+            yield* runOpenCodeSdk("session.abort", () =>
+              started.client.session.abort({
+                sessionID: started.openCodeSession.id,
+              }),
+            ).pipe(Effect.ignore);
+          }
+          yield* Scope.close(started.sessionScope, Exit.void).pipe(Effect.ignore);
+          return raceWinner.session;
+        }
+
+        // Resolve the model's context window (max tokens) from the OpenCode
+        // provider list so the context circle can show percentage/fill.
+        const modelContextWindow: number | undefined = yield* resolveModelContextWindow(
+          input.modelSelection?.model,
+          started.client,
+        );
+
         const createdAt = yield* nowIso;
         const session: ProviderSession = {
           provider: PROVIDER,
@@ -2386,16 +2457,11 @@ export function makeOpenCodeAdapter(
           activeTurnId: undefined,
           activeAgent: undefined,
           activeVariant: undefined,
-          cancellation: undefined,
-          interruptedTurnId: undefined,
-          reconcileIdleStatus: false,
-          awaitingBusyAfterInterruption: false,
-          pendingIdleReconciliation: undefined,
-          pendingRequestRecovery: undefined,
-          promptGeneration: 0,
-          promptAdmission: undefined,
-          promptSemaphore: Semaphore.makeUnsafe(1),
-          firstConnection: Deferred.makeUnsafe<void, ProviderAdapterRequestError>(),
+          accumulatedInputTokens: 0,
+          accumulatedOutputTokens: 0,
+          accumulatedReasoningTokens: 0,
+          accumulatedCacheReadTokens: 0,
+          modelContextWindow,
           stopped: yield* Ref.make(false),
           sessionScope: started.sessionScope,
         };
