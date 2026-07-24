@@ -65,6 +65,14 @@ export type WorkLogToolLifecycleStatus =
   | "declined"
   | "stopped";
 
+export interface FileChange {
+  filePath: string;
+  oldString?: string;
+  newString?: string;
+  content?: string;
+  patch?: string;
+}
+
 export interface WorkLogEntry {
   id: string;
   createdAt: string;
@@ -100,6 +108,8 @@ export interface WorkLogEntry {
     workflowId: string | null;
     agentTaskIds: ReadonlyArray<string>;
   };
+  /** Detailed file change info for file_change tool calls. */
+  fileChange?: FileChange;
 }
 
 const workLogCollapseKey = Symbol();

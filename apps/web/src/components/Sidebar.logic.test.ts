@@ -258,6 +258,7 @@ describe("hasUnseenCompletion", () => {
       hasUnseenCompletion({
         hasActionableProposedPlan: false,
         hasPendingApprovals: false,
+        hasPendingBackgroundTasks: false,
         hasPendingUserInput: false,
         interactionMode: "default",
         latestTurn: makeLatestTurn(),
@@ -272,6 +273,7 @@ describe("hasUnseenCompletion", () => {
       hasUnseenCompletion({
         hasActionableProposedPlan: false,
         hasPendingApprovals: false,
+        hasPendingBackgroundTasks: false,
         hasPendingUserInput: false,
         interactionMode: "default",
         latestTurn: makeLatestTurn(),
@@ -1132,6 +1134,7 @@ describe("resolveThreadStatusPill", () => {
   const baseThread = {
     hasActionableProposedPlan: false,
     hasPendingApprovals: false,
+    hasPendingBackgroundTasks: false,
     hasPendingUserInput: false,
     interactionMode: "plan" as const,
     latestTurn: null,
