@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   parseClaudeUsageLimitsJson,
+  parseOpenCodeGoUsageHtml,
   usageLimitsFromCodexRateLimits,
 } from "./providerUsageLimits.ts";
 
@@ -11,8 +12,16 @@ describe("usageLimitsFromCodexRateLimits", () => {
       usageLimitsFromCodexRateLimits(
         {
           rateLimits: {
-            primary: { usedPercent: 25, windowDurationMins: 300, resetsAt: 1_774_000_000 },
-            secondary: { usedPercent: 40, windowDurationMins: 10_080, resetsAt: 1_775_000_000 },
+            primary: {
+              usedPercent: 25,
+              windowDurationMins: 300,
+              resetsAt: 1_774_000_000,
+            },
+            secondary: {
+              usedPercent: 40,
+              windowDurationMins: 10_080,
+              resetsAt: 1_775_000_000,
+            },
           },
         },
         "2026-03-20T00:00:00.000Z",
@@ -35,6 +44,46 @@ describe("usageLimitsFromCodexRateLimits", () => {
         },
       ],
     });
+  });
+});
+
+describe("parseOpenCodeGoUsageHtml", () => {
+  it("parses rolling, weekly, and monthly dashboard windows", () => {
+    const result = parseOpenCodeGoUsageHtml(
+      String.raw`<script>self.__next_f.push([1,"{\"rollingUsage\":{\"usagePercent\":12.5,\"resetInSec\":3600},\"weeklyUsage\":{\"usagePercent\":99,\"resetInSec\":172800},\"monthlyUsage\":{\"usagePercent\":100,\"resetInSec\":900000}}"])</script>`,
+      "2026-07-24T12:00:00.000Z",
+    );
+
+    expect(result).toEqual({
+      source: "openCodeDashboard",
+      checkedAt: "2026-07-24T12:00:00.000Z",
+      windows: [
+        {
+          label: "Session",
+          usedPercent: 12.5,
+          windowDurationMins: 300,
+          resetsAt: "2026-07-24T13:00:00.000Z",
+        },
+        {
+          label: "Weekly",
+          usedPercent: 99,
+          windowDurationMins: 10080,
+          resetsAt: "2026-07-26T12:00:00.000Z",
+        },
+        {
+          label: "Monthly",
+          usedPercent: 100,
+          windowDurationMins: 43200,
+          resetsAt: "2026-08-03T22:00:00.000Z",
+        },
+      ],
+    });
+  });
+
+  it("returns undefined when dashboard usage data is absent", () => {
+    expect(
+      parseOpenCodeGoUsageHtml("<html><body>Sign in</body></html>", "2026-07-24T12:00:00.000Z"),
+    ).toBeUndefined();
   });
 });
 

@@ -129,6 +129,8 @@ const makeOpenCodeConfig = (overrides: Partial<OpenCodeSettings>): OpenCodeSetti
   binaryPath: "opencode",
   serverUrl: "",
   serverPassword: "",
+  goWorkspaceId: "",
+  goAuthCookie: "",
   customModels: [],
   ...overrides,
 });
