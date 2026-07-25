@@ -8,6 +8,8 @@ import * as Cause from "effect/Cause";
 import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 
 import { createModelCapabilities } from "@t3tools/shared/model";
 import { compareSemverVersions } from "@t3tools/shared/semver";
@@ -25,12 +27,40 @@ import {
   type OpenCodeInventory,
 } from "../opencodeRuntime.ts";
 import type { Agent, ProviderListResponse } from "@opencode-ai/sdk/v2";
-import * as OpenCodeServerOwner from "../OpenCodeServerOwner.ts";
+import { parseOpenCodeGoUsageHtml } from "../providerUsageLimits.ts";
 
 const OPENCODE_PRESENTATION = {
   displayName: "OpenCode",
   showInteractionModeToggle: false,
 } as const;
+
+const fetchOpenCodeGoUsageLimits = Effect.fn("fetchOpenCodeGoUsageLimits")(function* (input: {
+  readonly workspaceId: string;
+  readonly authCookie: string;
+  readonly checkedAt: string;
+}) {
+  if (!input.workspaceId || !input.authCookie) return undefined;
+  const client = yield* HttpClient.HttpClient;
+  const request = HttpClientRequest.get(
+    `https://opencode.ai/workspace/${encodeURIComponent(input.workspaceId)}/go`,
+  ).pipe(
+    HttpClientRequest.setHeader("accept", "text/html,application/xhtml+xml"),
+    HttpClientRequest.setHeader(
+      "cookie",
+      input.authCookie.includes("auth=") ? input.authCookie : `auth=${input.authCookie}`,
+    ),
+    HttpClientRequest.setHeader("user-agent", "T3-Code"),
+  );
+  const response = yield* client.execute(request).pipe(
+    Effect.timeoutOption(10_000),
+    Effect.orElseSucceed(() => Option.none()),
+  );
+  if (Option.isNone(response) || response.value.status < 200 || response.value.status >= 300) {
+    return undefined;
+  }
+  const html = yield* response.value.text.pipe(Effect.orElseSucceed(() => ""));
+  return parseOpenCodeGoUsageHtml(html, input.checkedAt);
+});
 
 class OpenCodeProbeError extends Data.TaggedError("OpenCodeProbeError")<{
   readonly cause: unknown;
@@ -191,7 +221,11 @@ function openCodeCapabilitiesForModel(input: {
   const defaultAgent = inferDefaultAgent(primaryAgents);
   const agentOptions = primaryAgents.map((agent) =>
     defaultAgent === agent.name
-      ? { id: agent.name, label: titleCaseSlug(agent.name), isDefault: true as const }
+      ? {
+          id: agent.name,
+          label: titleCaseSlug(agent.name),
+          isDefault: true as const,
+        }
       : { id: agent.name, label: titleCaseSlug(agent.name) },
   );
   return createModelCapabilities({
@@ -330,11 +364,7 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
   openCodeSettings: OpenCodeSettings,
   cwd: string,
   environment?: NodeJS.ProcessEnv,
-): Effect.fn.Return<
-  ServerProviderDraft,
-  never,
-  OpenCodeRuntime | OpenCodeServerOwner.OpenCodeServerOwner
-> {
+): Effect.fn.Return<ServerProviderDraft, never, OpenCodeRuntime | HttpClient.HttpClient> {
   const openCodeRuntime = yield* OpenCodeRuntime;
   const serverOwner = yield* OpenCodeServerOwner.OpenCodeServerOwner;
   const resolvedEnvironment = environment ?? process.env;
@@ -397,7 +427,11 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
         })
         .pipe(
           Effect.mapError(
-            (cause) => new OpenCodeProbeError({ cause, detail: openCodeRuntimeErrorDetail(cause) }),
+            (cause) =>
+              new OpenCodeProbeError({
+                cause,
+                detail: openCodeRuntimeErrorDetail(cause),
+              }),
           ),
         ),
     );
@@ -460,7 +494,11 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
   const inventoryExit = yield* Effect.exit(
     inventoryEffect.pipe(
       Effect.mapError(
-        (cause) => new OpenCodeProbeError({ cause, detail: openCodeRuntimeErrorDetail(cause) }),
+        (cause) =>
+          new OpenCodeProbeError({
+            cause,
+            detail: openCodeRuntimeErrorDetail(cause),
+          }),
       ),
     ),
   );
@@ -475,8 +513,13 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
     customModels,
     DEFAULT_OPENCODE_MODEL_CAPABILITIES,
   );
-  const skills = flattenOpenCodeSkills(inventoryExit.value.inventory);
-  const connectedCount = inventoryExit.value.inventory.providerList.connected.length;
+  const skills = flattenOpenCodeSkills(inventoryExit.value);
+  const usageLimits = yield* fetchOpenCodeGoUsageLimits({
+    workspaceId: openCodeSettings.goWorkspaceId,
+    authCookie: openCodeSettings.goAuthCookie,
+    checkedAt,
+  });
+  const connectedCount = inventoryExit.value.providerList.connected.length;
   return buildServerProvider({
     presentation: OPENCODE_PRESENTATION,
     enabled: true,
@@ -491,6 +534,7 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
         status: connectedCount > 0 ? "authenticated" : "unknown",
         type: "opencode",
       },
+      ...(usageLimits ? { usageLimits } : {}),
       message:
         connectedCount > 0
           ? `${connectedCount} upstream provider${connectedCount === 1 ? "" : "s"} connected through ${isExternalServer ? "the configured OpenCode server" : "OpenCode"}.`
