@@ -123,6 +123,21 @@ describe("parseClaudeUsageLimitsJson", () => {
     });
   });
 
+  it("keeps a zero-percent session that has no reset timestamp", () => {
+    const output = JSON.stringify({
+      result: [
+        "Current session: 0% used",
+        "Current week (all models): 28% used · resets Jul 29, 9:59pm (America/Toronto)",
+      ].join("\n"),
+    });
+
+    expect(parseClaudeUsageLimitsJson(output, "2026-07-25T00:00:00.000Z")?.windows[0]).toEqual({
+      label: "Session",
+      usedPercent: 0,
+      windowDurationMins: 300,
+    });
+  });
+
   it("fails closed for malformed or changed output", () => {
     expect(parseClaudeUsageLimitsJson("not json", "2026-07-22T12:00:00.000Z")).toBeUndefined();
     expect(
