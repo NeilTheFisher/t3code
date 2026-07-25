@@ -57,6 +57,7 @@ import { DiffWorkerPoolProvider } from "../DiffWorkerPoolProvider";
 import {
   createMessageAttachmentPreviewProjector,
   deriveTimelineEntries,
+  type FileChange,
   selectMessageImageResources,
   workEntryDisplayIndicatesToolFailure,
   workEntrySignalsSevereFailure,
@@ -3254,6 +3255,16 @@ function buildToolCallExpandedBody(
 const toolCallExpandedBodyClassName =
   "max-h-64 cursor-text overflow-auto whitespace-pre-wrap break-words font-mono text-secondary-label text-[length:var(--font-size-code,0.6875rem)] leading-relaxed select-text";
 
+function buildInlineFileChangePatch(change: FileChange): string | null {
+  const patch = change.patch?.trim();
+  if (!patch) return null;
+  if (patch.includes("diff --git") || (patch.includes("--- ") && patch.includes("+++ "))) {
+    return patch;
+  }
+  const path = change.filePath;
+  return [`diff --git a/${path} b/${path}`, `--- a/${path}`, `+++ b/${path}`, patch].join("\n");
+}
+
 function workEntryIconName(workEntry: TimelineWorkEntry): WorkEntryIconName {
   if (
     workEntry.sourceActivityKind === "user-input.requested" ||
@@ -3393,7 +3404,8 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
   onToggleEntry?: ((collapsed: boolean) => void) | undefined;
 }) {
   const { workEntry, workspaceRoot, isExpandedToolGroupEntry, displayLabel } = props;
-  const { threadRef, onImageExpand } = use(TimelineRowCtx);
+  const timelineRow = use(TimelineRowCtx);
+  const { threadRef, onImageExpand } = timelineRow;
   const groupView = use(WorkGroupViewCtx);
   const [expanded, setExpanded] = useState(
     () => groupView?.state.expandedEntries.has(workEntry.id) ?? false,
@@ -3432,15 +3444,26 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
           workspaceRoot,
         })
       : null;
+  const inlineFileChanges =
+    workEntry.fileChanges ?? (workEntry.fileChange ? [workEntry.fileChange] : []);
+  const inlineFilePatches = inlineFileChanges.flatMap((change) => {
+    const patch = buildInlineFileChangePatch(change);
+    const renderablePatch = patch
+      ? getRenderablePatch(patch, `work-log:${workEntry.id}:${change.filePath}`)
+      : null;
+    return renderablePatch?.kind === "files" ? renderablePatch.files : [];
+  });
+  const commandMatchesVisibleLabel = workEntry.command?.trim() === previewText.trim();
   const canExpand =
     (showFailedIndicator && previewText.trim().length > 0) ||
     (workEntry.itemType === "mcp_tool_call" && workEntry.toolData !== undefined) ||
     Boolean(
-      workEntryRawCommand(workEntry) ||
-      workEntry.command?.trim() ||
+      (!commandMatchesVisibleLabel &&
+        (workEntryRawCommand(workEntry) || workEntry.command?.trim())) ||
       workEntry.detail?.trim() ||
       workEntry.changedFiles?.length ||
-      viewedImage,
+      viewedImage ||
+      inlineFilePatches.length > 0,
     );
   const expandedBody = expanded
     ? buildToolCallExpandedBody(
@@ -3569,13 +3592,26 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
       {workEntry.questionAnswer ? (
         <QuestionAnswerHistory answer={workEntry.questionAnswer} />
       ) : null}
-      {expanded && canExpand && expandedBody ? (
+      {expanded && canExpand ? (
         <div
           className="mt-1 ms-7 cursor-default rounded-md bg-muted/40 px-3 py-2"
           onClick={stopRowToggle}
           onPointerDown={stopRowToggle}
         >
-          <pre className={toolCallExpandedBodyClassName}>{expandedBody}</pre>
+          {inlineFilePatches.map((fileDiff) => (
+            <FileDiff
+              key={`${workEntry.id}:${resolveFileDiffPath(fileDiff)}`}
+              fileDiff={fileDiff}
+              options={{
+                collapsed: false,
+                diffStyle: "unified",
+                theme: resolveDiffThemeName((timelineRow as unknown as { resolvedTheme?: string }).resolvedTheme ?? "light"),
+              }}
+            />
+          ))}
+          {expandedBody ? (
+            <pre className={toolCallExpandedBodyClassName}>{expandedBody}</pre>
+          ) : null}
         </div>
       ) : null}
     </div>
