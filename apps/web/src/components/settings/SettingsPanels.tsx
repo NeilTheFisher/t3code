@@ -117,6 +117,7 @@ import {
   type ProviderUpdateCandidate,
 } from "../ProviderUpdateLaunchNotification.logic";
 import { ProviderInstanceCard } from "./ProviderInstanceCard";
+import { OpenCodeGoCredentialsDialog } from "./OpenCodeGoCredentialsDialog";
 import { DRIVER_OPTIONS, getDriverOption } from "./providerDriverMeta";
 import {
   backgroundActivitySharedPolicySettings,
@@ -1763,6 +1764,8 @@ export function ProviderSettingsPanel() {
   });
   const [isRefreshingProviders, setIsRefreshingProviders] = useState(false);
   const [isAddInstanceDialogOpen, setIsAddInstanceDialogOpen] = useState(false);
+  const [openCodeCredentialsInstanceId, setOpenCodeCredentialsInstanceId] =
+    useState<ProviderInstanceId | null>(null);
   const [updatingProviderDrivers, setUpdatingProviderDrivers] = useState<
     ReadonlySet<ProviderDriverKind>
   >(() => new Set());
@@ -2226,6 +2229,18 @@ export function ProviderSettingsPanel() {
               }}
               onDelete={row.isDefault ? undefined : () => deleteProviderInstance(row.instanceId)}
               headerAction={headerAction}
+              providerUsageAction={
+                row.driver === "opencode" ? (
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant="outline"
+                    onClick={() => setOpenCodeCredentialsInstanceId(row.instanceId)}
+                  >
+                    Update Go credentials
+                  </Button>
+                ) : undefined
+              }
               hiddenModels={modelPreferences.hiddenModels}
               favoriteModels={favoriteModels}
               modelOrder={modelPreferences.modelOrder}
@@ -2263,6 +2278,21 @@ export function ProviderSettingsPanel() {
       {isAddInstanceDialogOpen ? (
         <AddProviderInstanceDialog open onOpenChange={setIsAddInstanceDialogOpen} />
       ) : null}
+      {openCodeCredentialsInstanceId !== null
+        ? rows
+            .filter((row) => row.instanceId === openCodeCredentialsInstanceId)
+            .map((row) => (
+              <OpenCodeGoCredentialsDialog
+                key={row.instanceId}
+                open
+                config={row.instance.config}
+                onOpenChange={(open) => {
+                  if (!open) setOpenCodeCredentialsInstanceId(null);
+                }}
+                onSave={(config) => updateProviderInstance(row, { ...row.instance, config })}
+              />
+            ))
+        : null}
     </SettingsPageContainer>
   );
 }
