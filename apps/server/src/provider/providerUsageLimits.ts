@@ -41,7 +41,9 @@ function mapCodexWindow(
       ? { windowDurationMins: Math.max(0, window.windowDurationMins) }
       : {}),
     ...(window.resetsAt !== undefined && window.resetsAt !== null
-      ? { resetsAt: DateTime.formatIso(DateTime.makeUnsafe(window.resetsAt * 1000)) }
+      ? {
+          resetsAt: DateTime.formatIso(DateTime.makeUnsafe(window.resetsAt * 1000)),
+        }
       : {}),
   };
 }
@@ -144,4 +146,62 @@ export function parseClaudeUsageLimitsJson(
   }
 
   return windows.length > 0 ? { source: "claudePrint", checkedAt, windows } : undefined;
+}
+
+function decodeDashboardHtml(html: string): string {
+  return html
+    .replaceAll("&quot;", '"')
+    .replaceAll("&#34;", '"')
+    .replaceAll("&#x27;", "'")
+    .replaceAll("&#39;", "'")
+    .replaceAll("&amp;", "&")
+    .replaceAll('\\"', '"')
+    .replaceAll("\\u0022", '"');
+}
+
+function parseOpenCodeWindow(
+  html: string,
+  fieldName: string,
+  label: string,
+  windowDurationMins: number,
+  checkedAt: string,
+): ServerProviderUsageWindow | undefined {
+  const body = html.match(
+    new RegExp(`["']?${fieldName}["']?\\s*:\\s*(?:\\$R\\[\\d+\\]\\s*=\\s*)?\\{([^{}]*)\\}`, "s"),
+  )?.[1];
+  if (!body) return undefined;
+  const usedPercent = Number.parseFloat(
+    body.match(/["']?usagePercent["']?\s*:\s*"?(-?\d+(?:\.\d+)?)"?/)?.[1] ?? "",
+  );
+  const resetInSec = Number.parseFloat(
+    body.match(/["']?resetInSec["']?\s*:\s*"?(-?\d+(?:\.\d+)?)"?/)?.[1] ?? "",
+  );
+  if (!Number.isFinite(usedPercent) || !Number.isFinite(resetInSec)) return undefined;
+  const checked = DateTime.make(checkedAt);
+  const resetsAt = Option.isSome(checked)
+    ? DateTime.formatIso(
+        DateTime.add(checked.value, {
+          seconds: Math.max(0, Math.round(resetInSec)),
+        }),
+      )
+    : undefined;
+  return {
+    label,
+    usedPercent: clampPercent(usedPercent),
+    windowDurationMins,
+    ...(resetsAt ? { resetsAt } : {}),
+  };
+}
+
+export function parseOpenCodeGoUsageHtml(
+  output: string,
+  checkedAt: string,
+): ServerProviderUsageLimits | undefined {
+  const html = decodeDashboardHtml(output);
+  const windows = [
+    parseOpenCodeWindow(html, "rollingUsage", "Session", 5 * 60, checkedAt),
+    parseOpenCodeWindow(html, "weeklyUsage", "Weekly", 7 * 24 * 60, checkedAt),
+    parseOpenCodeWindow(html, "monthlyUsage", "Monthly", 30 * 24 * 60, checkedAt),
+  ].filter((window): window is ServerProviderUsageWindow => window !== undefined);
+  return windows.length > 0 ? { source: "openCodeDashboard", checkedAt, windows } : undefined;
 }

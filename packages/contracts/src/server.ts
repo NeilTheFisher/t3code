@@ -109,7 +109,7 @@ export const ServerProviderUsageWindow = Schema.Struct({
 export type ServerProviderUsageWindow = typeof ServerProviderUsageWindow.Type;
 
 export const ServerProviderUsageLimits = Schema.Struct({
-  source: Schema.Literals(["codexAppServer", "claudePrint"]),
+  source: Schema.Literals(["codexAppServer", "claudePrint", "openCodeDashboard"]),
   checkedAt: IsoDateTime,
   windows: Schema.Array(ServerProviderUsageWindow),
 });

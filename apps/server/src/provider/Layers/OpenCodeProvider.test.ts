@@ -5,6 +5,7 @@ import { it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
+import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import { beforeEach } from "vite-plus/test";
 
 import { OpenCodeSettings } from "@t3tools/contracts";
@@ -34,6 +35,7 @@ const runtimeMock = {
     runVersionError: null as Error | null,
     versionStdout: DEFAULT_VERSION_STDOUT,
     inventoryError: null as Error | null,
+    dashboardHtml: null as string | null,
     closeCalls: 0,
     inventory: {
       providerList: { connected: [] as string[], all: [] as unknown[], default: {} },
@@ -44,6 +46,7 @@ const runtimeMock = {
     this.state.runVersionError = null;
     this.state.versionStdout = DEFAULT_VERSION_STDOUT;
     this.state.inventoryError = null;
+    this.state.dashboardHtml = null;
     this.state.closeCalls = 0;
     this.state.inventory = {
       providerList: { connected: [], all: [] as unknown[], default: {} },
@@ -107,6 +110,20 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
       : Effect.succeed(runtimeMock.state.inventory as OpenCodeInventory),
 };
 
+const TestHttpClientLive = Layer.succeed(
+  HttpClient.HttpClient,
+  HttpClient.make((request) =>
+    Effect.succeed(
+      HttpClientResponse.fromWeb(
+        request,
+        runtimeMock.state.dashboardHtml === null
+          ? new Response("Not found", { status: 404 })
+          : new Response(runtimeMock.state.dashboardHtml),
+      ),
+    ),
+  ),
+);
+
 beforeEach(() => {
   runtimeMock.reset();
 });
@@ -114,6 +131,7 @@ beforeEach(() => {
 const testLayer = Layer.succeed(OpenCodeRuntime, OpenCodeRuntimeTestDouble).pipe(
   Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
   Layer.provideMerge(NodeServices.layer),
+  Layer.provideMerge(TestHttpClientLive),
 );
 
 const makeOpenCodeSettings = (overrides?: Partial<OpenCodeSettings>): OpenCodeSettings =>
@@ -212,6 +230,33 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
       yield* checkOpenCodeProviderStatus(makeOpenCodeSettings(), process.cwd());
 
       NodeAssert.equal(runtimeMock.state.closeCalls, 0);
+    }),
+  );
+
+  it.effect("attaches OpenCode Go dashboard usage when credentials are configured", () =>
+    Effect.gen(function* () {
+      runtimeMock.state.dashboardHtml =
+        '{"rollingUsage":{"usagePercent":10,"resetInSec":60},"weeklyUsage":{"usagePercent":20,"resetInSec":120},"monthlyUsage":{"usagePercent":30,"resetInSec":180}}';
+
+      const snapshot = yield* checkOpenCodeProviderStatus(
+        makeOpenCodeSettings({
+          goWorkspaceId: "wrk_test",
+          goAuthCookie: "cookie-value",
+        }),
+        process.cwd(),
+      );
+
+      NodeAssert.deepEqual(
+        snapshot.usageLimits?.windows.map(({ label, usedPercent }) => ({
+          label,
+          usedPercent,
+        })),
+        [
+          { label: "Session", usedPercent: 10 },
+          { label: "Weekly", usedPercent: 20 },
+          { label: "Monthly", usedPercent: 30 },
+        ],
+      );
     }),
   );
 
