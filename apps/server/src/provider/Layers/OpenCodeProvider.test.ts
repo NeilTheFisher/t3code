@@ -6,8 +6,7 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import * as TestClock from "effect/testing/TestClock";
-import { beforeEach } from "vite-plus/test";
+import * as TestClock from "effect/testing/TestClock";import { HttpClient, HttpClientResponse } from "effect/unstable/http";import { beforeEach } from "vite-plus/test";
 
 import { OpenCodeSettings } from "@t3tools/contracts";
 import { ServerConfig } from "../../config.ts";
@@ -23,6 +22,8 @@ import type { OpenCodeInventory } from "../opencodeRuntime.ts";
 const decodeOpenCodeSettings = Schema.decodeSync(OpenCodeSettings);
 
 const DEFAULT_VERSION_STDOUT = "opencode 1.14.19\n";
+const TEST_OPENCODE_HOME = "/__t3code_open_code_provider_test_home__";
+const testEnvironment = { ...process.env, OPENCODE_HOME: TEST_OPENCODE_HOME };
 
 /**
  * The legacy `OpenCodeProviderLive` Layer + `OpenCodeProvider` service tag
@@ -41,6 +42,7 @@ const runtimeMock = {
     inventoryError: null as Error | null,
     connectionError: null as Error | null,
     inventoryCwd: null as string | null,
+    dashboardHtml: null as string | null,
     closeCalls: 0,
     sdkClientInputs: [] as Array<{
       baseUrl: string;
@@ -60,6 +62,7 @@ const runtimeMock = {
     this.state.inventoryError = null;
     this.state.connectionError = null;
     this.state.inventoryCwd = null;
+    this.state.dashboardHtml = null;
     this.state.closeCalls = 0;
     this.state.sdkClientInputs.length = 0;
     this.state.inventory = {
@@ -159,6 +162,20 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
   loadSkillsFromCli: () => Effect.succeed([]),
 };
 
+const TestHttpClientLive = Layer.succeed(
+  HttpClient.HttpClient,
+  HttpClient.make((request) =>
+    Effect.succeed(
+      HttpClientResponse.fromWeb(
+        request,
+        runtimeMock.state.dashboardHtml === null
+          ? new Response("Not found", { status: 404 })
+          : new Response(runtimeMock.state.dashboardHtml),
+      ),
+    ),
+  ),
+);
+
 beforeEach(() => {
   runtimeMock.reset();
 });
@@ -166,6 +183,7 @@ beforeEach(() => {
 const testLayer = Layer.succeed(OpenCodeRuntime, OpenCodeRuntimeTestDouble).pipe(
   Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
   Layer.provideMerge(NodeServices.layer),
+  Layer.provideMerge(TestHttpClientLive),
 );
 
 const makeOpenCodeSettings = (overrides?: Partial<OpenCodeSettings>): OpenCodeSettings =>
@@ -178,31 +196,14 @@ const makeOpenCodeSettings = (overrides?: Partial<OpenCodeSettings>): OpenCodeSe
     ...overrides,
   });
 
-const checkProvider = Effect.fn("checkProvider")(function* (
-  settings: OpenCodeSettings,
-  cwd = process.cwd(),
-  environment?: NodeJS.ProcessEnv,
-) {
-  return yield* Effect.scoped(
-    Effect.gen(function* () {
-      const serverOwner = yield* OpenCodeServerOwner.make({
-        binaryPath: settings.binaryPath,
-        directory: cwd,
-        ...(settings.serverPassword ? { serverPassword: settings.serverPassword } : {}),
-        ...(environment ? { environment } : {}),
-      });
-      return yield* checkOpenCodeProviderStatus(settings, cwd, environment).pipe(
-        Effect.provideService(OpenCodeServerOwner.OpenCodeServerOwner, serverOwner),
-      );
-    }),
-  );
-});
+const checkStatus = (settings: OpenCodeSettings, cwd = process.cwd()) =>
+  checkOpenCodeProviderStatus(settings, cwd, testEnvironment);
 
 it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
   it.effect("shows a codex-style missing binary message", () =>
     Effect.gen(function* () {
       runtimeMock.state.runVersionError = new Error("spawn opencode ENOENT");
-      const snapshot = yield* checkProvider(makeOpenCodeSettings());
+      const snapshot = yield* checkStatus(makeOpenCodeSettings());
 
       NodeAssert.equal(snapshot.status, "error");
       NodeAssert.equal(snapshot.installed, false);
@@ -216,7 +217,7 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
   it.effect("hides generic Effect.tryPromise text for local CLI probe failures", () =>
     Effect.gen(function* () {
       runtimeMock.state.runVersionError = new Error("An error occurred in Effect.tryPromise");
-      const snapshot = yield* checkProvider(makeOpenCodeSettings());
+      const snapshot = yield* checkStatus(makeOpenCodeSettings());
 
       NodeAssert.equal(snapshot.status, "error");
       NodeAssert.equal(snapshot.installed, true);
@@ -274,7 +275,7 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
         ],
       };
 
-      const snapshot = yield* checkProvider(makeOpenCodeSettings());
+      const snapshot = yield* checkStatus(makeOpenCodeSettings());
       const model = snapshot.models.find((entry) => entry.slug === "openai/gpt-5.4");
 
       NodeAssert.ok(model);
@@ -337,7 +338,7 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
         ],
       };
 
-      const snapshot = yield* checkProvider(makeOpenCodeSettings());
+      const snapshot = yield* checkStatus(makeOpenCodeSettings());
 
       NodeAssert.deepEqual(
         snapshot.skills.map((skill) => ({
@@ -366,7 +367,7 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
 
   it.effect("loads local inventory from a scoped OpenCode server", () =>
     Effect.gen(function* () {
-      yield* checkProvider(makeOpenCodeSettings({ serverPassword: "secret-password" }));
+      yield* checkStatus(makeOpenCodeSettings());
 
       NodeAssert.deepEqual(runtimeMock.state.sdkClientInputs, [
         {
@@ -408,10 +409,36 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
     }),
   );
 
+  it.effect("attaches OpenCode Go dashboard usage when credentials are configured", () =>
+    Effect.gen(function* () {
+      runtimeMock.state.dashboardHtml =
+        '{"rollingUsage":{"usagePercent":10,"resetInSec":60},"weeklyUsage":{"usagePercent":20,"resetInSec":120},"monthlyUsage":{"usagePercent":30,"resetInSec":180}}';
+
+      const snapshot = yield* checkStatus(
+        makeOpenCodeSettings({
+          goWorkspaceId: "wrk_test",
+          goAuthCookie: "cookie-value",
+        }),
+      );
+
+      NodeAssert.deepEqual(
+        snapshot.usageLimits?.windows.map(({ label, usedPercent }) => ({
+          label,
+          usedPercent,
+        })),
+        [
+          { label: "Session", usedPercent: 10 },
+          { label: "Weekly", usedPercent: 20 },
+          { label: "Monthly", usedPercent: 30 },
+        ],
+      );
+    }),
+  );
+
   it.effect("reports local model inventory failures without treating them as empty", () =>
     Effect.gen(function* () {
       runtimeMock.state.inventoryError = new Error("opencode models failed");
-      const snapshot = yield* checkProvider(makeOpenCodeSettings());
+      const snapshot = yield* checkStatus(makeOpenCodeSettings());
 
       NodeAssert.equal(snapshot.status, "error");
       NodeAssert.equal(snapshot.installed, true);
@@ -461,8 +488,8 @@ it.layer(testLayer)("checkOpenCodeProviderStatus with configured server URL", (i
 
   it.effect("surfaces a friendly auth error for configured servers", () =>
     Effect.gen(function* () {
-      runtimeMock.state.connectionError = new Error("401 Unauthorized");
-      const snapshot = yield* checkProvider(
+      runtimeMock.state.inventoryError = new Error("401 Unauthorized");
+      const snapshot = yield* checkStatus(
         makeOpenCodeSettings({
           serverUrl: "http://127.0.0.1:9999",
           serverPassword: "secret-password",
@@ -483,7 +510,7 @@ it.layer(testLayer)("checkOpenCodeProviderStatus with configured server URL", (i
       runtimeMock.state.connectionError = new Error(
         "fetch failed: connect ECONNREFUSED 127.0.0.1:9999",
       );
-      const snapshot = yield* checkProvider(
+      const snapshot = yield* checkStatus(
         makeOpenCodeSettings({
           serverUrl: "http://127.0.0.1:9999",
           serverPassword: "secret-password",
