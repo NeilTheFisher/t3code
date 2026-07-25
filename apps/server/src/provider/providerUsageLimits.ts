@@ -145,6 +145,18 @@ export function parseClaudeUsageLimitsJson(
     });
   }
 
+  if (!windows.some((window) => window.label === "Session")) {
+    const sessionWithoutReset = result.match(/^Current session:\s*(\d{1,3}(?:\.\d+)?)% used\s*$/im);
+    const usedPercent = Number.parseFloat(sessionWithoutReset?.[1] ?? "");
+    if (Number.isFinite(usedPercent)) {
+      windows.unshift({
+        label: "Session",
+        usedPercent: clampPercent(usedPercent),
+        windowDurationMins: 5 * 60,
+      });
+    }
+  }
+
   return windows.length > 0 ? { source: "claudePrint", checkedAt, windows } : undefined;
 }
 
