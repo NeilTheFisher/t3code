@@ -890,6 +890,7 @@ function serverTerminalIdsStrictSubsetOfClient(
 interface PersistentThreadTerminalDrawerProps {
   threadRef: { environmentId: EnvironmentId; threadId: ThreadId };
   threadId: ThreadId;
+  active: boolean;
   visible: boolean;
   launchContext: PersistentTerminalLaunchContext | null;
   focusRequestId: number;
@@ -904,6 +905,7 @@ interface PersistentThreadTerminalDrawerProps {
 const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDrawer({
   threadRef,
   threadId,
+  active,
   visible,
   launchContext,
   focusRequestId,
@@ -9831,6 +9833,7 @@ function ChatViewContent(props: ChatViewProps) {
             key={mountedThreadKey}
             threadRef={mountedThreadRef}
             threadId={mountedThreadRef.threadId}
+            active={mountedThreadKey === activeThreadKey}
             visible={mountedThreadKey === activeThreadKey && terminalUiState.terminalOpen}
             launchContext={
               mountedThreadKey === activeThreadKey ? (activeTerminalLaunchContext ?? null) : null

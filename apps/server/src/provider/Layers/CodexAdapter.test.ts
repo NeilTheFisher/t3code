@@ -51,7 +51,7 @@ const decodeCodexSettings = Schema.decodeSync(CodexSettings);
 
 // Test-local service tag so the rest of the file can keep using `yield* CodexAdapter`.
 class CodexAdapter extends Context.Service<CodexAdapter, CodexAdapterShape>()(
-  "t3/provider/Layers/CodexAdapter.test/CodexAdapter",
+  "@neilthefisher/t3/provider/Layers/CodexAdapter.test/CodexAdapter",
 ) {}
 
 const asThreadId = (value: string): ThreadId => ThreadId.make(value);
@@ -85,6 +85,8 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
   );
 
   public readonly compactThread = Effect.void;
+
+  public readonly compact = Effect.void;
 
   public readonly interruptTurnImpl = vi.fn((_turnId?: TurnId): Promise<void> =>
     Promise.resolve(undefined),
@@ -1716,6 +1718,52 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
       }
       NodeAssert.equal(firstEvent.value.turnId, "turn-1");
       NodeAssert.equal(firstEvent.value.payload.delta, "## Final plan");
+    }),
+  );
+
+  it.effect("maps Codex file-change patches to a file_change item update", () =>
+    Effect.gen(function* () {
+      const { adapter, runtime } = yield* startLifecycleRuntime();
+      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+
+      yield* runtime.emit({
+        id: asEventId("evt-file-change-patch"),
+        kind: "notification",
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        method: "item/fileChange/patchUpdated",
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-1"),
+        itemId: asItemId("file-change-1"),
+        payload: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          itemId: "file-change-1",
+          changes: [
+            {
+              path: "apps/web/src/session-logic.ts",
+              kind: { type: "update" },
+              diff: "@@ -1 +1 @@\\n-old\\n+new",
+            },
+          ],
+        },
+      } satisfies ProviderEvent);
+
+      const firstEvent = yield* Fiber.join(firstEventFiber);
+      NodeAssert.equal(firstEvent._tag, "Some");
+      if (firstEvent._tag !== "Some" || firstEvent.value.type !== "item.updated") {
+        return;
+      }
+      NodeAssert.equal(firstEvent.value.payload.itemType, "file_change");
+      NodeAssert.deepStrictEqual(firstEvent.value.payload.data, {
+        changes: [
+          {
+            path: "apps/web/src/session-logic.ts",
+            kind: { type: "update" },
+            diff: "@@ -1 +1 @@\\n-old\\n+new",
+          },
+        ],
+      });
     }),
   );
 

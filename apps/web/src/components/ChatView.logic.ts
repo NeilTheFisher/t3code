@@ -4,6 +4,7 @@ import {
   type AssetCreateUrlResult,
   type ChatFileAttachment,
   type EnvironmentId,
+  isProviderDriverKind,
   ProjectId,
   type MessageId,
   type ModelSelection,

@@ -981,8 +981,10 @@ export function deriveMessagesTimelineRows(input: {
   expandedWorkGroupIds?: ReadonlySet<string>;
   isWorking: boolean;
   activeTurnStartedAt: string | null;
-  turnDiffSummaries: ReadonlyArray<TurnDiffSummary>;
-  supportsConversationRollback: boolean;
+  turnDiffSummaryByAssistantMessageId?: ReadonlyMap<MessageId, TurnDiffSummary>;
+  revertTurnCountByUserMessageId?: ReadonlyMap<MessageId, number>;
+  turnDiffSummaries?: ReadonlyArray<TurnDiffSummary>;
+  supportsConversationRollback?: boolean;
   /** Task ids of subagents still working, used by the active tool indicator. */
   liveAgentTaskIds?: ReadonlySet<string> | undefined;
   /** Live bootstrap progress. Renders a stage card under the first user message. */
@@ -990,21 +992,23 @@ export function deriveMessagesTimelineRows(input: {
   /** Messages sent during the running turn, rendered after the live rows. */
   queuedMessages?: ReadonlyArray<QueuedComposerMessage>;
 }): MessagesTimelineRow[] {
-  const turnDiffSummaryByAssistantMessageId = new Map<MessageId, TurnDiffSummary>();
-  for (const summary of input.turnDiffSummaries) {
-    if (summary.assistantMessageId) {
-      turnDiffSummaryByAssistantMessageId.set(summary.assistantMessageId, summary);
-    }
-  }
-  const revertTurnCountByUserMessageId = buildRevertTurnCountByUserMessageId({
-    supportsConversationRollback: input.supportsConversationRollback,
-    timelineEntries: input.timelineEntries,
-    turnDiffSummaryByAssistantMessageId,
-    inferredCheckpointTurnCountByTurnId: input.supportsConversationRollback
-      ? inferCheckpointTurnCountByTurnId(input.turnDiffSummaries)
-      : {},
-  });
   const nextRows: MessagesTimelineRow[] = [];
+  const turnDiffSummaries = input.turnDiffSummaries ?? [];
+  const turnDiffSummaryByAssistantMessageId =
+    input.turnDiffSummaryByAssistantMessageId ??
+    new Map<MessageId, TurnDiffSummary>(
+      turnDiffSummaries.flatMap((summary) =>
+        summary.assistantMessageId ? [[summary.assistantMessageId, summary] as const] : [],
+      ),
+    );
+  const revertTurnCountByUserMessageId =
+    input.revertTurnCountByUserMessageId ??
+    buildRevertTurnCountByUserMessageId({
+      supportsConversationRollback: input.supportsConversationRollback ?? false,
+      timelineEntries: input.timelineEntries,
+      turnDiffSummaryByAssistantMessageId,
+      inferredCheckpointTurnCountByTurnId: inferCheckpointTurnCountByTurnId(turnDiffSummaries),
+    });
   const durationStartByMessageId = computeMessageDurationStart(
     input.timelineEntries.flatMap((entry) => (entry.kind === "message" ? [entry.message] : [])),
   );
