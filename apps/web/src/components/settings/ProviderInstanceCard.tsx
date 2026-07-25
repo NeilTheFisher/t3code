@@ -343,6 +343,7 @@ interface ProviderInstanceCardProps {
    * omit it.
    */
   readonly headerAction?: ReactNode | undefined;
+  readonly providerUsageAction?: ReactNode | undefined;
   readonly hiddenModels: ReadonlyArray<string>;
   readonly favoriteModels: ReadonlyArray<string>;
   readonly modelOrder: ReadonlyArray<string>;
@@ -388,6 +389,7 @@ export function ProviderInstanceCard({
   onUpdate,
   onDelete,
   headerAction,
+  providerUsageAction,
   hiddenModels,
   favoriteModels,
   modelOrder,
@@ -737,13 +739,20 @@ export function ProviderInstanceCard({
       <Collapsible open={isExpanded} onOpenChange={onExpandedChange}>
         <CollapsibleContent>
           <div className="space-y-5 px-3 pb-4 pt-2 sm:px-4">
-            {enabled && liveProvider?.usageLimits ? (
+            {enabled && (liveProvider?.usageLimits || providerUsageAction) ? (
               <div className="grid max-w-lg gap-2.5">
-                <p className="text-xs font-medium text-foreground">Provider usage</p>
-                <ProviderUsageRows
-                  usageLimits={liveProvider.usageLimits}
-                  timestampFormat={timestampFormat}
-                />
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-xs font-medium text-foreground">Provider usage</p>
+                  {providerUsageAction}
+                </div>
+                {liveProvider?.usageLimits ? (
+                  <ProviderUsageRows
+                    usageLimits={liveProvider.usageLimits}
+                    timestampFormat={timestampFormat}
+                  />
+                ) : (
+                  <p className="text-xs text-muted-foreground">Usage data is unavailable.</p>
+                )}
               </div>
             ) : null}
             <div>
