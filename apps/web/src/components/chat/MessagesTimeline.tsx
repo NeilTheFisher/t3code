@@ -33,6 +33,7 @@ import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { FileDiff } from "@pierre/diffs/react";
 import {
   deriveTimelineEntries,
+  type FileChange,
   workEntryIndicatesToolFailure,
   workEntryIndicatesToolNeutralStatus,
   workEntryIndicatesToolSuccess,
@@ -2066,6 +2067,16 @@ function buildToolCallExpandedBody(
 const toolCallExpandedBodyClassName =
   "max-h-64 cursor-text overflow-auto whitespace-pre-wrap break-words font-mono text-secondary-label text-[length:var(--font-size-code,0.6875rem)] leading-relaxed select-text";
 
+function buildInlineFileChangePatch(change: FileChange): string | null {
+  const patch = change.patch?.trim();
+  if (!patch) return null;
+  if (patch.includes("diff --git") || (patch.includes("--- ") && patch.includes("+++ "))) {
+    return patch;
+  }
+  const path = change.filePath;
+  return [`diff --git a/${path} b/${path}`, `--- a/${path}`, `+++ b/${path}`, patch].join("\n");
+}
+
 function workEntryIconName(workEntry: TimelineWorkEntry): WorkEntryIconName {
   if (
     workEntry.sourceActivityKind === "user-input.requested" ||
@@ -2232,6 +2243,7 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
 }) {
   const { workEntry, workspaceRoot } = props;
   const activity = use(TimelineRowActivityCtx);
+  const timelineRow = use(TimelineRowCtx);
   const [expanded, setExpanded] = useState(false);
   const iconConfig = workToneIcon(workEntry.tone);
   const showWarningIndicator = workEntry.sourceActivityKind === "runtime.warning";
@@ -2246,7 +2258,16 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
       : rawPreview;
   const displayText = preview ? `${heading} - ${preview}` : heading;
   const expandedBody = buildToolCallExpandedBody(workEntry, workspaceRoot);
-  const canExpand = expandedBody !== null;
+  const inlineFileChanges =
+    workEntry.fileChanges ?? (workEntry.fileChange ? [workEntry.fileChange] : []);
+  const inlineFilePatches = inlineFileChanges.flatMap((change) => {
+    const patch = buildInlineFileChangePatch(change);
+    const renderablePatch = patch
+      ? getRenderablePatch(patch, `work-log:${workEntry.id}:${change.filePath}`)
+      : null;
+    return renderablePatch?.kind === "files" ? renderablePatch.files : [];
+  });
+  const canExpand = expandedBody !== null || inlineFilePatches.length > 0;
   const showFailedIndicator = workEntryIndicatesToolFailure(workEntry);
   const showDestructiveRowStyle =
     showFailedIndicator &&
@@ -2370,13 +2391,26 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
           </div>
         </div>
       </div>
-      {expanded && canExpand && expandedBody ? (
+      {expanded && canExpand ? (
         <div
           className="mt-1 ms-7 cursor-default border-s border-border/45 ps-3 pt-0.5"
           onClick={stopRowToggle}
           onPointerDown={stopRowToggle}
         >
-          <pre className={toolCallExpandedBodyClassName}>{expandedBody}</pre>
+          {inlineFilePatches.map((fileDiff) => (
+            <FileDiff
+              key={`${workEntry.id}:${resolveFileDiffPath(fileDiff)}`}
+              fileDiff={fileDiff}
+              options={{
+                collapsed: false,
+                diffStyle: "unified",
+                theme: resolveDiffThemeName(timelineRow.resolvedTheme),
+              }}
+            />
+          ))}
+          {expandedBody ? (
+            <pre className={toolCallExpandedBodyClassName}>{expandedBody}</pre>
+          ) : null}
         </div>
       ) : null}
     </div>
