@@ -194,28 +194,31 @@ describe("getDiffLineStat", () => {
 });
 
 describe("getRenderablePatch upgradeFullContextFiles", () => {
-  const fullContextPatch = [
-    "diff --git a/x.ts b/x.ts",
-    "--- a/x.ts",
-    "+++ b/x.ts",
-    "@@ -1,6 +1,6 @@",
-    " line1",
-    " line2",
-    "-old3",
-    "+new3",
-    " line4",
-    " line5",
-    " line6",
-  ].join("\n");
+  it("rebuilds full-context patches into collapsed, expandable non-partial diffs", () => {
+    const oldLines = Array.from({ length: 200 }, (_, index) => `line ${index + 1}`);
+    const newLines = [...oldLines];
+    newLines[99] = "changed line";
+    const longFullContextPatch = [
+      "diff --git a/x.ts b/x.ts",
+      "--- a/x.ts",
+      "+++ b/x.ts",
+      "@@ -1,200 +1,200 @@",
+      ...oldLines.flatMap((line, index) =>
+        index === 99 ? [`-${line}`, `+${newLines[index]}`] : [` ${line}`],
+      ),
+    ].join("\n");
 
-  it("rebuilds full-context patches into expandable non-partial diffs", () => {
-    const parsed = getRenderablePatch(fullContextPatch, "t", { upgradeFullContextFiles: true });
+    const parsed = getRenderablePatch(longFullContextPatch, "t", {
+      upgradeFullContextFiles: true,
+    });
     expect(parsed?.kind).toBe("files");
     if (parsed?.kind !== "files") return;
     const [file] = parsed.files;
     expect(file!.isPartial).toBe(false);
-    expect(file!.deletionLines.join("")).toBe("line1\nline2\nold3\nline4\nline5\nline6");
-    expect(file!.additionLines.join("")).toBe("line1\nline2\nnew3\nline4\nline5\nline6");
+    expect(file!.deletionLines).toHaveLength(200);
+    expect(file!.additionLines).toHaveLength(200);
+    expect(file!.hunks[0]!.collapsedBefore).toBeGreaterThan(0);
+    expect(file!.hunks[0]!.unifiedLineCount).toBeLessThan(200);
   });
 
   it("leaves mid-file partial patches untouched", () => {
