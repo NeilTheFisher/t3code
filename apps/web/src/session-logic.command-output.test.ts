@@ -115,3 +115,29 @@ describe("deriveWorkLogEntries command output", () => {
     });
   });
 });
+
+describe("deriveWorkLogEntries collaboration tools", () => {
+  it("uses the collaboration operation instead of the generic Tool label", () => {
+    const [entry] = deriveWorkLogEntries([
+      makeCommandActivity(
+        "collaboration-wait",
+        {
+          itemType: "collab_agent_tool_call",
+          data: {
+            item: {
+              status: "completed",
+              tool: "wait",
+              type: "collabAgentToolCall",
+            },
+          },
+        },
+        "Tool",
+      ),
+    ]);
+
+    expect(entry).toMatchObject({
+      label: "Tool",
+      toolTitle: "Wait for agents",
+    });
+  });
+});

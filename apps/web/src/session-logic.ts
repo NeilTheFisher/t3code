@@ -1138,7 +1138,22 @@ function extractToolCommand(payload: Record<string, unknown> | null): {
 }
 
 function extractToolTitle(payload: Record<string, unknown> | null): string | null {
-  return asTrimmedString(payload?.title);
+  const title = asTrimmedString(payload?.title);
+  if (title) {
+    return title;
+  }
+  if (payload?.itemType !== "collab_agent_tool_call") {
+    return null;
+  }
+  const item = asRecord(asRecord(payload.data)?.item);
+  const operation = asTrimmedString(item?.tool);
+  if (!operation) {
+    return null;
+  }
+  if (operation === "wait") {
+    return "Wait for agents";
+  }
+  return operation.replace(/[_-]+/g, " ").replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
 function extractToolCallId(payload: Record<string, unknown> | null): string | null {
