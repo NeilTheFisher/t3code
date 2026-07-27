@@ -18,6 +18,21 @@ function asTrimmedString(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+const MAX_PROJECTED_TOOL_OUTPUT_CHARS = 16_000;
+const TOOL_OUTPUT_TRUNCATED_MARKER = "\n\n[truncated]";
+
+function projectToolOutput(value: unknown): string | null {
+  const output = asTrimmedString(value);
+  if (!output) {
+    return null;
+  }
+  if (output.length <= MAX_PROJECTED_TOOL_OUTPUT_CHARS) {
+    return output;
+  }
+  const contentLength = MAX_PROJECTED_TOOL_OUTPUT_CHARS - TOOL_OUTPUT_TRUNCATED_MARKER.length;
+  return `${output.slice(0, contentLength)}${TOOL_OUTPUT_TRUNCATED_MARKER}`;
+}
+
 function pushChangedFile(target: string[], seen: Set<string>, value: unknown): void {
   const normalized = asTrimmedString(value);
   if (!normalized || seen.has(normalized)) {
@@ -90,6 +105,14 @@ function projectCommandData(data: Record<string, unknown>): Record<string, unkno
   if ("command" in item) {
     projectedItem.command = item.command;
   }
+  const aggregatedOutput = projectToolOutput(item.aggregatedOutput);
+  if (aggregatedOutput) {
+    projectedItem.aggregatedOutput = aggregatedOutput;
+  }
+  const tool = asTrimmedString(item.tool);
+  if (tool) {
+    projectedItem.tool = tool;
+  }
 
   const input = asRecord(item.input);
   if (input && "command" in input) {
@@ -99,6 +122,13 @@ function projectCommandData(data: Record<string, unknown>): Record<string, unkno
   const result = asRecord(item.result);
   if (result && "command" in result) {
     projectedItem.result = { command: result.command };
+  }
+  const resultContent = projectToolOutput(result?.content);
+  if (resultContent) {
+    projectedItem.result = {
+      ...(asRecord(projectedItem.result) ?? {}),
+      content: resultContent,
+    };
   }
 
   return Object.keys(projectedItem).length > 0 ? projectedItem : undefined;
