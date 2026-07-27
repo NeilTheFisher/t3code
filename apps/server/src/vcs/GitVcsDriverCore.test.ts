@@ -919,6 +919,42 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         assert.strictEqual(contents.newContents, "# branch change\nunchanged context\n");
       }),
     );
+
+    it.effect("includes full file context in worktree and branch previews", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const originalLines = Array.from({ length: 200 }, (_, index) => `line ${index + 1}`);
+        yield* writeTextFile(cwd, "long.txt", `${originalLines.join("\n")}\n`);
+        yield* git(cwd, ["add", "long.txt"]);
+        yield* git(cwd, ["commit", "-m", "add long file"]);
+        yield* git(cwd, ["checkout", "-b", "feature/full-context"]);
+
+        const branchLines = [...originalLines];
+        branchLines[99] = "branch change";
+        yield* writeTextFile(cwd, "long.txt", `${branchLines.join("\n")}\n`);
+        yield* git(cwd, ["add", "long.txt"]);
+        yield* git(cwd, ["commit", "-m", "change middle line"]);
+
+        const worktreeLines = [...branchLines];
+        worktreeLines[149] = "worktree change";
+        yield* writeTextFile(cwd, "long.txt", `${worktreeLines.join("\n")}\n`);
+
+        const preview = yield* driver.getReviewDiffPreview({
+          cwd,
+          baseRef: initialBranch,
+          ignoreWhitespace: false,
+        });
+        const worktreeDiff = preview.sources.find((source) => source.kind === "working-tree")?.diff;
+        const branchDiff = preview.sources.find((source) => source.kind === "branch-range")?.diff;
+
+        assert.include(worktreeDiff, "@@ -1,200 +1,200 @@");
+        assert.include(branchDiff, "@@ -1,200 +1,200 @@");
+        assert.include(worktreeDiff, " line 1");
+        assert.include(branchDiff, " line 200");
+      }),
+    );
   });
 
   describe("repository status", () => {
