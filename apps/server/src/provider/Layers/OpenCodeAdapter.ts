@@ -407,6 +407,77 @@ function detailFromToolPart(part: Extract<Part, { type: "tool" }>): string | und
   }
 }
 
+function extractOpenCodeToolFileChanges(
+  toolName: string,
+  input: Record<string, unknown>,
+): Array<{ path: string; diff: string }> | undefined {
+  const normalized = toolName.toLowerCase();
+  if (
+    !(
+      normalized.includes("edit") ||
+      normalized.includes("write") ||
+      normalized.includes("patch") ||
+      normalized.includes("multiedit")
+    )
+  ) {
+    return undefined;
+  }
+
+  const filePath =
+    typeof input.file_path === "string"
+      ? input.file_path
+      : typeof input.filePath === "string"
+        ? input.filePath
+        : typeof input.path === "string"
+          ? input.path
+          : undefined;
+  if (!filePath) return undefined;
+
+  const oldString =
+    typeof input.old_string === "string"
+      ? input.old_string
+      : typeof input.oldString === "string"
+        ? input.oldString
+        : undefined;
+  const newString =
+    typeof input.new_string === "string"
+      ? input.new_string
+      : typeof input.newString === "string"
+        ? input.newString
+        : undefined;
+  if (oldString !== undefined && newString !== undefined) {
+    return [{ path: filePath, diff: synthesizeUnifiedDiff(oldString, newString) }];
+  }
+
+  const content =
+    typeof input.content === "string"
+      ? input.content
+      : typeof input.new_content === "string"
+        ? input.new_content
+        : undefined;
+  if (content !== undefined) {
+    return [{ path: filePath, diff: synthesizeUnifiedDiff("", content) }];
+  }
+
+  return undefined;
+}
+
+function synthesizeUnifiedDiff(oldText: string, newText: string): string {
+  const oldLines = oldText.split("\n");
+  const newLines = newText.split("\n");
+  const oldCount = oldLines.length;
+  const newCount = newLines.length;
+  const lines: string[] = [];
+  lines.push(`@@ -1,${oldCount} +1,${newCount} @@`);
+  for (const line of oldLines) {
+    lines.push(`-${line}`);
+  }
+  for (const line of newLines) {
+    lines.push(`+${line}`);
+  }
+  return lines.join("\n");
+}
+
 function toolStateCreatedAt(part: Extract<Part, { type: "tool" }>): string | undefined {
   switch (part.state.status) {
     case "running":
@@ -954,6 +1025,13 @@ export function makeOpenCodeAdapter(
                 ? (part.state.title ?? part.tool)
                 : part.tool;
             const detail = detailFromToolPart(part);
+            const fileChanges =
+              part.state.status === "completed" && itemType === "file_change"
+                ? extractOpenCodeToolFileChanges(
+                    part.tool,
+                    part.state.input as Record<string, unknown>,
+                  )
+                : undefined;
             const payload = {
               itemType,
               ...(part.state.status === "error"
@@ -966,6 +1044,7 @@ export function makeOpenCodeAdapter(
               data: {
                 tool: part.tool,
                 state: part.state,
+                ...(fileChanges ? { changes: fileChanges } : {}),
               },
             };
             const runtimeEvent: ProviderRuntimeEvent = {
@@ -1193,6 +1272,29 @@ export function makeOpenCodeAdapter(
               detail: event.properties.error,
             },
           });
+          break;
+        }
+
+        case "session.diff": {
+          const diffs = event.properties.diff;
+          if (!Array.isArray(diffs)) break;
+          for (const d of diffs) {
+            if (!d.file || !d.patch) continue;
+            yield* emit({
+              ...(yield* buildEventBase({
+                threadId: context.session.threadId,
+                turnId,
+                raw: event,
+              })),
+              type: "item.updated",
+              payload: {
+                itemType: "file_change",
+                data: {
+                  changes: [{ path: d.file, diff: d.patch }],
+                },
+              },
+            });
+          }
           break;
         }
 
