@@ -1446,6 +1446,66 @@ function toolInputFingerprint(input: Record<string, unknown>): string | undefine
   return encodeJsonStringForDiagnostics(input);
 }
 
+function buildClaudeFileChanges(
+  toolName: string,
+  input: Record<string, unknown>,
+): Array<{ path: string; diff: string }> | undefined {
+  const normalizedName = toolName.toLowerCase();
+
+  // Edit tool: file_path, old_string, new_string
+  if (normalizedName === "edit" || normalizedName.includes("edit")) {
+    const filePath = typeof input.file_path === "string" ? input.file_path : undefined;
+    const oldString = typeof input.old_string === "string" ? input.old_string : undefined;
+    const newString = typeof input.new_string === "string" ? input.new_string : undefined;
+    if (filePath && oldString !== undefined && newString !== undefined) {
+      return [{ path: filePath, diff: synthesizeUnifiedDiff(oldString, newString) }];
+    }
+  }
+
+  // Write tool: file_path, content
+  if (
+    normalizedName === "write" ||
+    (normalizedName.includes("write") && !normalizedName.includes("todo"))
+  ) {
+    const filePath = typeof input.file_path === "string" ? input.file_path : undefined;
+    const content = typeof input.content === "string" ? input.content : undefined;
+    if (filePath && content !== undefined) {
+      return [{ path: filePath, diff: synthesizeUnifiedDiff("", content) }];
+    }
+  }
+
+  // apply_patch: the entire input is the patch string
+  if (normalizedName === "apply_patch" || normalizedName.includes("apply_patch")) {
+    const patch = typeof input.patch === "string" ? input.patch : undefined;
+    if (patch && patch.length > 0) {
+      // Try to extract the file path from the patch header (--- a/path or --- /path)
+      const pathMatch = patch.match(/^(?:---|\+\+\+) [ab]?(\/?[^\s]+)/m);
+      const filePath = pathMatch?.[1];
+      if (filePath) {
+        return [{ path: filePath, diff: patch }];
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function synthesizeUnifiedDiff(oldText: string, newText: string): string {
+  const oldLines = oldText.split("\n");
+  const newLines = newText.split("\n");
+  const oldCount = oldLines.length;
+  const newCount = newLines.length;
+  const lines: string[] = [];
+  lines.push(`@@ -1,${oldCount} +1,${newCount} @@`);
+  for (const line of oldLines) {
+    lines.push(`-${line}`);
+  }
+  for (const line of newLines) {
+    lines.push(`+${line}`);
+  }
+  return lines.join("\n");
+}
+
 function toolResultStreamKind(itemType: CanonicalItemType): ClaudeToolResultStreamKind | undefined {
   switch (itemType) {
     case "command_execution":
@@ -2718,10 +2778,15 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const [index, tool] = toolEntry;
       const itemStatus = toolResult.isError ? "failed" : "completed";
       const toolUseResult = readClaudeToolUseResult(message);
+      const fileChanges =
+        !toolResult.isError && tool.itemType === "file_change"
+          ? buildClaudeFileChanges(tool.toolName, tool.input)
+          : undefined;
       const toolData = {
         toolName: tool.toolName,
         input: tool.input,
         result: toolResult.block,
+        ...(fileChanges ? { changes: fileChanges } : {}),
       };
 
       const updatedStamp = yield* makeEventStamp();
