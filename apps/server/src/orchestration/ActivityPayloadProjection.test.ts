@@ -81,4 +81,37 @@ describe("projectActivityPayload", () => {
       },
     });
   });
+
+  it("keeps nested Codex file changes for inline diffs", () => {
+    const changes = [
+      {
+        path: "/workspace/README.md",
+        diff: "@@ -21,2 +21,3 @@\n before\n+added\n after\n",
+        kind: { type: "update", move_path: null },
+      },
+    ];
+    const projected = projectActivityPayload(
+      makeActivity({
+        itemType: "file_change",
+        data: {
+          completedAtMs: 1,
+          item: {
+            id: "file-change-1",
+            status: "completed",
+            type: "fileChange",
+            changes,
+          },
+          threadId: "provider-thread-1",
+          turnId: "provider-turn-1",
+        },
+      }),
+    );
+
+    expect(projected.payload).toMatchObject({
+      data: {
+        changes,
+        files: [{ path: "/workspace/README.md" }],
+      },
+    });
+  });
 });
