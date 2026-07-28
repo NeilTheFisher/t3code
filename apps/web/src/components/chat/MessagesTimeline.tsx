@@ -1862,6 +1862,7 @@ function workEntryRawCommand(
 function buildToolCallExpandedBody(
   workEntry: TimelineWorkEntry,
   workspaceRoot: string | undefined,
+  hasDiffPatches: boolean = false,
 ): string | null {
   const blocks: string[] = [];
   if (workEntry.itemType === "mcp_tool_call" && workEntry.toolData !== undefined) {
@@ -1873,7 +1874,7 @@ function buildToolCallExpandedBody(
   } else if (workEntry.command?.trim()) {
     blocks.push(workEntry.command.trim());
   }
-  if (workEntry.detail?.trim()) {
+  if (workEntry.detail?.trim() && !hasDiffPatches) {
     blocks.push(workEntry.detail.trim());
   }
   const changedFiles = workEntry.changedFiles ?? [];
@@ -1965,7 +1966,6 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
       ? null
       : rawPreview;
   const displayText = preview ? `${heading} - ${preview}` : heading;
-  const expandedBody = buildToolCallExpandedBody(workEntry, workspaceRoot);
   const inlineFileChanges =
     workEntry.fileChanges ?? (workEntry.fileChange ? [workEntry.fileChange] : []);
   const inlineFilePatches = inlineFileChanges.flatMap((change) => {
@@ -1975,6 +1975,11 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
       : null;
     return renderablePatch?.kind === "files" ? renderablePatch.files : [];
   });
+  const expandedBody = buildToolCallExpandedBody(
+    workEntry,
+    workspaceRoot,
+    inlineFilePatches.length > 0,
+  );
   const canExpand = expandedBody !== null || inlineFilePatches.length > 0;
   const showFailedIndicator = workEntryIndicatesToolFailure(workEntry);
   const showDestructiveRowStyle =

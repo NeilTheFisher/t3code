@@ -90,6 +90,7 @@ import {
 } from "../Errors.ts";
 import { type ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
+import { synthesizeUnifiedDiff } from "./DiffUtils.ts";
 const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.UnknownFromJsonString);
 const decodeUnknownJsonStringExit = Schema.decodeUnknownExit(Schema.UnknownFromJsonString);
 
@@ -1150,7 +1151,7 @@ function toolInputFingerprint(input: Record<string, unknown>): string | undefine
   return encodeJsonStringForDiagnostics(input);
 }
 
-function buildClaudeFileChanges(
+export function buildClaudeFileChanges(
   toolName: string,
   input: Record<string, unknown>,
 ): Array<{ path: string; diff: string }> | undefined {
@@ -1192,22 +1193,6 @@ function buildClaudeFileChanges(
   }
 
   return undefined;
-}
-
-function synthesizeUnifiedDiff(oldText: string, newText: string): string {
-  const oldLines = oldText.split("\n");
-  const newLines = newText.split("\n");
-  const oldCount = oldLines.length;
-  const newCount = newLines.length;
-  const lines: string[] = [];
-  lines.push(`@@ -1,${oldCount} +1,${newCount} @@`);
-  for (const line of oldLines) {
-    lines.push(`-${line}`);
-  }
-  for (const line of newLines) {
-    lines.push(`+${line}`);
-  }
-  return lines.join("\n");
 }
 
 function toolResultStreamKind(itemType: CanonicalItemType): ClaudeToolResultStreamKind | undefined {
