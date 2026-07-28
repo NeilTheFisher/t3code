@@ -67,7 +67,8 @@ This checkout is a maintained fork of `pingdotgg/t3code`. In addition to upstrea
 includes:
 
 - Richer work logs with command output, provider-specific tool titles, collaboration labels, and
-  expandable inline file-change diffs for Codex, Claude, and OpenCode.
+  inline file-change diffs for Codex, Claude, and OpenCode with persistent line wrapping and
+  expandable full-context regions.
 - Scalable thread history and recovery, including bounded activity storage, scroll-up pagination,
   restart recovery, cross-client deletion handling, and more reliable interrupted/input lifecycles.
 - Provider continuity features such as switching provider or model mid-thread, model favorites,
