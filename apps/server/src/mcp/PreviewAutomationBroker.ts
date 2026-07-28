@@ -89,7 +89,6 @@ interface HostAssignment {
   readonly clientId: ClientConnection["clientId"];
   readonly connectionId: ClientConnection["connectionId"];
   readonly queue: ClientConnection["queue"];
-  readonly expiresAt: number;
   readonly tabId?: PreviewTabId;
   readonly tabSequence?: number;
 }
@@ -463,13 +462,12 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
   ): Effect.fn.Return<A, PreviewAutomationError> {
     const timeoutMs = input.timeoutMs ?? 15_000;
     const deferred = yield* Deferred.make<unknown, PreviewAutomationError>();
-    const tryRoute = (now: number) =>
+    const tryRoute = () =>
       SynchronizedRef.modify(state, (current): readonly [RouteResult, BrokerState] => {
         const assignments = new Map(
           Array.from(current.assignments).filter(([, assignment]) => {
             const connection = current.clients.get(assignment.clientId);
             return (
-              assignment.expiresAt > now &&
               connection?.connectionId === assignment.connectionId &&
               connection.queue === assignment.queue
             );
@@ -523,7 +521,6 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
           clientId: connection.clientId,
           connectionId: connection.connectionId,
           queue: connection.queue,
-          expiresAt: input.scope.expiresAt,
           ...(canReuseAssignedTab && assigned.tabId !== undefined ? { tabId: assigned.tabId } : {}),
           ...(canReuseAssignedTab && assigned.tabSequence !== undefined
             ? { tabSequence: assigned.tabSequence }
@@ -554,7 +551,7 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
           { ...current, assignments, pending, requestSequence: current.requestSequence + 1 },
         ] as const;
       });
-    let route = yield* tryRoute(yield* Clock.currentTimeMillis);
+    let route = yield* tryRoute();
     // Self-heal transient host gaps (UI tab reloads, WebSocket reconnects):
     // keep re-checking for a capable host until the grace window elapses.
     const waitForHostMs = Math.min(input.waitForHostMs ?? 0, timeoutMs);
@@ -564,7 +561,7 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
         const now = yield* Clock.currentTimeMillis;
         if (now >= deadline) break;
         yield* Effect.sleep(Math.min(250, deadline - now));
-        route = yield* tryRoute(yield* Clock.currentTimeMillis);
+        route = yield* tryRoute();
       }
     }
     if (!("connection" in route)) {
