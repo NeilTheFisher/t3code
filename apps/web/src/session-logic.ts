@@ -54,6 +54,7 @@ export {
 
 export interface FileChange {
   filePath: string;
+  postFileHash?: string;
   oldString?: string;
   newString?: string;
   content?: string;
@@ -1479,7 +1480,11 @@ function extractFileChanges(payload: Record<string, unknown> | null): FileChange
     const change = asRecord(candidate);
     if (!change || typeof change.path !== "string" || typeof change.diff !== "string") continue;
     if (change.path.length === 0 || change.diff.length === 0) continue;
-    byPath.set(change.path, { filePath: change.path, patch: change.diff });
+    byPath.set(change.path, {
+      filePath: change.path,
+      patch: change.diff,
+      ...(typeof change.postFileHash === "string" ? { postFileHash: change.postFileHash } : {}),
+    });
   }
   return [...byPath.values()];
 }
