@@ -1,10 +1,10 @@
 {
-  "name": "t3",
+  "name": "@neilthefisher/t3",
   "version": "0.0.37",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/pingdotgg/t3code",
+    "url": "https://github.com/NeilTheFisher/t3code",
     "directory": "apps/server"
   },
   "bin": {
