@@ -32,6 +32,7 @@ import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import { synthesizeUnifiedDiff } from "./DiffUtils.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import {
@@ -652,7 +653,7 @@ function detailFromToolPart(part: Extract<Part, { type: "tool" }>): string | und
   }
 }
 
-function extractOpenCodeToolFileChanges(
+export function extractOpenCodeToolFileChanges(
   toolName: string,
   input: Record<string, unknown>,
 ): Array<{ path: string; diff: string }> | undefined {
@@ -705,22 +706,6 @@ function extractOpenCodeToolFileChanges(
   }
 
   return undefined;
-}
-
-function synthesizeUnifiedDiff(oldText: string, newText: string): string {
-  const oldLines = oldText.split("\n");
-  const newLines = newText.split("\n");
-  const oldCount = oldLines.length;
-  const newCount = newLines.length;
-  const lines: string[] = [];
-  lines.push(`@@ -1,${oldCount} +1,${newCount} @@`);
-  for (const line of oldLines) {
-    lines.push(`-${line}`);
-  }
-  for (const line of newLines) {
-    lines.push(`+${line}`);
-  }
-  return lines.join("\n");
 }
 
 function toolStateCreatedAt(part: Extract<Part, { type: "tool" }>): string | undefined {

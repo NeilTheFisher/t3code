@@ -2358,6 +2358,7 @@ function liveWorkEntryLabel(
 function buildToolCallExpandedBody(
   workEntry: TimelineWorkEntry,
   workspaceRoot: string | undefined,
+  hasDiffPatches: boolean = false,
 ): string | null {
   const blocks: string[] = [];
   if (workEntry.itemType === "mcp_tool_call" && workEntry.toolData !== undefined) {
@@ -2369,7 +2370,7 @@ function buildToolCallExpandedBody(
   } else if (workEntry.command?.trim()) {
     blocks.push(workEntry.command.trim());
   }
-  if (workEntry.detail?.trim()) {
+  if (workEntry.detail?.trim() && !hasDiffPatches) {
     blocks.push(workEntry.detail.trim());
   }
   const changedFiles = workEntry.changedFiles ?? [];
@@ -2567,8 +2568,15 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
   const showFailedIndicator = workEntryDisplayIndicatesToolFailure(workEntry);
   const entryIconName =
     showWarningIndicator || showFailedIndicator ? "circle-alert" : workEntryIconName(workEntry);
-  const displayText = workEntryPreview(workEntry, workspaceRoot) ?? toolWorkEntryHeading(workEntry);
-  const expandedBody = buildToolCallExpandedBody(workEntry, workspaceRoot);
+  const heading = toolWorkEntryHeading(workEntry);
+  const rawPreview = workEntryPreview(workEntry, workspaceRoot);
+  const preview =
+    rawPreview &&
+    normalizeCompactToolLabel(rawPreview).toLowerCase() ===
+      normalizeCompactToolLabel(heading).toLowerCase()
+      ? null
+      : rawPreview;
+  const displayText = preview ? `${heading} - ${preview}` : heading;
   const viewedImagePath = workEntryViewedImagePath(workEntry);
   const viewedImage =
     viewedImagePath && threadRef
@@ -2586,6 +2594,11 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
       : null;
     return renderablePatch?.kind === "files" ? renderablePatch.files : [];
   });
+  const expandedBody = buildToolCallExpandedBody(
+    workEntry,
+    workspaceRoot,
+    inlineFilePatches.length > 0,
+  );
   const canExpand = expandedBody !== null || inlineFilePatches.length > 0 || viewedImage !== null;
   const showDestructiveRowStyle =
     showFailedIndicator &&
