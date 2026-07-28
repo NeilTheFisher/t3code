@@ -2726,24 +2726,30 @@ export function makeOpenCodeAdapter(
           context.promptGeneration = promptGeneration;
           context.promptAdmission = promptAdmission;
 
-          context.activeTurnId = turnId;
-          context.activeAgent = agent ?? (input.interactionMode === "plan" ? "plan" : undefined);
-          context.activeVariant = variant;
-          if (steeringTurnId === undefined) {
-            context.awaitingBusyAfterInterruption = context.interruptedTurnId !== undefined;
-          }
-          if (pendingIdleReconciliation?.fiber) {
-            yield* Fiber.interrupt(pendingIdleReconciliation.fiber);
-          }
-          yield* updateProviderSession(
-            context,
-            {
-              status: "running",
-              activeTurnId: turnId,
-              model: modelSelection?.model ?? context.session.model,
-            },
-            { clearLastError: true },
-          );
+      // Update the context window limit when the model changes so the
+      // context circle reflects the new model's capacity. This is cosmetic
+      // (the provider handles real compaction) but avoids showing a stale
+      // percentage after a mid-session model switch.
+      const newModelSlug = modelSelection?.model;
+      if (newModelSlug !== undefined && newModelSlug !== context.session.model) {
+        const updatedContextWindow = yield* resolveModelContextWindow(newModelSlug, context.client);
+        if (updatedContextWindow !== undefined) {
+          context.modelContextWindow = updatedContextWindow;
+        }
+      }
+
+      context.activeTurnId = turnId;
+      context.activeAgent = agent ?? (input.interactionMode === "plan" ? "plan" : undefined);
+      context.activeVariant = variant;
+      yield* updateProviderSession(
+        context,
+        {
+          status: "running",
+          activeTurnId: turnId,
+          model: modelSelection?.model ?? context.session.model,
+        },
+        { clearLastError: true },
+      );
 
           if (steeringTurnId === undefined) {
             yield* emit({
@@ -2979,9 +2985,21 @@ export function makeOpenCodeAdapter(
     const interruptTurn: OpenCodeAdapterShape["interruptTurn"] = Effect.fn("interruptTurn")(
       function* (threadId, turnId) {
         const context = yield* ensureSessionContext(sessions, threadId);
-        const activeTurnId = context.activeTurnId;
-        if (turnId !== undefined && activeTurnId !== turnId) {
-          return;
+        yield* runOpenCodeSdk("session.abort", () =>
+          context.client.session.abort({ sessionID: context.openCodeSessionId }),
+        ).pipe(Effect.mapError(toRequestError));
+        const targetTurnId = turnId ?? context.activeTurnId;
+        if (targetTurnId) {
+          yield* emit({
+            ...(yield* buildEventBase({
+              threadId,
+              turnId: targetTurnId,
+            })),
+            type: "turn.aborted",
+            payload: {
+              reason: "Interrupted by user.",
+            },
+          });
         }
         const interruptedTurnId = turnId ?? activeTurnId;
         yield* cancelIdleReconciliation(context);
