@@ -26,6 +26,7 @@ import {
 } from "../opencodeRuntime.ts";
 import type { Agent, ProviderListResponse } from "@opencode-ai/sdk/v2";
 import { parseOpenCodeGoUsageHtml } from "../providerUsageLimits.ts";
+import { discoverOpenCodeSkills } from "../Drivers/OpenCodeSkills.ts";
 
 const OPENCODE_PRESENTATION = {
   displayName: "OpenCode",
@@ -477,12 +478,18 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
     authCookie: openCodeSettings.goAuthCookie,
     checkedAt,
   });
+  const skills = yield* discoverOpenCodeSkills(
+    { homePath: openCodeSettings.homePath },
+    cwd,
+    resolvedEnvironment,
+  );
   const connectedCount = inventoryExit.value.providerList.connected.length;
   return buildServerProvider({
     presentation: OPENCODE_PRESENTATION,
     enabled: true,
     checkedAt,
     models,
+    skills,
     probe: {
       installed: true,
       version,
