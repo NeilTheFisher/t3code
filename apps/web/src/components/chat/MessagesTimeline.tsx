@@ -30,7 +30,7 @@ import {
   type ReactNode,
 } from "react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
-import { FileDiff } from "@pierre/diffs/react";
+import { FileDiff, type FileDiffMetadata } from "@pierre/diffs/react";
 import {
   deriveTimelineEntries,
   type FileChange,
@@ -41,6 +41,7 @@ import {
 } from "../../session-logic";
 import { type TurnDiffSummary } from "../../types";
 import {
+  expandPartialPatchWithCurrentFile,
   getDiffLineStat,
   getRenderablePatch,
   resolveDiffThemeName,
@@ -111,6 +112,8 @@ import { useUiStateStore } from "~/uiStateStore";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { formatChatTimestampTooltip, formatDayAwareTimestamp } from "../../timestampFormat";
 import { useClientSettings, useUpdateClientSettings } from "../../hooks/useSettings";
+import { readProjectFileFresh } from "../files/projectFilesQueryState";
+import { toastManager } from "../ui/toast";
 
 import {
   buildInlineTerminalContextText,
@@ -2228,6 +2231,137 @@ const AgentSpawnCtaRow = memo(function AgentSpawnCtaRow(props: { workEntry: Time
   );
 });
 
+function InlineFileDiff(props: {
+  change: FileChange;
+  fileDiff: FileDiffMetadata;
+  environmentId: EnvironmentId;
+  workspaceRoot: string | undefined;
+  theme: "light" | "dark";
+  wordWrap: boolean;
+  onToggleWordWrap: () => void;
+}) {
+  const { change, environmentId, workspaceRoot } = props;
+  const [expandedFileDiff, setExpandedFileDiff] = useState(props.fileDiff);
+  const [expansionError, setExpansionError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!props.fileDiff.isPartial) return;
+    if (!workspaceRoot || !change.postFileHash) {
+      setExpansionError(
+        workspaceRoot
+          ? "This edit predates unchanged-line tracking."
+          : "The workspace is unavailable.",
+      );
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const normalizedRoot = workspaceRoot.replaceAll("\\", "/").replace(/\/+$/, "");
+        const normalizedPath = change.filePath.replaceAll("\\", "/");
+        const relativePath = normalizedPath.startsWith(`${normalizedRoot}/`)
+          ? normalizedPath.slice(normalizedRoot.length + 1)
+          : normalizedPath.replace(/^\.?\//, "");
+        const file = await readProjectFileFresh(environmentId, workspaceRoot, relativePath);
+        if (!file) throw new Error("read");
+        const digest = await crypto.subtle.digest(
+          "SHA-256",
+          new TextEncoder().encode(file.contents),
+        );
+        const currentHash = [...new Uint8Array(digest)]
+          .map((byte) => byte.toString(16).padStart(2, "0"))
+          .join("");
+        if (currentHash !== change.postFileHash) throw new Error("changed");
+        const fullPatch = expandPartialPatchWithCurrentFile(
+          change.patch ?? "",
+          relativePath,
+          file.contents,
+        );
+        const renderable = getRenderablePatch(fullPatch ?? undefined, `expanded:${currentHash}`, {
+          upgradeFullContextFiles: true,
+        });
+        const [nextFileDiff] = renderable?.kind === "files" ? renderable.files : [];
+        if (!nextFileDiff) throw new Error("patch");
+        if (!cancelled) setExpandedFileDiff(nextFileDiff);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : "";
+        if (!cancelled) {
+          setExpansionError(
+            reason === "changed"
+              ? "The file changed after this edit."
+              : reason === "patch"
+                ? "The stored edit no longer applies to this file."
+                : "The file could not be read.",
+          );
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    change.filePath,
+    change.patch,
+    change.postFileHash,
+    environmentId,
+    props.fileDiff,
+    workspaceRoot,
+  ]);
+
+  const warnCannotExpand = () => {
+    toastManager.add({
+      type: "warning",
+      title: "Cannot expand unchanged lines",
+      description: expansionError ?? "The file is still being checked.",
+    });
+  };
+
+  const stat = getDiffLineStat([expandedFileDiff]);
+  return (
+    <div>
+      <FileDiff
+        fileDiff={expandedFileDiff}
+        renderCustomHeader={(headerFileDiff) => (
+          <div className="flex h-10 items-center gap-2 px-3 text-xs">
+            <span className="min-w-0 flex-1 truncate">{resolveFileDiffPath(headerFileDiff)}</span>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    aria-label={
+                      props.wordWrap ? "Disable diff line wrapping" : "Enable diff line wrapping"
+                    }
+                    variant="ghost"
+                    size="icon-xs"
+                    data-pressed={props.wordWrap || undefined}
+                    onClick={props.onToggleWordWrap}
+                  />
+                }
+              >
+                <TextWrapIcon className="size-3" />
+              </TooltipTrigger>
+              <TooltipPopup side="top">
+                {props.wordWrap ? "Disable line wrapping" : "Enable line wrapping"}
+              </TooltipPopup>
+            </Tooltip>
+            <span className="font-mono text-destructive">-{stat.deletions}</span>
+            <span className="font-mono text-success">+{stat.additions}</span>
+          </div>
+        )}
+        options={{
+          collapsed: false,
+          diffStyle: "unified",
+          expansionLineCount: 10,
+          overflow: props.wordWrap ? "wrap" : "scroll",
+          theme: resolveDiffThemeName(props.theme),
+          onHunkExpand: expandedFileDiff.isPartial ? warnCannotExpand : undefined,
+        }}
+      />
+    </div>
+  );
+}
+
 const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   workEntry: TimelineWorkEntry;
   workspaceRoot: string | undefined;
@@ -2271,7 +2405,9 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
           upgradeFullContextFiles: true,
         })
       : null;
-    return renderablePatch?.kind === "files" ? renderablePatch.files : [];
+    return renderablePatch?.kind === "files"
+      ? renderablePatch.files.map((fileDiff) => ({ change, fileDiff }))
+      : [];
   });
   const expandedBody =
     inlineFilePatches.length > 0 ? null : buildToolCallExpandedBody(workEntry, workspaceRoot);
@@ -2405,48 +2541,16 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
           onClick={stopRowToggle}
           onPointerDown={stopRowToggle}
         >
-          {inlineFilePatches.map((fileDiff) => (
-            <FileDiff
+          {inlineFilePatches.map(({ change, fileDiff }) => (
+            <InlineFileDiff
               key={`${workEntry.id}:${resolveFileDiffPath(fileDiff)}`}
+              change={change}
               fileDiff={fileDiff}
-              renderCustomHeader={(headerFileDiff) => {
-                const stat = getDiffLineStat([headerFileDiff]);
-                return (
-                  <div className="flex h-10 items-center gap-2 px-3 text-xs">
-                    <span className="min-w-0 flex-1 truncate">
-                      {resolveFileDiffPath(headerFileDiff)}
-                    </span>
-                    <Tooltip>
-                      <TooltipTrigger
-                        render={
-                          <Button
-                            aria-label={
-                              wordWrap ? "Disable diff line wrapping" : "Enable diff line wrapping"
-                            }
-                            variant="ghost"
-                            size="icon-xs"
-                            data-pressed={wordWrap || undefined}
-                            onClick={() => updateClientSettings({ wordWrap: !wordWrap })}
-                          />
-                        }
-                      >
-                        <TextWrapIcon className="size-3" />
-                      </TooltipTrigger>
-                      <TooltipPopup side="top">
-                        {wordWrap ? "Disable line wrapping" : "Enable line wrapping"}
-                      </TooltipPopup>
-                    </Tooltip>
-                    <span className="font-mono text-destructive">-{stat.deletions}</span>
-                    <span className="font-mono text-success">+{stat.additions}</span>
-                  </div>
-                );
-              }}
-              options={{
-                collapsed: false,
-                diffStyle: "unified",
-                overflow: wordWrap ? "wrap" : "scroll",
-                theme: resolveDiffThemeName(timelineRow.resolvedTheme),
-              }}
+              environmentId={timelineRow.activeThreadEnvironmentId}
+              workspaceRoot={workspaceRoot}
+              theme={timelineRow.resolvedTheme}
+              wordWrap={wordWrap}
+              onToggleWordWrap={() => updateClientSettings({ wordWrap: !wordWrap })}
             />
           ))}
           {expandedBody ? (
