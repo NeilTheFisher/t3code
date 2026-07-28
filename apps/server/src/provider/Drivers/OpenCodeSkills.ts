@@ -64,7 +64,7 @@ const resolveOpenCodeConfigDirPath = Effect.fn("resolveOpenCodeConfigDirPath")(f
   cwd?: string,
 ): Effect.fn.Return<string, never, Path.Path> {
   const path = yield* Path.Path;
-  const homePath = config.homePath.trim();
+  const homePath = (config.homePath ?? "").trim();
   if (homePath.length > 0) {
     return path.resolve(expandHomePath(homePath));
   }
