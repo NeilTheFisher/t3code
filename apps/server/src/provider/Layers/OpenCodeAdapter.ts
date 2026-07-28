@@ -1616,6 +1616,18 @@ export function makeOpenCodeAdapter(
       const agent = getModelSelectionStringOptionValue(modelSelection, "agent");
       const variant = getModelSelectionStringOptionValue(modelSelection, "variant");
 
+      // Update the context window limit when the model changes so the
+      // context circle reflects the new model's capacity. This is cosmetic
+      // (the provider handles real compaction) but avoids showing a stale
+      // percentage after a mid-session model switch.
+      const newModelSlug = modelSelection?.model;
+      if (newModelSlug !== undefined && newModelSlug !== context.session.model) {
+        const updatedContextWindow = yield* resolveModelContextWindow(newModelSlug, context.client);
+        if (updatedContextWindow !== undefined) {
+          context.modelContextWindow = updatedContextWindow;
+        }
+      }
+
       context.activeTurnId = turnId;
       context.activeAgent = agent ?? (input.interactionMode === "plan" ? "plan" : undefined);
       context.activeVariant = variant;
@@ -1697,11 +1709,12 @@ export function makeOpenCodeAdapter(
         yield* runOpenCodeSdk("session.abort", () =>
           context.client.session.abort({ sessionID: context.openCodeSessionId }),
         ).pipe(Effect.mapError(toRequestError));
-        if (turnId ?? context.activeTurnId) {
+        const targetTurnId = turnId ?? context.activeTurnId;
+        if (targetTurnId) {
           yield* emit({
             ...(yield* buildEventBase({
               threadId,
-              turnId: turnId ?? context.activeTurnId,
+              turnId: targetTurnId,
             })),
             type: "turn.aborted",
             payload: {
@@ -1709,6 +1722,11 @@ export function makeOpenCodeAdapter(
             },
           });
         }
+        // Transition the session back to ready after aborting the turn.
+        // Without this, a stuck session (e.g. context overflow causing the
+        // provider to hang) stays in "running" and blocks settlement.
+        context.activeTurnId = undefined;
+        yield* updateProviderSession(context, { status: "ready" }, { clearActiveTurnId: true });
       },
     );
 
