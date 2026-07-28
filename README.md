@@ -61,6 +61,27 @@ We are very very early in this project. Expect bugs.
 
 We are (mostly) not accepting contributions yet. Small fixes may be considered. Big features will not be.
 
+## Fork-specific features
+
+This checkout is a maintained fork of `pingdotgg/t3code`. In addition to upstream T3 Code, it
+includes:
+
+- Richer work logs with command output, provider-specific tool titles, collaboration labels, and
+  expandable inline file-change diffs for Codex, Claude, and OpenCode.
+- Scalable thread history and recovery, including bounded activity storage, scroll-up pagination,
+  restart recovery, cross-client deletion handling, and more reliable interrupted/input lifecycles.
+- Provider continuity features such as switching provider or model mid-thread, model favorites,
+  context and usage limits, and improved OpenCode skill/session support.
+- File, diff, preview, and terminal improvements including binary-safe diffs, focused expandable
+  sidebar diffs, workspace and external image previews, an embedded web surface, and terminal paste.
+- Attention and status improvements including background-task waiting state, retention of important
+  and recent threads, dismissible errors, and reliable settling of inactive threads.
+
+These capability groups are rebase invariants, not an exhaustive changelog. See
+[AGENTS.md](./AGENTS.md#fork-rebase-invariants) for the checks required after updating from
+upstream.
+
+There's no public docs site yet, checkout the miscellaneous markdown files in [docs](./docs).
 ## Documentation
 
 Full docs live in [docs/](./docs). There's no docs site yet.
