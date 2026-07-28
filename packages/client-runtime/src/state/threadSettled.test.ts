@@ -372,15 +372,18 @@ describe("canSettle", () => {
     );
   });
 
-  it("blocks settling a queued turn start, only within the grace window", () => {
+  it("lets the server adjudicate a queued-looking shell", () => {
     const queued = {
       ...makeShell({ activityAt: FRESH }),
       latestUserMessageAt: "2026-04-09T12:00:00.000Z",
     };
     const justAfter = "2026-04-09T12:00:30.000Z";
-    expect(canSettle(queued, { now: justAfter })).toBe(false);
-    // effectiveSettled must agree: queued work never auto-settles either,
-    // even with a merged PR.
+    // The client cannot distinguish a genuinely queued turn from a completed
+    // turn whose latestTurn has not reached the shell yet. Do not reject the
+    // user's action locally; the server still guards a real queued start.
+    expect(canSettle(queued, { now: justAfter })).toBe(true);
+    // Automatic classification remains conservative: queued-looking work
+    // never auto-settles, even with a merged PR.
     expect(
       effectiveSettled(queued, {
         now: justAfter,
@@ -388,7 +391,6 @@ describe("canSettle", () => {
         changeRequestState: "merged",
       }),
     ).toBe(false);
-    // Past the window the message is a failed/stale start: settleable again.
     expect(canSettle(queued, { now: NOW })).toBe(true);
   });
 
@@ -427,8 +429,7 @@ describe("canSettle", () => {
   });
 
   it("agrees with effectiveSettled's blockers for explicitly settled shells", () => {
-    // Anything canSettle rejects must render as active even when the user
-    // settled it earlier.
+    // Explicit attention requests remain blocked on both paths.
     const blocked = makeShell({
       settledOverride: "settled",
       activityAt: FRESH,

@@ -70,24 +70,21 @@ export function hasQueuedTurnStart(
 }
 
 /**
- * A thread may be settled only when none of effectiveSettled's activity
- * blockers hold. This is deliberately the same list: anything the partition
- * refuses to CLASSIFY as settled must also be refused as a settle TARGET.
- * The server enforces its own invariants; this client-side twin exists so
- * the UI can disable/reject before a round trip.
+ * A thread may be settled only when it has no explicit attention request or
+ * live session. The server remains authoritative for the short queued-start
+ * race: client shells can briefly have a recent user message but no
+ * `latestTurn` after a turn has already completed, so applying
+ * `hasQueuedTurnStart` here creates a false "still needs attention" error.
  */
 export function canSettle(
   shell: Pick<
     OrchestrationThreadShell,
     "hasPendingApprovals" | "hasPendingUserInput" | "session" | "latestUserMessageAt" | "latestTurn"
   >,
-  options: { readonly now: string },
+  _options: { readonly now: string },
 ): boolean {
   if (shell.hasPendingApprovals || shell.hasPendingUserInput) return false;
   if (shell.session?.status === "starting" || shell.session?.status === "running") return false;
-  // Queued work is as blocked-on-progress as a live session: settling it
-  // (or auto-settling it on a closed PR) would hide a just-requested turn.
-  if (hasQueuedTurnStart(shell, options)) return false;
   return true;
 }
 
