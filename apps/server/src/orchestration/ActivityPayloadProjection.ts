@@ -184,7 +184,7 @@ function projectRawOutput(value: unknown): Record<string, unknown> | undefined {
 /**
  * Removes activity payload fields that no current client reads while retaining
  * the full payload in persistence and the event store.
- * Preserves data.changes so the web client can render inline diffs.
+ * Preserves file changes so the web client can render inline diffs.
  */
 export function projectActivityPayload(
   activity: OrchestrationThreadActivity,
@@ -211,8 +211,14 @@ export function projectActivityPayload(
     projectedData.files = changedFiles.map((path) => ({ path }));
   }
 
-  if (Array.isArray(data.changes)) {
-    projectedData.changes = data.changes;
+  const dataItem = asRecord(data.item);
+  const fileChanges = Array.isArray(data.changes)
+    ? data.changes
+    : Array.isArray(dataItem?.changes)
+      ? dataItem.changes
+      : undefined;
+  if (fileChanges) {
+    projectedData.changes = fileChanges;
   }
 
   if ("toolCallId" in data) {
