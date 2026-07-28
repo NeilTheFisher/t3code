@@ -3209,6 +3209,7 @@ function buildToolCallExpandedBody(
   workspaceRoot: string | undefined,
   visibleLabel: string,
   viewedImagePath: string | null,
+hasDiffPatches: boolean = false,
 ): string | null {
   const blocks: string[] = [];
   const seen = new Set<string>([visibleLabel.trim()]);
@@ -3231,6 +3232,8 @@ function buildToolCallExpandedBody(
   const detail = workEntry.detail?.trim();
   if (detail !== viewedImagePath?.trim()) {
     addBlock(detail);
+if (workEntry.detail?.trim() && !hasDiffPatches) {
+    blocks.push(workEntry.detail.trim());
   }
   const viewedImagePaths = new Set(
     viewedImagePath
@@ -3436,6 +3439,16 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
   const previewText = workEntry.questionAnswer
     ? "Question answer submitted"
     : (displayLabel ?? workEntryDisplayLabel(workEntry, workspaceRoot));
+showWarningIndicator || showFailedIndicator ? "circle-alert" : workEntryIconName(workEntry);
+  const heading = toolWorkEntryHeading(workEntry);
+  const rawPreview = workEntryPreview(workEntry, workspaceRoot);
+  const preview =
+    rawPreview &&
+    normalizeCompactToolLabel(rawPreview).toLowerCase() ===
+      normalizeCompactToolLabel(heading).toLowerCase()
+      ? null
+      : rawPreview;
+  const displayText = preview ? `${heading} - ${preview}` : heading;
   const viewedImagePath = workEntryViewedImagePath(workEntry);
   const viewedImage =
     viewedImagePath && threadRef
@@ -3474,6 +3487,17 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
       )
     : null;
   // Reserve destructive row styling for severe failures, not routine tool errors.
+const expandedBody = buildToolCallExpandedBody(
+    workEntry,
+    workspaceRoot,
+    inlineFilePatches.length > 0,
+  );
+  const canExpand = expandedBody !== null || inlineFilePatches.length > 0 || viewedImage !== null;
+  const showDestructiveRowStyle =
+    showFailedIndicator &&
+    (workEntrySignalsSevereFailure(workEntry) || !workLogEntryIsToolLike(workEntry));
+  // Ordinary tool failures stay muted; only runtime errors and warnings get
+  // color. The red treatment is reserved for severe failures.
   const iconWrapperClass = cn(
     "flex size-6 shrink-0 items-center justify-center",
     showWarningIndicator
