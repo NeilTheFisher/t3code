@@ -1275,7 +1275,11 @@ describe("deriveWorkLogEntries", () => {
           itemType: "file_change",
           data: {
             changes: [
-              { path: "apps/web/src/session-logic.ts", diff: "@@ -1 +1 @@\n-old\n+new" },
+              {
+                path: "apps/web/src/session-logic.ts",
+                diff: "@@ -1 +1 @@\n-old\n+new",
+                postFileHash: "abc123",
+              },
               { path: "apps/server/src/server.ts", diff: "@@ -2 +2 @@\n-before\n+after" },
             ],
           },
@@ -1289,7 +1293,11 @@ describe("deriveWorkLogEntries", () => {
       "apps/server/src/server.ts",
     ]);
     expect(entry?.fileChanges).toEqual([
-      { filePath: "apps/web/src/session-logic.ts", patch: "@@ -1 +1 @@\n-old\n+new" },
+      {
+        filePath: "apps/web/src/session-logic.ts",
+        patch: "@@ -1 +1 @@\n-old\n+new",
+        postFileHash: "abc123",
+      },
       { filePath: "apps/server/src/server.ts", patch: "@@ -2 +2 @@\n-before\n+after" },
     ]);
   });

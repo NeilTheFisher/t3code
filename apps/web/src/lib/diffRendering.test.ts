@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   buildFileDiffRenderKey,
   buildPatchCacheKey,
+  expandPartialPatchWithCurrentFile,
   extractBinaryPatchPaths,
   getDiffLineStat,
   getRenderablePatch,
@@ -194,6 +195,26 @@ describe("getDiffLineStat", () => {
 });
 
 describe("getRenderablePatch upgradeFullContextFiles", () => {
+  it("reconstructs full context by reversing a partial patch against the current file", () => {
+    const currentContents = ["one", "changed", "three", "four"].join("\n");
+    const partialPatch = ["@@ -1,3 +1,3 @@", " one", "-two", "+changed", " three"].join("\n");
+
+    const fullPatch = expandPartialPatchWithCurrentFile(
+      partialPatch,
+      "example.txt",
+      currentContents,
+    );
+    const parsed = getRenderablePatch(fullPatch ?? undefined, "expanded", {
+      upgradeFullContextFiles: true,
+    });
+
+    expect(parsed?.kind).toBe("files");
+    if (parsed?.kind !== "files") return;
+    expect(parsed.files[0]?.isPartial).toBe(false);
+    expect(fullPatch).toContain("-two");
+    expect(fullPatch).toContain("+changed");
+  });
+
   it("rebuilds full-context patches into collapsed, expandable non-partial diffs", () => {
     const oldLines = Array.from({ length: 200 }, (_, index) => `line ${index + 1}`);
     const newLines = [...oldLines];
