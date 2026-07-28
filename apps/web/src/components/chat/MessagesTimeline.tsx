@@ -74,6 +74,7 @@ import {
   type TurnDiffSummary,
 } from "../../types";
 import {
+  getDiffLineStat,
   getRenderablePatch,
   resolveDiffThemeName,
   resolveFileDiffPath,
@@ -101,6 +102,7 @@ import {
   SearchIcon,
   SquarePenIcon,
   TerminalIcon,
+  TextWrapIcon,
   Undo2Icon,
   WrenchIcon,
   XIcon,
@@ -179,6 +181,7 @@ import { cn } from "~/lib/utils";
 import { useUiStateStore } from "~/uiStateStore";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { formatChatTimestampTooltip, formatDayAwareTimestamp } from "../../timestampFormat";
+import { useClientSettings, useUpdateClientSettings } from "../../hooks/useSettings";
 import {
   buildInlineTerminalContextText,
   formatInlineTerminalContextLabel,
@@ -3210,29 +3213,6 @@ function buildToolCallExpandedBody(
   visibleLabel: string,
   viewedImagePath: string | null,
 hasDiffPatches: boolean = false,
-): string | null {
-  const blocks: string[] = [];
-  const seen = new Set<string>([visibleLabel.trim()]);
-  const addBlock = (value: string | null | undefined) => {
-    const text = value?.trim();
-    if (!text || seen.has(text)) return;
-    seen.add(text);
-    blocks.push(text);
-  };
-  if (workEntry.itemType === "mcp_tool_call" && workEntry.toolData !== undefined) {
-    addBlock(`MCP call\n${JSON.stringify(workEntry.toolData, null, 2)}`);
-  }
-  const command = workEntry.command?.trim();
-  const raw = workEntryRawCommand(workEntry);
-  if (command === visibleLabel.trim()) {
-    seen.add(command);
-  } else {
-    addBlock(raw ?? command);
-  }
-  const detail = workEntry.detail?.trim();
-  if (detail !== viewedImagePath?.trim()) {
-    addBlock(detail);
-if (workEntry.detail?.trim() && !hasDiffPatches) {
     blocks.push(workEntry.detail.trim());
   }
   const viewedImagePaths = new Set(
@@ -3462,7 +3442,9 @@ showWarningIndicator || showFailedIndicator ? "circle-alert" : workEntryIconName
   const inlineFilePatches = inlineFileChanges.flatMap((change) => {
     const patch = buildInlineFileChangePatch(change);
     const renderablePatch = patch
-      ? getRenderablePatch(patch, `work-log:${workEntry.id}:${change.filePath}`)
+      ? getRenderablePatch(patch, `work-log:${workEntry.id}:${change.filePath}`, {
+          upgradeFullContextFiles: true,
+        })
       : null;
     return renderablePatch?.kind === "files" ? renderablePatch.files : [];
   });
@@ -3626,6 +3608,38 @@ const expandedBody = buildToolCallExpandedBody(
             <FileDiff
               key={`${workEntry.id}:${resolveFileDiffPath(fileDiff)}`}
               fileDiff={fileDiff}
+              renderCustomHeader={(headerFileDiff) => {
+                const stat = getDiffLineStat([headerFileDiff]);
+                return (
+                  <div className="flex h-10 items-center gap-2 px-3 text-xs">
+                    <span className="min-w-0 flex-1 truncate">
+                      {resolveFileDiffPath(headerFileDiff)}
+                    </span>
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <Button
+                            aria-label={
+                              wordWrap ? "Disable diff line wrapping" : "Enable diff line wrapping"
+                            }
+                            variant="ghost"
+                            size="icon-xs"
+                            data-pressed={wordWrap || undefined}
+                            onClick={() => updateClientSettings({ wordWrap: !wordWrap })}
+                          />
+                        }
+                      >
+                        <TextWrapIcon className="size-3" />
+                      </TooltipTrigger>
+                      <TooltipPopup side="top">
+                        {wordWrap ? "Disable line wrapping" : "Enable line wrapping"}
+                      </TooltipPopup>
+                    </Tooltip>
+                    <span className="font-mono text-destructive">-{stat.deletions}</span>
+                    <span className="font-mono text-success">+{stat.additions}</span>
+                  </div>
+                );
+              }}
               options={{
                 collapsed: false,
                 diffStyle: "unified",

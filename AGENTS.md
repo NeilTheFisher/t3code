@@ -13,7 +13,8 @@ You can think of T3 Code as an open source "bring-your-own-subscription" alterna
 - Inline file diffs are an end-to-end contract. A completed Codex `file_change` event stores patches
   in `data.item.changes`; activity projection must preserve them, client extraction must retain them,
   and expanding the work-log file-change row must render the patch. Keep the projection and client
-  regression tests, including an absolute workspace path.
+  regression tests, including an absolute workspace path. Inline previews must hide redundant tool
+  input, preserve the global line-wrap preference, and keep full-context regions expandable.
 - After every upstream rebase, follow the parent setup repository's required dependency install,
   build, web/server test, and scoped web-check workflow. Then smoke-test inline diffs in the
   controlled browser with: `make an edit to the readme. I'm testing the file edit tool... make an
