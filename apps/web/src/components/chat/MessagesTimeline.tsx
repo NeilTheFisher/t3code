@@ -56,6 +56,7 @@ import {
   type TurnDiffSummary,
 } from "../../types";
 import {
+  getDiffLineStat,
   getRenderablePatch,
   resolveDiffThemeName,
   resolveFileDiffPath,
@@ -80,6 +81,7 @@ import {
   SearchIcon,
   SquarePenIcon,
   TerminalIcon,
+  TextWrapIcon,
   Undo2Icon,
   WrenchIcon,
   XIcon,
@@ -133,6 +135,7 @@ import { cn } from "~/lib/utils";
 import { useUiStateStore } from "~/uiStateStore";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { formatChatTimestampTooltip, formatDayAwareTimestamp } from "../../timestampFormat";
+import { useClientSettings, useUpdateClientSettings } from "../../hooks/useSettings";
 
 import {
   buildInlineTerminalContextText,
@@ -2358,7 +2361,6 @@ function liveWorkEntryLabel(
 function buildToolCallExpandedBody(
   workEntry: TimelineWorkEntry,
   workspaceRoot: string | undefined,
-  hasDiffPatches: boolean = false,
 ): string | null {
   const blocks: string[] = [];
   if (workEntry.itemType === "mcp_tool_call" && workEntry.toolData !== undefined) {
@@ -2370,7 +2372,7 @@ function buildToolCallExpandedBody(
   } else if (workEntry.command?.trim()) {
     blocks.push(workEntry.command.trim());
   }
-  if (workEntry.detail?.trim() && !hasDiffPatches) {
+  if (workEntry.detail?.trim()) {
     blocks.push(workEntry.detail.trim());
   }
   const changedFiles = workEntry.changedFiles ?? [];
@@ -2562,6 +2564,8 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
   const { workEntry, workspaceRoot, isExpandedToolGroupEntry } = props;
   const timelineRow = use(TimelineRowCtx);
   const { threadRef, onImageExpand } = timelineRow;
+  const wordWrap = useClientSettings((settings) => settings.wordWrap);
+  const updateClientSettings = useUpdateClientSettings();
   const [expanded, setExpanded] = useState(false);
   const iconConfig = workToneIcon(workEntry.tone);
   const showWarningIndicator = workEntry.sourceActivityKind === "runtime.warning";
@@ -2590,15 +2594,14 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
   const inlineFilePatches = inlineFileChanges.flatMap((change) => {
     const patch = buildInlineFileChangePatch(change);
     const renderablePatch = patch
-      ? getRenderablePatch(patch, `work-log:${workEntry.id}:${change.filePath}`)
+      ? getRenderablePatch(patch, `work-log:${workEntry.id}:${change.filePath}`, {
+          upgradeFullContextFiles: true,
+        })
       : null;
     return renderablePatch?.kind === "files" ? renderablePatch.files : [];
   });
-  const expandedBody = buildToolCallExpandedBody(
-    workEntry,
-    workspaceRoot,
-    inlineFilePatches.length > 0,
-  );
+  const expandedBody =
+    inlineFilePatches.length > 0 ? null : buildToolCallExpandedBody(workEntry, workspaceRoot);
   const canExpand = expandedBody !== null || inlineFilePatches.length > 0 || viewedImage !== null;
   const showDestructiveRowStyle =
     showFailedIndicator &&
@@ -2708,9 +2711,42 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
             <FileDiff
               key={`${workEntry.id}:${resolveFileDiffPath(fileDiff)}`}
               fileDiff={fileDiff}
+              renderCustomHeader={(headerFileDiff) => {
+                const stat = getDiffLineStat([headerFileDiff]);
+                return (
+                  <div className="flex h-10 items-center gap-2 px-3 text-xs">
+                    <span className="min-w-0 flex-1 truncate">
+                      {resolveFileDiffPath(headerFileDiff)}
+                    </span>
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <Button
+                            aria-label={
+                              wordWrap ? "Disable diff line wrapping" : "Enable diff line wrapping"
+                            }
+                            variant="ghost"
+                            size="icon-xs"
+                            data-pressed={wordWrap || undefined}
+                            onClick={() => updateClientSettings({ wordWrap: !wordWrap })}
+                          />
+                        }
+                      >
+                        <TextWrapIcon className="size-3" />
+                      </TooltipTrigger>
+                      <TooltipPopup side="top">
+                        {wordWrap ? "Disable line wrapping" : "Enable line wrapping"}
+                      </TooltipPopup>
+                    </Tooltip>
+                    <span className="font-mono text-destructive">-{stat.deletions}</span>
+                    <span className="font-mono text-success">+{stat.additions}</span>
+                  </div>
+                );
+              }}
               options={{
                 collapsed: false,
                 diffStyle: "unified",
+                overflow: wordWrap ? "wrap" : "scroll",
                 theme: resolveDiffThemeName(timelineRow.resolvedTheme),
               }}
             />
