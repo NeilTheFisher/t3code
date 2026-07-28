@@ -29,6 +29,7 @@ import {
 } from "../opencodeRuntime.ts";
 import type { Agent, ProviderListResponse } from "@opencode-ai/sdk/v2";
 import { parseOpenCodeGoUsageHtml } from "../providerUsageLimits.ts";
+import { discoverOpenCodeSkills } from "../Drivers/OpenCodeSkills.ts";
 
 const OPENCODE_PRESENTATION = {
   displayName: "OpenCode",
@@ -556,15 +557,19 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
     customModels,
     DEFAULT_OPENCODE_MODEL_CAPABILITIES,
   );
-  const skills = openCodeSkillsToServerProviderSkills(inventoryExit.value.inventory.skills);
-  const connectedCount = inventoryExit.value.inventory.providerList.connected.length;
+  const inventorySkills = openCodeSkillsToServerProviderSkills(inventoryExit.value.inventory.skills);
   const usageLimits = yield* fetchOpenCodeGoUsageLimits({
     workspaceId: openCodeSettings.goWorkspaceId,
     authCookie: openCodeSettings.goAuthCookie,
     checkedAt,
   });
-  const connectedCount = inventoryExit.value.providerList.connected.length;
->>>>>>> 541798a47 (feat: show OpenCode Go usage limits)
+  const discoveredSkills = yield* discoverOpenCodeSkills({}, cwd, resolvedEnvironment);
+  const skills = [
+    ...new Map(
+      [...inventorySkills, ...discoveredSkills].map((skill) => [skill.name, skill] as const),
+    ).values(),
+  ].toSorted((left, right) => left.name.localeCompare(right.name));
+  const connectedCount = inventoryExit.value.inventory.providerList.connected.length;
   return buildServerProvider({
     presentation: OPENCODE_PRESENTATION,
     enabled: true,
