@@ -11,6 +11,23 @@ import {
 import { ModelSelection } from "./orchestration.ts";
 import { ProviderInstanceConfig, ProviderInstanceId } from "./providerInstance.ts";
 
+// ── Userscripts ──────────────────────────────────────────────
+
+export const UserscriptType = Schema.Literals(["css", "javascript"]);
+export type UserscriptType = typeof UserscriptType.Type;
+
+export const Userscript = Schema.Struct({
+  id: Schema.String,
+  name: TrimmedNonEmptyString,
+  code: Schema.String,
+  type: UserscriptType,
+  enabled: Schema.Boolean,
+  deviceId: Schema.String,
+});
+export type Userscript = typeof Userscript.Type;
+
+export const DEFAULT_USERSCRIPTS: Record<string, readonly Userscript[]> = {};
+
 // ── Client Settings (local-only) ───────────────────────────────
 
 export const TimestampFormat = Schema.Literals(["locale", "12-hour", "24-hour"]);
@@ -636,6 +653,9 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  userscripts: Schema.Record(Schema.String, Schema.Array(Userscript)).pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
 });
 export type ServerSettings = typeof ServerSettings.Type;
 
@@ -778,6 +798,9 @@ export const ServerSettingsPatch = Schema.Struct({
   // patches risk leaving driver-specific config in a half-merged state.
   // The web UI sends a fully-formed map every time it edits this field.
   providerInstances: Schema.optionalKey(Schema.Record(ProviderInstanceId, ProviderInstanceConfig)),
+  // Per-device userscripts. The client sends only its own device's entry;
+  // deepMerge preserves scripts from other devices.
+  userscripts: Schema.optionalKey(Schema.Record(Schema.String, Schema.Array(Userscript))),
 });
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
 
