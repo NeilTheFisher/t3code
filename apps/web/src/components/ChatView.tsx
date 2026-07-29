@@ -1257,13 +1257,6 @@ function ChatViewContent(props: ChatViewProps) {
   const setLogicalProjectDraftThreadId = useComposerDraftStore(
     (store) => store.setLogicalProjectDraftThreadId,
   );
-  const draftThread = useComposerDraftStore((store) =>
-    routeKind === "server"
-      ? store.getDraftSessionByRef(routeThreadRef)
-      : draftId
-        ? store.getDraftSession(draftId)
-        : null,
-  );
   const promptRef = useRef("");
   const composerImagesRef = useRef<ComposerImageAttachment[]>([]);
   const composerTerminalContextsRef = useRef<TerminalContextDraft[]>([]);
