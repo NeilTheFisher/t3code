@@ -47,10 +47,8 @@ import {
   type MouseEvent,
   type ReactNode,
 } from "react";
-=======
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { FileDiff, type FileDiffMetadata } from "@pierre/diffs/react";
->>>>>>> 746957056c (Make omitted diff context safely expandable)
 import {
   LegendList,
   type LegendListRef,
@@ -187,7 +185,6 @@ import { useUiStateStore } from "~/uiStateStore";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { formatChatTimestampTooltip, formatDayAwareTimestamp } from "../../timestampFormat";
 import { useClientSettings, useUpdateClientSettings } from "../../hooks/useSettings";
-<<<<<<< HEAD
 import { readProjectFileFresh } from "../files/projectFilesQueryState";
 import { toastManager } from "../ui/toast";
 
