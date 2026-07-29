@@ -20,6 +20,8 @@ import {
   KeyboardIcon,
   Link2Icon,
   PaletteIcon,
+  FileCode2Icon,
+  FlaskConicalIcon,
   SearchIcon,
   Settings2Icon,
   XIcon,
@@ -86,6 +88,8 @@ const SETTINGS_SECTION_ICONS: Readonly<
   "/settings/source-control": GitBranchIcon,
   "/settings/storage": HardDriveIcon,
   "/settings/connections": Link2Icon,
+  "/settings/beta": FlaskConicalIcon,
+  "/settings/userscripts": FileCode2Icon,
   "/settings/archived": ArchiveIcon,
 };
 

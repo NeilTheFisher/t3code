@@ -22,6 +22,8 @@ export type SettingsPath =
   | "/settings/source-control"
   | "/settings/storage"
   | "/settings/connections"
+  | "/settings/beta"
+  | "/settings/userscripts"
   | "/settings/archived";
 
 /**
@@ -93,6 +95,8 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/source-control": "Source Control",
   "/settings/storage": "Storage",
   "/settings/connections": "Connections",
+  "/settings/beta": "Beta",
+  "/settings/userscripts": "Userscripts",
   "/settings/archived": "Archive",
 };
 
