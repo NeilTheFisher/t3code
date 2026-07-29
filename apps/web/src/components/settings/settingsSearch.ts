@@ -9,6 +9,8 @@ export type SettingsPath =
   | "/settings/integrations"
   | "/settings/source-control"
   | "/settings/connections"
+  | "/settings/beta"
+  | "/settings/userscripts"
   | "/settings/archived";
 
 export interface SettingsSearchItem {
@@ -54,6 +56,8 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/integrations": "Integrations",
   "/settings/source-control": "Source Control",
   "/settings/connections": "Connections",
+  "/settings/beta": "Beta",
+  "/settings/userscripts": "Userscripts",
   "/settings/archived": "Archive",
 };
 
