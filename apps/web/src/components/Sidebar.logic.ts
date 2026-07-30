@@ -911,6 +911,25 @@ export function getProjectSortTimestamp(
   return toSortableTimestamp(project.updatedAt ?? project.createdAt) ?? Number.NEGATIVE_INFINITY;
 }
 
+function sortProjectsByActivity<TProject extends SidebarProject>(
+  projects: readonly TProject[],
+  sortOrder: SidebarProjectSortOrder,
+  getProjectThreads: (project: TProject) => readonly ThreadSortInput[],
+  compareTies: (left: TProject, right: TProject) => number,
+): TProject[] {
+  if (sortOrder === "manual") {
+    return [...projects];
+  }
+
+  return [...projects].toSorted((left, right) => {
+    const rightTimestamp = getProjectSortTimestamp(right, getProjectThreads(right), sortOrder);
+    const leftTimestamp = getProjectSortTimestamp(left, getProjectThreads(left), sortOrder);
+    const byTimestamp =
+      rightTimestamp === leftTimestamp ? 0 : rightTimestamp > leftTimestamp ? 1 : -1;
+    return byTimestamp || compareTies(left, right);
+  });
+}
+
 export function sortProjectsForSidebar<
   TProject extends SidebarProject,
   TThread extends Pick<Thread, "projectId" | "createdAt" | "updatedAt"> & ThreadSortInput,
