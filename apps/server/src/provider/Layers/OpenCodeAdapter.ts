@@ -890,6 +890,13 @@ export function makeOpenCodeAdapter(
         context.accumulatedReasoningTokens += reasoningTokens;
         context.accumulatedCacheReadTokens += tokens.cache?.read ?? 0;
 
+        const contextTokens = inputTokens + outputTokens + (tokens.cache?.read ?? 0);
+        const maxTokens = context.modelContextWindow;
+        const usedTokens =
+          maxTokens !== undefined ? Math.min(contextTokens, maxTokens) : contextTokens;
+        const totalProcessedTokens =
+          context.accumulatedInputTokens + context.accumulatedOutputTokens;
+
         yield* emit({
           ...(yield* buildEventBase({
             threadId: context.session.threadId,
@@ -899,10 +906,9 @@ export function makeOpenCodeAdapter(
           type: "thread.token-usage.updated",
           payload: {
             usage: {
-              usedTokens: context.accumulatedInputTokens + context.accumulatedOutputTokens,
-              ...(context.modelContextWindow !== undefined
-                ? { maxTokens: context.modelContextWindow }
-                : {}),
+              usedTokens,
+              ...(maxTokens !== undefined ? { maxTokens } : {}),
+              ...(totalProcessedTokens > usedTokens ? { totalProcessedTokens } : {}),
               inputTokens: context.accumulatedInputTokens,
               outputTokens: context.accumulatedOutputTokens,
               reasoningOutputTokens: context.accumulatedReasoningTokens,
