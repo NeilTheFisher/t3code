@@ -5719,11 +5719,16 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           },
         ],
       };
+      const closedTaskTab = makeDefaultOrchestrationThreadShell({
+        id: ThreadId.make("thread-closed"),
+        tabClosedAt: now,
+      });
 
       yield* buildAppUnderTest({
         layers: {
           projectionSnapshotQuery: {
             getSnapshot: () => Effect.succeed(snapshot),
+            getClosedTaskTabs: () => Effect.succeed([closedTaskTab]),
           },
           orchestrationEngine: {
             dispatch: () => Effect.succeed({ sequence: 7 }),
@@ -5781,6 +5786,19 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         ),
       );
       assert.equal(fullDiffResult.diff, "full-diff");
+      const replayResult = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.replayEvents]({
+            fromSequenceExclusive: 0,
+          }),
+        ),
+      );
+      assert.deepEqual(replayResult, []);
+
+      const closedTaskTabs = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) => client[ORCHESTRATION_WS_METHODS.getClosedTaskTabs]({})),
+      );
+      assert.deepEqual(closedTaskTabs, [closedTaskTab]);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

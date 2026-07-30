@@ -3,6 +3,7 @@ import {
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationReadModel,
+  WorkspaceTaskId,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Crypto from "effect/Crypto";
@@ -23,6 +24,10 @@ import {
 import { projectEvent } from "./projector.ts";
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
+
+function workspaceTaskIdForThread(thread: OrchestrationReadModel["threads"][number]) {
+  return thread.workspaceTaskId ?? WorkspaceTaskId.make(String(thread.id));
+}
 
 // Session adoption takes seconds; a user message still unadopted after this
 // window is a failed/stale start, not pending work. Mirrors the client's
@@ -355,6 +360,47 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
+      const workspaceTaskId =
+        command.workspaceTaskId ?? WorkspaceTaskId.make(String(command.threadId));
+      const sibling = readModel.threads.find(
+        (thread) =>
+          thread.deletedAt === null && workspaceTaskIdForThread(thread) === workspaceTaskId,
+      );
+      if (
+        sibling &&
+        (sibling.projectId !== command.projectId || sibling.worktreePath !== command.worktreePath)
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `workspace task ${workspaceTaskId} must keep project and worktree identity from sibling thread ${sibling.id}`,
+        });
+      }
+      if (
+        command.forkProvenance?.mode === "fresh" &&
+        command.forkProvenance.sourceThreadId !== null
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "a fresh task tab cannot declare a source thread",
+        });
+      }
+      if (command.forkProvenance?.mode === "portable") {
+        const source = readModel.threads.find(
+          (thread) => thread.id === command.forkProvenance?.sourceThreadId,
+        );
+        if (
+          !source ||
+          source.deletedAt !== null ||
+          workspaceTaskIdForThread(source) !== workspaceTaskId ||
+          source.projectId !== command.projectId ||
+          source.worktreePath !== command.worktreePath
+        ) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `portable fork source must be an existing tab in workspace task ${workspaceTaskId}`,
+          });
+        }
+      }
       return {
         ...(yield* withEventBase({
           aggregateKind: "thread",
@@ -366,6 +412,11 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           projectId: command.projectId,
+          workspaceTaskId,
+          tabLabel: command.tabLabel ?? null,
+          tabPosition: command.tabPosition ?? 0,
+          tabClosedAt: command.tabClosedAt ?? null,
+          forkProvenance: command.forkProvenance ?? null,
           title: command.title,
           modelSelection: command.modelSelection,
           runtimeMode: command.runtimeMode,
@@ -642,6 +693,24 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         thread.branch !== command.expectedBranch
           ? thread.branch
           : command.branch;
+      if (command.worktreePath !== undefined) {
+        const workspaceTaskId = workspaceTaskIdForThread(thread);
+        const sibling = readModel.threads.find(
+          (candidate) =>
+            candidate.id !== thread.id &&
+            candidate.deletedAt === null &&
+            workspaceTaskIdForThread(candidate) === workspaceTaskId,
+        );
+        if (
+          sibling &&
+          (sibling.projectId !== thread.projectId || sibling.worktreePath !== command.worktreePath)
+        ) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `workspace task ${workspaceTaskId} must keep project and worktree identity from sibling thread ${sibling.id}`,
+          });
+        }
+      }
       const occurredAt = yield* nowIso;
       return {
         ...(yield* withEventBase({
@@ -659,6 +728,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             : {}),
           ...(branch !== undefined ? { branch } : {}),
           ...(command.worktreePath !== undefined ? { worktreePath: command.worktreePath } : {}),
+          ...(command.tabLabel !== undefined ? { tabLabel: command.tabLabel } : {}),
+          ...(command.tabPosition !== undefined ? { tabPosition: command.tabPosition } : {}),
+          ...(command.tabClosedAt !== undefined ? { tabClosedAt: command.tabClosedAt } : {}),
           updatedAt: occurredAt,
         },
       };
