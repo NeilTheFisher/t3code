@@ -11,7 +11,7 @@ import {
 import { SidebarInset } from "../components/ui/sidebar";
 import { waitForDraftHeroTransition } from "../components/chat/draftHeroTransition";
 import { buildThreadRouteParams } from "../threadRoutes";
-import { useThread, useThreadRefs } from "../state/entities";
+import { readThreadShell, useThread, useThreadRefs } from "../state/entities";
 
 function DraftChatThreadRouteView() {
   const navigate = useNavigate();
@@ -36,11 +36,36 @@ function DraftChatThreadRouteView() {
   });
 
   useEffect(() => {
-    if (!inferredThreadRef || draftSession?.promotedTo) {
+    if (draftSession?.promotedTo) return;
+    if (inferredThreadRef) {
+      markPromotedDraftThreadByRef(inferredThreadRef);
       return;
     }
-    markPromotedDraftThreadByRef(inferredThreadRef);
-  }, [draftSession?.promotedTo, inferredThreadRef]);
+    if (!draftSession) return;
+
+    let cancelled = false;
+    void (async () => {
+      for (let attempt = 0; attempt < 50 && !cancelled; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        if (cancelled) return;
+        const shell = readThreadShell({
+          environmentId: draftSession.environmentId,
+          threadId: draftSession.threadId,
+        });
+        if (shell) {
+          markPromotedDraftThreadByRef({
+            environmentId: draftSession.environmentId,
+            threadId: shell.id,
+          });
+          return;
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [draftSession, inferredThreadRef]);
 
   useEffect(() => {
     if (!canonicalThreadRef) {
