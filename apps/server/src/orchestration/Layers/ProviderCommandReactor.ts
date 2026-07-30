@@ -49,6 +49,7 @@ import {
 } from "../../serverSettings.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
+import { buildPortableForkProviderInput } from "../portableFork.ts";
 const isProviderAdapterRequestError = Schema.is(ProviderAdapterRequestError);
 const isProviderDriverKind = Schema.is(ProviderDriverKind);
 
@@ -704,6 +705,21 @@ const make = Effect.gen(function* () {
       threadModelSelections.set(input.threadId, input.modelSelection);
     }
     const normalizedInput = toNonEmptyProviderInput(input.messageText);
+
+    const sourceThread =
+      thread.forkProvenance?.mode === "portable" &&
+      thread.forkProvenance.sourceThreadId !== null &&
+      thread.messages.filter((entry) => entry.role === "user").length === 1
+        ? yield* resolveThread(thread.forkProvenance.sourceThreadId)
+        : undefined;
+    const providerInput =
+      sourceThread !== undefined
+        ? buildPortableForkProviderInput({
+            source: sourceThread,
+            userInput: input.messageText,
+          })
+        : (normalizedInput ?? "");
+
     const handoffPrelude = ensuredSession.handedOff
       ? renderProviderHandoffPrelude({
           messages: thread.messages,
@@ -711,13 +727,13 @@ const make = Effect.gen(function* () {
           ...(input.messageId !== undefined ? { excludeMessageId: input.messageId } : {}),
           maxChars: Math.min(
             HANDOFF_TRANSCRIPT_MAX_CHARS,
-            PROVIDER_SEND_TURN_MAX_INPUT_CHARS - (normalizedInput?.length ?? 0) - 1_000,
+            PROVIDER_SEND_TURN_MAX_INPUT_CHARS - (providerInput?.length ?? 0) - 1_000,
           ),
         })
       : undefined;
     const inputWithHandoffPrelude = handoffPrelude
-      ? [handoffPrelude, normalizedInput].filter(Boolean).join("\n\n")
-      : normalizedInput;
+      ? [handoffPrelude, providerInput].filter(Boolean).join("\n\n")
+      : providerInput;
     const normalizedAttachments = input.attachments ?? [];
     const activeSession = yield* providerService
       .listSessions()

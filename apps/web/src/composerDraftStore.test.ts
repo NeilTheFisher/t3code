@@ -12,6 +12,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   ThreadId,
+  WorkspaceTaskId,
   type ModelSelection,
   type ProviderOptionSelection,
 } from "@t3tools/contracts";
@@ -848,6 +849,102 @@ describe("composerDraftStore project draft thread mapping", () => {
     );
     expect(useComposerDraftStore.getState().getDraftThread(draftId)).toBeNull();
     expect(draftByKey(draftId)).toBeUndefined();
+  });
+
+  it("retains sibling task-tab drafts and their fork metadata when remapping the project", () => {
+    const store = useComposerDraftStore.getState();
+    const workspaceTaskId = WorkspaceTaskId.make("task-a");
+    store.setProjectDraftThreadId(projectRef, draftId, {
+      threadId,
+      workspaceTaskId,
+      tabPosition: 0,
+      retainPreviousDraft: true,
+    });
+    store.setPrompt(draftId, "main tab draft");
+
+    store.setProjectDraftThreadId(projectRef, otherDraftId, {
+      threadId: otherThreadId,
+      workspaceTaskId,
+      tabPosition: 1,
+      forkProvenance: {
+        mode: "portable",
+        sourceThreadId: threadId,
+        createdAt: "2026-07-24T00:00:00.000Z",
+      },
+      retainPreviousDraft: true,
+    });
+    store.setPrompt(otherDraftId, "fork tab draft");
+
+    // Other call sites remap an already-existing draft without passing the
+    // creation-only retention option. Task identity itself must keep the
+    // sibling registered and preserve its unsent composer.
+    store.setProjectDraftThreadId(projectRef, draftId, { threadId });
+
+    expect(useComposerDraftStore.getState().getDraftThread(draftId)).toMatchObject({
+      threadId,
+      workspaceTaskId,
+      tabPosition: 0,
+    });
+    expect(draftByKey(draftId)?.prompt).toBe("main tab draft");
+    expect(useComposerDraftStore.getState().getDraftThread(otherDraftId)).toMatchObject({
+      threadId: otherThreadId,
+      workspaceTaskId,
+      tabPosition: 1,
+      forkProvenance: {
+        mode: "portable",
+        sourceThreadId: threadId,
+      },
+    });
+    expect(draftByKey(otherDraftId)?.prompt).toBe("fork tab draft");
+  });
+
+  it("soft-closes and reopens draft tabs without losing composer state", () => {
+    const store = useComposerDraftStore.getState();
+    const closedAt = "2026-07-27T12:00:00.000Z";
+    store.setProjectDraftThreadId(projectRef, draftId, {
+      threadId,
+      workspaceTaskId: WorkspaceTaskId.make("task-a"),
+      tabPosition: 1,
+    });
+    store.setPrompt(draftId, "keep this unsent");
+
+    store.setDraftThreadContext(draftId, { tabClosedAt: closedAt });
+
+    expect(useComposerDraftStore.getState().getDraftThread(draftId)?.tabClosedAt).toBe(closedAt);
+    expect(draftByKey(draftId)?.prompt).toBe("keep this unsent");
+
+    const persistApi = useComposerDraftStore.persist as unknown as {
+      getOptions: () => {
+        partialize: (state: ReturnType<typeof useComposerDraftStore.getState>) => unknown;
+      };
+    };
+    const persistedState = persistApi.getOptions().partialize(useComposerDraftStore.getState()) as {
+      draftThreadsByThreadKey?: Record<string, { tabClosedAt?: string }>;
+    };
+    expect(persistedState.draftThreadsByThreadKey?.[draftId]?.tabClosedAt).toBe(closedAt);
+
+    store.setDraftThreadContext(draftId, { tabClosedAt: null });
+    expect(useComposerDraftStore.getState().getDraftThread(draftId)?.tabClosedAt).toBeNull();
+    expect(draftByKey(draftId)?.prompt).toBe("keep this unsent");
+  });
+
+  it("retains a closed draft when its project mapping moves to another task", () => {
+    const store = useComposerDraftStore.getState();
+    store.setProjectDraftThreadId(projectRef, draftId, {
+      threadId,
+      workspaceTaskId: WorkspaceTaskId.make("task-a"),
+      tabPosition: 1,
+    });
+    store.setPrompt(draftId, "restore me later");
+    store.setDraftThreadContext(draftId, { tabClosedAt: "2026-07-27T12:00:00.000Z" });
+
+    store.setProjectDraftThreadId(projectRef, otherDraftId, {
+      threadId: otherThreadId,
+      workspaceTaskId: WorkspaceTaskId.make("task-b"),
+    });
+
+    expect(useComposerDraftStore.getState().getDraftThread(draftId)?.tabClosedAt).not.toBeNull();
+    expect(draftByKey(draftId)?.prompt).toBe("restore me later");
   });
 
   it("keeps composer drafts when the thread is still mapped by another project", () => {

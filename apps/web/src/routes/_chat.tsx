@@ -3,7 +3,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { useEffect, useMemo } from "react";
 
 import { isCommandPaletteOpen } from "../commandPaletteBus";
-import { useClientSettings, useSidebarV2Enabled } from "../hooks/useSettings";
+import { useClientSettings } from "../hooks/useSettings";
 import { openCommandPalette } from "../commandPaletteBus";
 import { useProjects } from "../state/entities";
 import { usePrimaryEnvironmentId } from "../state/environments";
@@ -21,6 +21,7 @@ import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { primaryServerKeybindingsAtom } from "~/state/server";
+import { useWorkspaceTaskTabs } from "../hooks/useWorkspaceTaskTabs";
 
 function ChatRouteGlobalShortcuts() {
   const clearSelection = useThreadSelectionStore((state) => state.clearSelection);
@@ -28,7 +29,8 @@ function ChatRouteGlobalShortcuts() {
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread, routeThreadRef } =
     useHandleNewThread();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  const sidebarV2Enabled = useSidebarV2Enabled();
+  const sidebarV2Enabled = useClientSettings((settings) => settings.sidebarV2Enabled);
+  const workspaceTaskTabs = useWorkspaceTaskTabs();
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const projects = useProjects();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
@@ -108,6 +110,22 @@ function ChatRouteGlobalShortcuts() {
         return;
       }
 
+      if (command === "chat.newTab") {
+        if (!sidebarV2Enabled || !workspaceTaskTabs.hasTask) return;
+        event.preventDefault();
+        event.stopPropagation();
+        void workspaceTaskTabs.createTab("fresh");
+        return;
+      }
+
+      if (command === "chat.reopenClosedTab") {
+        if (!sidebarV2Enabled || workspaceTaskTabs.closedTabs.length === 0) return;
+        event.preventDefault();
+        event.stopPropagation();
+        void workspaceTaskTabs.reopenLastClosedTab();
+        return;
+      }
+
       if (command === "preview.toggle") {
         event.preventDefault();
         event.stopPropagation();
@@ -169,6 +187,7 @@ function ChatRouteGlobalShortcuts() {
     selectedThreadKeysSize,
     sidebarV2Enabled,
     terminalOpen,
+    workspaceTaskTabs,
   ]);
 
   return null;

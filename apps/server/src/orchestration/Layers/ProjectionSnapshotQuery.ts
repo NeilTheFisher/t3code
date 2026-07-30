@@ -25,6 +25,7 @@ import {
   ModelSelection,
   ProjectId,
   ThreadId,
+  ThreadForkProvenance,
 } from "@t3tools/contracts";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
@@ -79,6 +80,7 @@ const ProjectionThreadProposedPlanDbRowSchema = ProjectionThreadProposedPlan;
 const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
   Struct.assign({
     modelSelection: Schema.fromJsonString(ModelSelection),
+    forkProvenance: Schema.NullOr(Schema.fromJsonString(ThreadForkProvenance)),
   }),
 );
 const ProjectionThreadActivityDbRowSchema = ProjectionThreadActivity.mapFields(
@@ -118,20 +120,13 @@ const ProjectIdLookupInput = Schema.Struct({
 const ThreadIdLookupInput = Schema.Struct({
   threadId: ThreadId,
 });
-
-/**
- * Maximum number of most-recent activities loaded into a thread-detail snapshot.
- * Bounds peak memory when opening a long-lived thread; older activities are
- * fetched on demand (lazy-load, planned) and live ones stream in via events.
- */
 const THREAD_DETAIL_ACTIVITY_WINDOW = 500;
 
-// `beforeSequence`/`limit` are NonNegativeInt (not bare Number) to match the
-// contract: the WHERE clause `(sequence < beforeSequence OR sequence IS NULL)`
-// is only equivalent to the old `COALESCE(sequence, -1) < beforeSequence` when
-// `beforeSequence` is non-negative — a negative cursor would silently match no
-// sequenced rows and return only unsequenced ones. Validating here (not just at
-// the RPC boundary) keeps any future non-RPC caller honest.
+const ThreadRowByIdLookupInput = Schema.Struct({
+  threadId: ThreadId,
+  includeClosed: Schema.Boolean,
+});
+
 const ThreadActivitiesBeforeSequenceInput = Schema.Struct({
   threadId: ThreadId,
   beforeSequence: NonNegativeInt,
@@ -266,6 +261,39 @@ function mapProjectShellRow(
   };
 }
 
+function mapThreadShellRow(
+  row: Schema.Schema.Type<typeof ProjectionThreadDbRowSchema>,
+): OrchestrationThreadShell {
+  return {
+    id: row.threadId,
+    projectId: row.projectId,
+    workspaceTaskId: row.workspaceTaskId,
+    tabLabel: row.tabLabel,
+    tabPosition: row.tabPosition,
+    tabClosedAt: row.tabClosedAt,
+    forkProvenance: row.forkProvenance,
+    title: row.title,
+    modelSelection: row.modelSelection,
+    runtimeMode: row.runtimeMode,
+    interactionMode: row.interactionMode,
+    branch: row.branch,
+    worktreePath: row.worktreePath,
+    latestTurn: null,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    archivedAt: row.archivedAt,
+    settledOverride: row.settledOverride,
+    settledAt: row.settledAt,
+    snoozedUntil: row.snoozedUntil,
+    snoozedAt: row.snoozedAt,
+    session: null,
+    latestUserMessageAt: row.latestUserMessageAt,
+    hasPendingApprovals: row.pendingApprovalCount > 0,
+    hasPendingUserInput: row.pendingUserInputCount > 0,
+    hasActionableProposedPlan: row.hasActionableProposedPlan > 0,
+  };
+}
+
 function mapProposedPlanRow(
   row: Schema.Schema.Type<typeof ProjectionThreadProposedPlanDbRowSchema>,
 ): OrchestrationProposedPlan {
@@ -367,6 +395,11 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         SELECT
           thread_id AS "threadId",
           project_id AS "projectId",
+          COALESCE(workspace_task_id, thread_id) AS "workspaceTaskId",
+          tab_label AS "tabLabel",
+          tab_position AS "tabPosition",
+          tab_closed_at AS "tabClosedAt",
+          fork_provenance_json AS "forkProvenance",
           title,
           model_selection_json AS "modelSelection",
           runtime_mode AS "runtimeMode",
@@ -400,6 +433,11 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         SELECT
           thread_id AS "threadId",
           project_id AS "projectId",
+          COALESCE(workspace_task_id, thread_id) AS "workspaceTaskId",
+          tab_label AS "tabLabel",
+          tab_position AS "tabPosition",
+          tab_closed_at AS "tabClosedAt",
+          fork_provenance_json AS "forkProvenance",
           title,
           model_selection_json AS "modelSelection",
           runtime_mode AS "runtimeMode",
@@ -423,7 +461,48 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         FROM projection_threads
         WHERE deleted_at IS NULL
           AND archived_at IS NULL
+          AND tab_closed_at IS NULL
         ORDER BY project_id ASC, created_at ASC, thread_id ASC
+      `,
+  });
+
+  const listClosedTaskTabRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionThreadDbRowSchema,
+    execute: () =>
+      sql`
+        SELECT
+          thread_id AS "threadId",
+          project_id AS "projectId",
+          COALESCE(workspace_task_id, thread_id) AS "workspaceTaskId",
+          tab_label AS "tabLabel",
+          tab_position AS "tabPosition",
+          tab_closed_at AS "tabClosedAt",
+          fork_provenance_json AS "forkProvenance",
+          title,
+          model_selection_json AS "modelSelection",
+          runtime_mode AS "runtimeMode",
+          interaction_mode AS "interactionMode",
+          branch,
+          worktree_path AS "worktreePath",
+          latest_turn_id AS "latestTurnId",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt",
+          archived_at AS "archivedAt",
+          settled_override AS "settledOverride",
+          settled_at AS "settledAt",
+          snoozed_until AS "snoozedUntil",
+          snoozed_at AS "snoozedAt",
+          latest_user_message_at AS "latestUserMessageAt",
+          pending_approval_count AS "pendingApprovalCount",
+          pending_user_input_count AS "pendingUserInputCount",
+          has_actionable_proposed_plan AS "hasActionableProposedPlan",
+          deleted_at AS "deletedAt"
+        FROM projection_threads
+        WHERE deleted_at IS NULL
+          AND archived_at IS NULL
+          AND tab_closed_at IS NOT NULL
+        ORDER BY tab_closed_at DESC, thread_id ASC
       `,
   });
 
@@ -435,6 +514,11 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         SELECT
           thread_id AS "threadId",
           project_id AS "projectId",
+          COALESCE(workspace_task_id, thread_id) AS "workspaceTaskId",
+          tab_label AS "tabLabel",
+          tab_position AS "tabPosition",
+          tab_closed_at AS "tabClosedAt",
+          fork_provenance_json AS "forkProvenance",
           title,
           model_selection_json AS "modelSelection",
           runtime_mode AS "runtimeMode",
@@ -794,14 +878,19 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       `,
   });
 
-  const getActiveThreadRowById = SqlSchema.findOneOption({
-    Request: ThreadIdLookupInput,
+  const getThreadRowById = SqlSchema.findOneOption({
+    Request: ThreadRowByIdLookupInput,
     Result: ProjectionThreadDbRowSchema,
-    execute: ({ threadId }) =>
+    execute: ({ threadId, includeClosed }) =>
       sql`
         SELECT
           thread_id AS "threadId",
           project_id AS "projectId",
+          COALESCE(workspace_task_id, thread_id) AS "workspaceTaskId",
+          tab_label AS "tabLabel",
+          tab_position AS "tabPosition",
+          tab_closed_at AS "tabClosedAt",
+          fork_provenance_json AS "forkProvenance",
           title,
           model_selection_json AS "modelSelection",
           runtime_mode AS "runtimeMode",
@@ -826,6 +915,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         WHERE thread_id = ${threadId}
           AND deleted_at IS NULL
           AND archived_at IS NULL
+          AND (${includeClosed ? 1 : 0} = 1 OR tab_closed_at IS NULL)
         LIMIT 1
       `,
   });
@@ -1319,6 +1409,11 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               const threads: ReadonlyArray<OrchestrationThread> = threadRows.map((row) => ({
                 id: row.threadId,
                 projectId: row.projectId,
+                workspaceTaskId: row.workspaceTaskId,
+                tabLabel: row.tabLabel,
+                tabPosition: row.tabPosition,
+                tabClosedAt: row.tabClosedAt,
+                forkProvenance: row.forkProvenance,
                 title: row.title,
                 modelSelection: row.modelSelection,
                 runtimeMode: row.runtimeMode,
@@ -1523,6 +1618,11 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 threads.push({
                   id: row.threadId,
                   projectId: row.projectId,
+                  workspaceTaskId: row.workspaceTaskId,
+                  tabLabel: row.tabLabel,
+                  tabPosition: row.tabPosition,
+                  tabClosedAt: row.tabClosedAt,
+                  forkProvenance: row.forkProvenance,
                   title: row.title,
                   modelSelection: row.modelSelection,
                   runtimeMode: row.runtimeMode,
@@ -1656,6 +1756,11 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   ? Result.succeed({
                       id: row.threadId,
                       projectId: row.projectId,
+                      workspaceTaskId: row.workspaceTaskId,
+                      tabLabel: row.tabLabel,
+                      tabPosition: row.tabPosition,
+                      tabClosedAt: row.tabClosedAt,
+                      forkProvenance: row.forkProvenance,
                       title: row.title,
                       modelSelection: row.modelSelection,
                       runtimeMode: row.runtimeMode,
@@ -1795,6 +1900,11 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 (row): OrchestrationThreadShell => ({
                   id: row.threadId,
                   projectId: row.projectId,
+                  workspaceTaskId: row.workspaceTaskId,
+                  tabLabel: row.tabLabel,
+                  tabPosition: row.tabPosition,
+                  tabClosedAt: row.tabClosedAt,
+                  forkProvenance: row.forkProvenance,
                   title: row.title,
                   modelSelection: row.modelSelection,
                   runtimeMode: row.runtimeMode,
@@ -1838,6 +1948,17 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           );
         }),
       );
+
+  const getClosedTaskTabs: ProjectionSnapshotQueryShape["getClosedTaskTabs"] = () =>
+    listClosedTaskTabRows(undefined).pipe(
+      Effect.map((rows) => rows.map(mapThreadShellRow)),
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionSnapshotQuery.getClosedTaskTabs:query",
+          "ProjectionSnapshotQuery.getClosedTaskTabs:decodeRows",
+        ),
+      ),
+    );
 
   const getSnapshotSequence: ProjectionSnapshotQueryShape["getSnapshotSequence"] = () =>
     listProjectionStateRows(undefined).pipe(
@@ -2007,7 +2128,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
   const getThreadShellById: ProjectionSnapshotQueryShape["getThreadShellById"] = (threadId) =>
     Effect.gen(function* () {
       const [threadRow, latestTurnRow, sessionRow] = yield* Effect.all([
-        getActiveThreadRowById({ threadId }).pipe(
+        getThreadRowById({ threadId, includeClosed: false }).pipe(
           Effect.mapError(
             toPersistenceSqlOrDecodeError(
               "ProjectionSnapshotQuery.getThreadShellById:getThread:query",
@@ -2040,6 +2161,11 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       return Option.some({
         id: threadRow.value.threadId,
         projectId: threadRow.value.projectId,
+        workspaceTaskId: threadRow.value.workspaceTaskId,
+        tabLabel: threadRow.value.tabLabel,
+        tabPosition: threadRow.value.tabPosition,
+        tabClosedAt: threadRow.value.tabClosedAt,
+        forkProvenance: threadRow.value.forkProvenance,
         title: threadRow.value.title,
         modelSelection: threadRow.value.modelSelection,
         runtimeMode: threadRow.value.runtimeMode,
@@ -2074,7 +2200,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         latestTurnRow,
         sessionRow,
       ] = yield* Effect.all([
-        getActiveThreadRowById({ threadId }).pipe(
+        getThreadRowById({ threadId, includeClosed: true }).pipe(
           Effect.mapError(
             toPersistenceSqlOrDecodeError(
               "ProjectionSnapshotQuery.getThreadDetailById:getThread:query",
@@ -2139,6 +2265,11 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       const thread = {
         id: threadRow.value.threadId,
         projectId: threadRow.value.projectId,
+        workspaceTaskId: threadRow.value.workspaceTaskId,
+        tabLabel: threadRow.value.tabLabel,
+        tabPosition: threadRow.value.tabPosition,
+        tabClosedAt: threadRow.value.tabClosedAt,
+        forkProvenance: threadRow.value.forkProvenance,
         title: threadRow.value.title,
         modelSelection: threadRow.value.modelSelection,
         runtimeMode: threadRow.value.runtimeMode,
@@ -2270,6 +2401,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     getSnapshot,
     getShellSnapshot,
     getArchivedShellSnapshot,
+    getClosedTaskTabs,
     getSnapshotSequence,
     getCounts,
     getActiveProjectByWorkspaceRoot,
