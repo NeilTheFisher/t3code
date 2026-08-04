@@ -523,10 +523,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     [expandedWorkGroupIds, suspendEndScrollMaintenanceForDisclosure],
   );
 
-  // Audio is owned by a module-level singleton (see useTtsPlayer.ts) so it
-  // survives row unmounts during scroll. ChatView keys this timeline by the
-  // active thread id, so cleanup fires exactly when navigating to a different
-  // thread — which is when we want playback to stop.
+  // Stop playback on thread navigation: this timeline is keyed by thread id,
+  // so the cleanup runs exactly when the active thread changes.
   useEffect(() => {
     return () => {
       stopTtsPlayback();
@@ -1723,6 +1721,21 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
             showCopyButton={row.showAssistantCopyButton}
             copyStreaming={row.assistantCopyStreaming}
           />
+          <div className="mt-1.5 flex items-center gap-2 text-xs tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover/assistant:opacity-100">
+            <AssistantMessageActions row={row} />
+            {!row.message.streaming && (
+              <Tooltip>
+                <TooltipTrigger
+                  render={<p className="text-muted-foreground text-xs tabular-nums" />}
+                >
+                  {formatDayAwareTimestamp(row.message.updatedAt, ctx.timestampFormat)}
+                </TooltipTrigger>
+                <TooltipPopup>
+                  {formatChatTimestampTooltip(row.message.updatedAt, ctx.timestampFormat)}
+                </TooltipPopup>
+              </Tooltip>
+            )}
+          </div>
         ) : null}
       </div>
     </>
@@ -1805,12 +1818,28 @@ function AssistantCopyButton({
     showCopyButton,
     streaming,
   });
+function AssistantMessageActions({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
+  const ctx = use(TimelineRowCtx);
+  const source = {
+    text: row.message.text ?? null,
+    showCopyButton: row.showAssistantCopyButton,
+    streaming: row.assistantCopyStreaming,
+  };
+  const copyState = resolveAssistantMessageCopyState(source);
+  const playState = resolveAssistantMessagePlayState({ ...source, ttsEnabled: ctx.ttsEnabled });
 
-  if (!assistantCopyState.visible) {
+  if (!copyState.visible && !playState.visible) {
     return null;
   }
 
-  return <MessageCopyButton text={assistantCopyState.text ?? ""} variant="ghost" />;
+  return (
+    <div className="flex items-center gap-1">
+      {playState.visible ? (
+        <MessagePlayButton messageId={row.message.id} text={playState.text ?? ""} variant="ghost" />
+      ) : null}
+      {copyState.visible ? <MessageCopyButton text={copyState.text ?? ""} variant="ghost" /> : null}
+    </div>
+  );
 }
 
 function ProposedPlanTimelineRow({
