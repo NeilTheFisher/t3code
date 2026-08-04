@@ -1,18 +1,11 @@
 /**
- * Module-level singleton TTS player.
- *
- * One `<audio>` element and one in-flight `AbortController` are shared across
- * the whole app — so audio survives component unmounts (scroll, virtualized
- * timeline) and a Play click on a different message stops the current one.
- *
- * `useTtsPlayer` only wires the live settings into a stable `play` function
- * for components. Status is mirrored into `useAudioPlayerStore` so any number
- * of `MessagePlayButton` instances can render the right icon without owning
- * the DOM element.
+ * Module-level singleton TTS player: one `<audio>` element + in-flight
+ * AbortController shared app-wide, so audio survives row unmounts and a new
+ * play supersedes the current one. Status mirrors into `useAudioPlayerStore`.
  */
 import { useCallback } from "react";
 import { type MessageId } from "@t3tools/contracts";
-import { useSettings } from "./useSettings";
+import { useClientSettings } from "./useSettings";
 import { useAudioPlayerStore } from "~/audioPlayerStore";
 import { synthesizeSpeech } from "~/lib/ttsClient";
 
@@ -28,7 +21,7 @@ function ensureAudioElement(): HTMLAudioElement {
     });
     audioElement.addEventListener("error", () => {
       const store = useAudioPlayerStore.getState();
-      store.setError("Audio playback failed.");
+      store.setError("Audio playback failed.", store.playingMessageId);
       teardown();
     });
   }
@@ -92,7 +85,7 @@ export async function startPlayback(
     }
     abortController = null;
     const message = error instanceof Error ? error.message : "TTS request failed.";
-    useAudioPlayerStore.getState().setError(message);
+    useAudioPlayerStore.getState().setError(message, id);
     throw error;
   }
 
@@ -111,15 +104,19 @@ export async function startPlayback(
     await audio.play();
     useAudioPlayerStore.getState().setPlaying(id);
   } catch (error) {
-    teardown();
-    const message = error instanceof Error ? error.message : "Audio playback failed.";
-    useAudioPlayerStore.getState().setError(message);
-    throw error;
+    // A newer play superseding us also rejects this play() (via pause() in its
+    // teardown); only clean up and surface an error if we are still current.
+    if (currentBlobUrl === blobUrl) {
+      teardown();
+      const message = error instanceof Error ? error.message : "Audio playback failed.";
+      useAudioPlayerStore.getState().setError(message, id);
+      throw error;
+    }
   }
 }
 
 export function useTtsPlayer() {
-  const tts = useSettings((s) => s.tts);
+  const tts = useClientSettings((s) => s.tts);
 
   const play = useCallback(
     (id: MessageId, text: string) =>
