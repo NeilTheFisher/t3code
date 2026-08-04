@@ -2,14 +2,8 @@ import { create } from "zustand";
 import { type MessageId } from "@t3tools/contracts";
 
 /**
- * Tracks which assistant message (if any) is currently being read aloud by
- * the TTS player. Audio playback itself is owned by `useTtsPlayer` (a
- * module-level singleton `<audio>` element); this store only mirrors the
- * status so any number of `MessagePlayButton` instances can render the
- * correct icon without subscribing to a DOM element.
- *
- * Kept separate from the main `useStore` because its lifecycle is
- * independent of orchestration state.
+ * Mirrors the TTS player's status so any number of play buttons can render
+ * consistently without owning the shared audio element (see `useTtsPlayer`).
  */
 
 export type AudioPlayerStatus = "idle" | "loading" | "playing";
@@ -18,21 +12,27 @@ interface AudioPlayerState {
   status: AudioPlayerStatus;
   playingMessageId: MessageId | null;
   error: string | null;
+  /** Which message the current `error` belongs to (toasts must anchor only there). */
+  errorMessageId: MessageId | null;
 }
 
 interface AudioPlayerActions {
   setLoading: (id: MessageId) => void;
   setPlaying: (id: MessageId) => void;
   setIdle: () => void;
-  setError: (message: string) => void;
+  setError: (message: string, id: MessageId | null) => void;
 }
 
 export const useAudioPlayerStore = create<AudioPlayerState & AudioPlayerActions>((set) => ({
   status: "idle",
   playingMessageId: null,
   error: null,
-  setLoading: (id) => set({ status: "loading", playingMessageId: id, error: null }),
-  setPlaying: (id) => set({ status: "playing", playingMessageId: id, error: null }),
+  errorMessageId: null,
+  setLoading: (id) =>
+    set({ status: "loading", playingMessageId: id, error: null, errorMessageId: null }),
+  setPlaying: (id) =>
+    set({ status: "playing", playingMessageId: id, error: null, errorMessageId: null }),
   setIdle: () => set({ status: "idle", playingMessageId: null }),
-  setError: (message) => set({ status: "idle", playingMessageId: null, error: message }),
+  setError: (message, id) =>
+    set({ status: "idle", playingMessageId: null, error: message, errorMessageId: id }),
 }));
