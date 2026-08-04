@@ -175,6 +175,7 @@ import * as ResourceAttribution from "./resourceTelemetry/ResourceAttribution.ts
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
+import * as VoiceSessionService from "./voice/VoiceSessionService.ts";
 import * as Data from "effect/Data";
 
 import { makeOrchestrationIntegrationHarness } from "../integration/OrchestrationEngineHarness.integration.ts";
@@ -548,6 +549,7 @@ const buildAppUnderTest = (options?: {
     desktopTelemetryReceiver?: Partial<
       DesktopTelemetryReceiver.DesktopTelemetryReceiver["Service"]
     >;
+    voiceSessionService?: Partial<VoiceSessionService.VoiceSessionService["Service"]>;
   };
 }) =>
   Effect.gen(function* () {
@@ -1175,6 +1177,20 @@ const buildAppUnderTest = (options?: {
           ),
         };
       }),
+      Layer.provide(
+        Layer.mock(VoiceSessionService.VoiceSessionService)({
+          getCredentialStatus: Effect.succeed({ configured: false }),
+          setCredential: () => Effect.succeed({ configured: true }),
+          removeCredential: Effect.succeed({ configured: false }),
+          createSession: () => Effect.die("Unexpected OpenAI Realtime session request."),
+          getParallelCredentialStatus: Effect.succeed({ configured: false }),
+          setParallelCredential: () => Effect.succeed({ configured: true }),
+          removeParallelCredential: Effect.succeed({ configured: false }),
+          searchWeb: () => Effect.die("Unexpected Parallel Search request."),
+          extractWeb: () => Effect.die("Unexpected Parallel Extract request."),
+          ...options?.layers?.voiceSessionService,
+        }),
+      ),
       Layer.provideMerge(makeAuthTestLayer()),
       Layer.provideMerge(ServerSecretStore.layer),
       Layer.provide(workspaceAndProjectServicesLayer),
@@ -9321,7 +9337,16 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                   return;
                 }
                 assertTrue(threadResult._tag === "Success");
-                assert.deepEqual(threadResult.success, [{ kind: "synchronized" }]);
+                // The fork delivers thread.deleted to thread detail
+                // subscribers, so the catch-up replay of a deleted thread ends
+                // with its tombstone before the synchronized marker.
+                assert.equal(threadResult.success.length, 2);
+                const tombstone = threadResult.success[0];
+                assertTrue(
+                  tombstone?.kind === "event" && tombstone.event.type === "thread.deleted",
+                );
+                assert.equal(tombstone.event.sequence, deleted.sequence);
+                assert.deepEqual(threadResult.success[1], { kind: "synchronized" });
                 const shellItems = yield* client[ORCHESTRATION_WS_METHODS.subscribeShell]({
                   afterSequence: 0,
                   requestCompletionMarker: true,

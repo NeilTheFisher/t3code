@@ -844,7 +844,9 @@ import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectValue } from "../ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
+import { useVoiceSession } from "../voice/VoiceSession";
 import {
+  AudioLinesIcon,
   BotIcon,
   CircleAlertIcon,
   PaperclipIcon,
@@ -853,6 +855,7 @@ import {
   type LucideIcon,
   LockIcon,
   LockOpenIcon,
+  MicIcon,
   PenLineIcon,
   SparklesIcon,
   XIcon,
@@ -1197,6 +1200,12 @@ export interface ChatComposerHandle {
     citation: AssistantCitation,
     sourceAnchor: AssistantCitationSourceAnchor,
   ) => boolean;
+  replaceTextRange: (input: {
+    rangeStart: number;
+    rangeEnd: number;
+    replacement: string;
+    expectedText?: string;
+  }) => boolean;
   openModelPicker: () => void;
   toggleModelPicker: () => void;
   isModelPickerOpen: () => boolean;
@@ -1487,6 +1496,28 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   } = props;
   const activeTasksProgress = props.threadSyncPhase === null ? props.activeTasksProgress : null;
   const activeTaskSteps = props.threadSyncPhase === null ? props.activeTaskSteps : null;
+  const voiceSession = useVoiceSession();
+
+  useEffect(
+    () =>
+      voiceSession.registerComposer({
+        environmentId,
+        threadRef: routeThreadRef,
+        composerDraftTarget,
+        composerRef,
+        title: activeThread?.title ?? "New task",
+      }),
+    [
+      activeThread?.title,
+      composerDraftTarget,
+      composerRef,
+      environmentId,
+      routeThreadRef,
+      voiceSession.registerComposer,
+    ],
+  );
+
+
   // ------------------------------------------------------------------
   // Store subscriptions (prompt / images / terminal contexts)
   // ------------------------------------------------------------------
@@ -4786,6 +4817,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           { ensureLeadingBoundary: true, citationCommentAnchor: sourceAnchor },
         ),
       openModelPicker,
+      replaceTextRange: ({ rangeStart, rangeEnd, replacement, expectedText }) =>
+        applyPromptReplacement(rangeStart, rangeEnd, replacement, {
+          ...(expectedText !== undefined ? { expectedText } : {}),
+          focusEditorAfterReplace: false,
+        }),
+      openModelPicker: () => {
+        setIsComposerModelPickerOpen(true);
+      },
       toggleModelPicker: () => {
         if (isComposerModelPickerOpen) {
           setIsComposerModelPickerOpen(false);
@@ -5854,6 +5893,42 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       </Tooltip>
                     </>
                   ) : null}
+                  {showMobilePendingAnswerActions ? null : inlineTasksBadge}
+                  {showMobilePendingAnswerActions ? null : inlineStashBadge}
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          type="button"
+                          size="icon-sm"
+                          variant="ghost"
+                          className={cn(
+                            "shrink-0 rounded-full transition-colors",
+                            voiceSession.active
+                              ? "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
+                              : "text-muted-foreground hover:text-foreground",
+                          )}
+                          onClick={voiceSession.start}
+                          aria-label={
+                            voiceSession.active
+                              ? "Open active OpenAI voice session"
+                              : "Start OpenAI voice"
+                          }
+                        >
+                          {voiceSession.active ? (
+                            <AudioLinesIcon className="size-4" />
+                          ) : (
+                            <MicIcon className="size-4" />
+                          )}
+                        </Button>
+                      }
+                    />
+                    <TooltipPopup side="top">
+                      {voiceSession.active
+                        ? "Open active OpenAI voice session"
+                        : "Start OpenAI voice"}
+                    </TooltipPopup>
+                  </Tooltip>
                   <ComposerFooterPrimaryActions
                     compact={isComposerResting || isComposerPrimaryActionsCompact}
                     activeContextWindow={

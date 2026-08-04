@@ -103,6 +103,7 @@ const readWorkspaceConfig = Effect.fn("readWorkspaceConfig")(function* () {
 
 interface DesktopBuildIconAssets {
   readonly macIconPng: string;
+  readonly macIconIcns?: string;
   readonly linuxIconPng: string;
   readonly windowsIconIco: string;
 }
@@ -164,6 +165,7 @@ interface BuildCliInput {
   readonly mockUpdates: Option.Option<boolean>;
   readonly mockUpdateServerPort: Option.Option<number>;
   readonly wslPrebuild: Option.Option<string>;
+  readonly voiceVariant?: Option.Option<boolean>;
 }
 
 function detectHostBuildPlatform(hostPlatform: string): typeof BuildPlatform.Type | undefined {
@@ -933,6 +935,7 @@ interface ResolvedBuildOptions {
   readonly mockUpdates: boolean;
   readonly mockUpdateServerPort: number | undefined;
   readonly wslPrebuild: string | undefined;
+  readonly voiceVariant: boolean;
 }
 
 interface StagePackageJson {
@@ -1326,6 +1329,8 @@ ${associatedDomains}
     <true/>
     <key>com.apple.security.cs.disable-library-validation</key>
     <true/>
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
   </dict>
 </plist>
 `;
@@ -1590,6 +1595,7 @@ const BuildEnvConfig = Config.all({
   // into the staged node-pty so the WSL backend ships a ready binary and never
   // compiles on the user's machine.
   wslPrebuild: Config.string("T3CODE_DESKTOP_WSL_PREBUILD").pipe(Config.option),
+  voiceVariant: Config.boolean("T3CODE_DESKTOP_VOICE_VARIANT").pipe(Config.withDefault(false)),
 });
 
 const MockUpdateServerPortSchema = Schema.NumberFromString.check(
@@ -1683,6 +1689,7 @@ export const resolveBuildOptions = Effect.fn("resolveBuildOptions")(function* (
 
   const wslPrebuild =
     Option.getOrUndefined(input.wslPrebuild) ?? Option.getOrUndefined(env.wslPrebuild);
+  const voiceVariant = resolveBooleanFlag(input.voiceVariant ?? Option.none(), env.voiceVariant);
 
   return {
     platform,
@@ -1697,6 +1704,7 @@ export const resolveBuildOptions = Effect.fn("resolveBuildOptions")(function* (
     mockUpdates,
     mockUpdateServerPort,
     wslPrebuild,
+    voiceVariant,
   } satisfies ResolvedBuildOptions;
 });
 
@@ -2378,7 +2386,12 @@ function generateMacIconSet(
   });
 }
 
-function stageMacIcons(stageResourcesDir: string, sourcePng: string, verbose: boolean) {
+function stageMacIcons(
+  stageResourcesDir: string,
+  sourcePng: string,
+  verbose: boolean,
+  sourceIcns?: string,
+) {
   return Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -2401,7 +2414,17 @@ function stageMacIcons(stageResourcesDir: string, sourcePng: string, verbose: bo
       verbose,
     });
 
-    yield* generateMacIconSet(sourcePng, iconIcnsPath, tmpRoot, path, verbose);
+    if (sourceIcns) {
+      if (!(yield* fs.exists(sourceIcns))) {
+        return yield* new DesktopIconSourceMissingError({
+          platform: "mac",
+          sourcePath: sourceIcns,
+        });
+      }
+      yield* fs.copyFile(sourceIcns, iconIcnsPath);
+    } else {
+      yield* generateMacIconSet(sourcePng, iconIcnsPath, tmpRoot, path, verbose);
+    }
   });
 }
 
@@ -2640,7 +2663,8 @@ export function resolvePackageManagerUserAgent(packageManager: string): string {
   return `${trimmed.slice(0, versionSeparator)}/${trimmed.slice(versionSeparator + 1)}`;
 }
 
-export function resolveDesktopProductName(version: string): string {
+export function resolveDesktopProductName(version: string, voiceVariant = false): string {
+  if (voiceVariant) return "T3 Code Voice";
   return resolveDesktopUpdateChannel(version) === "nightly"
     ? "T3 Code (Nightly)"
     : (desktopPackageJson.productName ?? "T3 Code");
@@ -2664,11 +2688,23 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   // whose source file was never written fails the electron-builder step.
   wslRuntimeBundled = false,
   arch?: typeof BuildArch.Type,
+  voiceVariant = false,
 ) {
+  const appId = voiceVariant ? `${DESKTOP_APP_ID}.voice` : DESKTOP_APP_ID;
   const buildConfig: Record<string, unknown> = {
-    appId: DESKTOP_APP_ID,
-    productName: resolveDesktopProductName(version),
-    artifactName: "T3-Code-${version}-${arch}.${ext}",
+    appId,
+    productName: resolveDesktopProductName(version, voiceVariant),
+    ...(voiceVariant
+      ? {
+          extraMetadata: {
+            name: "t3code-voice",
+            productName: "T3 Code Voice",
+          },
+        }
+      : {}),
+    artifactName: voiceVariant
+      ? "T3-Code-Voice-${version}-${arch}.${ext}"
+      : "T3-Code-${version}-${arch}.${ext}",
     electronLanguages: [...DESKTOP_ELECTRON_LANGUAGES],
     files: [
       ...DESKTOP_FILE_EXCLUSIONS,
@@ -2694,9 +2730,9 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   const updateChannel = resolveDesktopUpdateChannel(version);
   if (!isDesktopPreviewVersion(version)) {
     const publishConfig = yield* resolveGitHubPublishConfig(updateChannel);
-    if (publishConfig) {
+    if (publishConfig && !voiceVariant) {
       buildConfig.publish = [publishConfig];
-    } else if (mockUpdates) {
+    } else if (mockUpdates && !voiceVariant) {
       buildConfig.publish = [
         {
           provider: "generic",
@@ -2723,6 +2759,17 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
           schemes: ["t3code", "t3code-dev"],
         },
       ],
+        NSMicrophoneUsageDescription:
+          "T3 Code uses the microphone for user-initiated OpenAI voice conversations.",
+      },
+      protocols: voiceVariant
+        ? []
+        : [
+            {
+              name: "T3 Code",
+              schemes: ["t3code", "t3code-dev"],
+            },
+          ],
       ...(signed ? { sign: path.join(repoRoot, "scripts/sign-macos.ts") } : {}),
       ...(macPasskeySigning
         ? {
@@ -2808,7 +2855,7 @@ const assertPlatformBuildResources = Effect.fn("assertPlatformBuildResources")(f
   verbose: boolean,
 ) {
   if (platform === "mac") {
-    yield* stageMacIcons(stageResourcesDir, iconAssets.macIconPng, verbose);
+    yield* stageMacIcons(stageResourcesDir, iconAssets.macIconPng, verbose, iconAssets.macIconIcns);
     return;
   }
 
@@ -3696,6 +3743,9 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     stageResourcesDir,
     {
       macIconPng: path.join(repoRoot, iconAssets.macIconPng),
+      ...(options.voiceVariant
+        ? { macIconIcns: path.join(repoRoot, "apps/desktop/resources/icon.icns") }
+        : {}),
       linuxIconPng: path.join(repoRoot, iconAssets.linuxIconPng),
       windowsIconIco: path.join(repoRoot, iconAssets.windowsIconIco),
     },
@@ -3791,6 +3841,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
         : undefined,
       bundlesWslRuntime({ arch: options.arch, prebuildPath: options.wslPrebuild }),
       options.arch,
+      options.voiceVariant,
     ),
     dependencies: stageDependencies,
     devDependencies: {
@@ -4040,6 +4091,12 @@ const buildDesktopArtifactCli = Command.make("build-desktop-artifact", {
   wslPrebuild: Flag.string("wsl-prebuild").pipe(
     Flag.withDescription(
       "Path to a prebuilt Linux node-pty (pty.node) for the target arch, staged for the WSL backend (env: T3CODE_DESKTOP_WSL_PREBUILD).",
+    ),
+    Flag.optional,
+  ),
+  voiceVariant: Flag.boolean("voice-variant").pipe(
+    Flag.withDescription(
+      "Build a separately installable T3 Code Voice app (env: T3CODE_DESKTOP_VOICE_VARIANT).",
     ),
     Flag.optional,
   ),
