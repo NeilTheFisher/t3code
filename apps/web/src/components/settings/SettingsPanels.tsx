@@ -2082,7 +2082,6 @@ export function GeneralSettingsPanel() {
         />
 
         <SettingsRow
-<SettingsRow
           title="External file preview"
           description="Allow viewing files from outside the workspace, such as temporary files or images from other directories."
           resetAction={
