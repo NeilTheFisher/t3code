@@ -641,18 +641,7 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
           ChildProcess.make(spawnCommand.command, spawnCommand.args, {
             detached: hostPlatform !== "win32",
             shell: spawnCommand.shell,
-            env: {
-              ...input.environment,
-              ...(serverPassword !== undefined ? { OPENCODE_SERVER_PASSWORD: serverPassword } : {}),
-              // Respect an OPENCODE_CONFIG_CONTENT provided by the caller or
-              // the inherited process environment, only falling back to the
-              // empty config when neither is set. Setting it unconditionally
-              // previously clobbered the user's opencode config, hiding their
-              // providers/models. The value is set explicitly (rather than
-              // relying on inheritance) because `extendEnv` is false whenever
-              // `input.environment` is provided.
-              OPENCODE_CONFIG_CONTENT: resolveOpenCodeConfigContent(input.environment),
-            },
+            env: input.environment,
             extendEnv: input.environment === undefined,
           }),
         )
