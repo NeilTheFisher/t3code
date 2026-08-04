@@ -18,6 +18,7 @@ const clientSettings: ClientSettings = {
   confirmThreadDelete: false,
   dismissedProviderUpdateNotificationKeys: [],
   diffIgnoreWhitespace: true,
+  enableExternalFilePreview: false,
   environmentIdentificationMode: "artwork",
   favorites: [],
   fontFamilyCode: "",
@@ -31,6 +32,7 @@ const clientSettings: ClientSettings = {
   fontSmoothing: true,
   glassOpacity: 80,
   providerModelPreferences: {},
+  showProviderUsageInContextPopover: false,
   sidebarAutoSettleAfterDays: 3,
   sidebarProjectGroupingMode: "repository_path",
   sidebarProjectGroupingOverrides: {
@@ -42,6 +44,11 @@ const clientSettings: ClientSettings = {
   sidebarV2Enabled: false,
   sidebarV2ConfiguredByUser: false,
   timestampFormat: "24-hour",
+  tts: {
+    enabled: true,
+    serverUrl: "http://127.0.0.1:8880",
+    voice: "af_heart",
+  },
   wordWrap: true,
 };
 

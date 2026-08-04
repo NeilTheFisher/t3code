@@ -192,7 +192,9 @@ import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectValue } from "../ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
+import { useVoiceSession } from "../voice/VoiceSession";
 import {
+  AudioLinesIcon,
   BotIcon,
   CircleAlertIcon,
   ListTodoIcon,
@@ -200,6 +202,7 @@ import {
   type LucideIcon,
   LockIcon,
   LockOpenIcon,
+  MicIcon,
   PenLineIcon,
   SparklesIcon,
   XIcon,
@@ -494,6 +497,12 @@ export interface ChatComposerHandle {
   focusAtEnd: () => void;
   focusAt: (cursor: number) => void;
   insertTextAtEnd: (text: string, options?: { ensureLeadingBoundary?: boolean }) => boolean;
+  replaceTextRange: (input: {
+    rangeStart: number;
+    rangeEnd: number;
+    replacement: string;
+    expectedText?: string;
+  }) => boolean;
   openModelPicker: () => void;
   toggleModelPicker: () => void;
   isModelPickerOpen: () => boolean;
@@ -720,6 +729,26 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     onExpandImage,
   } = props;
   const isSendDisabled = sendDisabledReason !== null;
+  const voiceSession = useVoiceSession();
+
+  useEffect(
+    () =>
+      voiceSession.registerComposer({
+        environmentId,
+        threadRef: routeThreadRef,
+        composerDraftTarget,
+        composerRef,
+        title: activeThread?.title ?? "New task",
+      }),
+    [
+      activeThread?.title,
+      composerDraftTarget,
+      composerRef,
+      environmentId,
+      routeThreadRef,
+      voiceSession.registerComposer,
+    ],
+  );
 
   // ------------------------------------------------------------------
   // Store subscriptions (prompt / images / terminal contexts)
@@ -2585,6 +2614,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         composerEditorRef.current?.focusAt(cursor);
       },
       insertTextAtEnd: insertComposerTextAtEnd,
+      replaceTextRange: ({ rangeStart, rangeEnd, replacement, expectedText }) =>
+        applyPromptReplacement(rangeStart, rangeEnd, replacement, {
+          ...(expectedText !== undefined ? { expectedText } : {}),
+          focusEditorAfterReplace: false,
+        }),
       openModelPicker: () => {
         setIsComposerModelPickerOpen(true);
       },
@@ -3239,6 +3273,40 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 }
                 className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
               >
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        type="button"
+                        size="icon-sm"
+                        variant="ghost"
+                        className={cn(
+                          "shrink-0 rounded-full transition-colors",
+                          voiceSession.active
+                            ? "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
+                            : "text-muted-foreground hover:text-foreground",
+                        )}
+                        onClick={voiceSession.start}
+                        aria-label={
+                          voiceSession.active
+                            ? "Open active OpenAI voice session"
+                            : "Start OpenAI voice"
+                        }
+                      >
+                        {voiceSession.active ? (
+                          <AudioLinesIcon className="size-4" />
+                        ) : (
+                          <MicIcon className="size-4" />
+                        )}
+                      </Button>
+                    }
+                  />
+                  <TooltipPopup side="top">
+                    {voiceSession.active
+                      ? "Open active OpenAI voice session"
+                      : "Start OpenAI voice"}
+                  </TooltipPopup>
+                </Tooltip>
                 <ComposerFooterPrimaryActions
                   compact={isComposerPrimaryActionsCompact}
                   activeContextWindow={activeContextWindow}
