@@ -1701,9 +1701,6 @@ export function makeOpenCodeAdapter(
     const interruptTurn: OpenCodeAdapterShape["interruptTurn"] = Effect.fn("interruptTurn")(
       function* (threadId, turnId) {
         const context = ensureSessionContext(sessions, threadId);
-        yield* runOpenCodeSdk("session.abort", () =>
-          context.client.session.abort({ sessionID: context.openCodeSessionId }),
-        ).pipe(Effect.mapError(toRequestError));
         const targetTurnId = turnId ?? context.activeTurnId;
         if (targetTurnId) {
           yield* emit({
@@ -1717,11 +1714,26 @@ export function makeOpenCodeAdapter(
             },
           });
         }
-        // Transition the session back to ready after aborting the turn.
-        // Without this, a stuck session (e.g. context overflow causing the
-        // provider to hang) stays in "running" and blocks settlement.
+        // Publish the local lifecycle transition before waiting on the remote
+        // abort. OpenCode can sit in a provider retry (for example after a
+        // monthly usage limit) long enough for session.abort to hang, but the
+        // user must still be able to stop the turn immediately.
         context.activeTurnId = undefined;
+        context.activeAgent = undefined;
+        context.activeVariant = undefined;
         yield* updateProviderSession(context, { status: "ready" }, { clearActiveTurnId: true });
+
+        // Best effort: the lifecycle event above is the authoritative UI
+        // transition, while this request stops the provider's in-flight work
+        // when the OpenCode server is responsive. Run it in the session scope
+        // so a later session stop also cancels a hung abort request.
+        yield* runOpenCodeSdk("session.abort", () =>
+          context.client.session.abort({ sessionID: context.openCodeSessionId }),
+        ).pipe(
+          Effect.mapError(toRequestError),
+          Effect.ignore({ log: true }),
+          Effect.forkIn(context.sessionScope),
+        );
       },
     );
 
