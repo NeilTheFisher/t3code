@@ -92,7 +92,7 @@ describe("ServerProvider", () => {
     expect(parsed.continuation?.groupKey).toBe("codex:home:/Users/julius/.codex");
   });
 
-  it("decodes optional legacy model metadata", () => {
+  it("decodes optional model metadata", () => {
     const parsed = decodeServerProvider({
       instanceId: "codex",
       driver: "codex",
@@ -108,12 +108,14 @@ describe("ServerProvider", () => {
           name: "GPT-5.4",
           isCustom: false,
           isLegacy: true,
+          contextWindowTokens: 1_000_000,
           capabilities: null,
         },
       ],
     });
 
     expect(parsed.models[0]?.isLegacy).toBe(true);
+    expect(parsed.models[0]?.contextWindowTokens).toBe(1_000_000);
   });
 
   it("decodes dynamic provider usage windows", () => {

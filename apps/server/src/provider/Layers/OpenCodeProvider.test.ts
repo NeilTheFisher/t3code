@@ -232,6 +232,7 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
                 "gpt-5.4": {
                   id: "gpt-5.4",
                   name: "GPT-5.4",
+                  limit: { context: 1_050_000, output: 128_000 },
                   variants: {
                     none: {},
                     low: {},
@@ -255,6 +256,7 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
       const model = snapshot.models.find((entry) => entry.slug === "openai/gpt-5.4");
 
       NodeAssert.ok(model);
+      NodeAssert.equal(model.contextWindowTokens, 1_050_000);
       const variantDescriptor = model.capabilities?.optionDescriptors?.find(
         (descriptor) => descriptor.id === "variant" && descriptor.type === "select",
       );
