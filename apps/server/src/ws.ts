@@ -125,6 +125,7 @@ import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
+import * as VoiceSessionService from "./voice/VoiceSessionService.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import { withTerminalOutputWindow } from "./terminal/OutputProtocol.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
@@ -583,6 +584,7 @@ const makeWsRpcLayer = (
       const config = yield* ServerConfig.ServerConfig;
       const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
       const serverSettings = yield* ServerSettings.ServerSettingsService;
+      const voiceSessionService = yield* VoiceSessionService.VoiceSessionService;
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
@@ -2920,6 +2922,56 @@ const makeWsRpcLayer = (
               "rpc.aggregate": "server",
             },
           ),
+        [WS_METHODS.voiceGetCredentialStatus]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.voiceGetCredentialStatus,
+            voiceSessionService.getCredentialStatus,
+            { "rpc.aggregate": "voice" },
+          ),
+        [WS_METHODS.voiceSetCredential]: ({ apiKey }) =>
+          observeRpcEffect(
+            WS_METHODS.voiceSetCredential,
+            voiceSessionService.setCredential(apiKey),
+            { "rpc.aggregate": "voice" },
+          ),
+        [WS_METHODS.voiceRemoveCredential]: (_input) =>
+          observeRpcEffect(WS_METHODS.voiceRemoveCredential, voiceSessionService.removeCredential, {
+            "rpc.aggregate": "voice",
+          }),
+        [WS_METHODS.voiceCreateSession]: ({ model }) =>
+          observeRpcEffect(
+            WS_METHODS.voiceCreateSession,
+            voiceSessionService.createSession(model),
+            {
+              "rpc.aggregate": "voice",
+            },
+          ),
+        [WS_METHODS.voiceGetParallelCredentialStatus]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.voiceGetParallelCredentialStatus,
+            voiceSessionService.getParallelCredentialStatus,
+            { "rpc.aggregate": "voice" },
+          ),
+        [WS_METHODS.voiceSetParallelCredential]: ({ apiKey }) =>
+          observeRpcEffect(
+            WS_METHODS.voiceSetParallelCredential,
+            voiceSessionService.setParallelCredential(apiKey),
+            { "rpc.aggregate": "voice" },
+          ),
+        [WS_METHODS.voiceRemoveParallelCredential]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.voiceRemoveParallelCredential,
+            voiceSessionService.removeParallelCredential,
+            { "rpc.aggregate": "voice" },
+          ),
+        [WS_METHODS.voiceSearchWeb]: (input) =>
+          observeRpcEffect(WS_METHODS.voiceSearchWeb, voiceSessionService.searchWeb(input), {
+            "rpc.aggregate": "voice",
+          }),
+        [WS_METHODS.voiceExtractWeb]: (input) =>
+          observeRpcEffect(WS_METHODS.voiceExtractWeb, voiceSessionService.extractWeb(input), {
+            "rpc.aggregate": "voice",
+          }),
         [WS_METHODS.serverDiscoverSourceControl]: (_input) =>
           observeRpcEffect(
             WS_METHODS.serverDiscoverSourceControl,
@@ -3494,6 +3546,7 @@ const makeWsRpcLayer = (
               if (
                 input.resource._tag === "attachment" ||
                 input.resource._tag === "native-app-icon" ||
+                input.resource._tag === "external-file" ||
                 // GitHub media names the repository it authenticates through itself.
                 input.resource._tag === "github-media" ||
                 (input.resource._tag === "media-file" && path.isAbsolute(input.resource.path))

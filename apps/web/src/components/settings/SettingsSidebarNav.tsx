@@ -22,6 +22,7 @@ import {
   PaletteIcon,
   FileCode2Icon,
   FlaskConicalIcon,
+  Mic2Icon,
   SearchIcon,
   Settings2Icon,
   XIcon,
@@ -88,8 +89,8 @@ const SETTINGS_SECTION_ICONS: Readonly<
   "/settings/source-control": GitBranchIcon,
   "/settings/storage": HardDriveIcon,
   "/settings/connections": Link2Icon,
-  "/settings/beta": FlaskConicalIcon,
   "/settings/userscripts": FileCode2Icon,
+  "/settings/voice": Mic2Icon,
   "/settings/archived": ArchiveIcon,
 };
 

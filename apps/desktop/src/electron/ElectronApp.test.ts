@@ -102,6 +102,7 @@ describe("ElectronApp", () => {
       const metadata = yield* electronApp.metadata;
 
       assert.deepEqual(metadata, {
+        appName: "T3 Code",
         appVersion: "1.2.3",
         appPath: "/app",
         isPackaged: true,
