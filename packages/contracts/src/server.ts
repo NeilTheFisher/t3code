@@ -78,6 +78,7 @@ export const ServerProviderModel = Schema.Struct({
   isCustom: Schema.Boolean,
   isDefault: Schema.optional(Schema.Boolean),
   isLegacy: Schema.optional(Schema.Boolean),
+  contextWindowTokens: Schema.optional(PositiveInt),
   capabilities: Schema.NullOr(ModelCapabilities),
 });
 export type ServerProviderModel = typeof ServerProviderModel.Type;
@@ -124,25 +125,6 @@ export const ServerProviderWorkspaceSnapshot = Schema.Struct({
   skills: Schema.Array(ServerProviderSkill),
 });
 export type ServerProviderWorkspaceSnapshot = typeof ServerProviderWorkspaceSnapshot.Type;
-
-const ServerProviderUsagePercent = Schema.Number.check(Schema.isGreaterThanOrEqualTo(0)).check(
-  Schema.isLessThanOrEqualTo(100),
-);
-
-export const ServerProviderUsageWindow = Schema.Struct({
-  label: TrimmedNonEmptyString,
-  usedPercent: ServerProviderUsagePercent,
-  resetsAt: Schema.optional(IsoDateTime),
-  windowDurationMins: Schema.optional(NonNegativeInt),
-});
-export type ServerProviderUsageWindow = typeof ServerProviderUsageWindow.Type;
-
-export const ServerProviderUsageLimits = Schema.Struct({
-  source: Schema.Literals(["codexAppServer", "claudePrint", "openCodeDashboard"]),
-  checkedAt: IsoDateTime,
-  windows: Schema.Array(ServerProviderUsageWindow),
-});
-export type ServerProviderUsageLimits = typeof ServerProviderUsageLimits.Type;
 
 /**
  * Availability of a configured provider instance from the runtime's POV.

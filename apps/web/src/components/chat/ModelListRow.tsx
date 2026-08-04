@@ -14,6 +14,7 @@ import { Kbd } from "../ui/kbd";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
 import { modelPickerModelKey } from "./modelPickerKeys";
+import { formatModelContextWindowTokens, getModelCapabilityLabels } from "../modelMetadata";
 
 export const ModelListRow = memo(function ModelListRow(props: {
   index: number;
@@ -46,6 +47,40 @@ export const ModelListRow = memo(function ModelListRow(props: {
     ? `${props.providerDisplayName} · ${props.model.subProvider}`
     : props.providerDisplayName;
 
+  const modelLabel = (
+    <>
+      <div className="flex min-w-0 items-center gap-2">
+        <div className="min-w-0 truncate text-xs font-medium leading-snug">
+          {props.useTriggerLabel
+            ? getTriggerDisplayModelLabel(props.model)
+            : getDisplayModelName(
+                props.model,
+                props.preferShortName ? { preferShortName: true } : undefined,
+              )}
+        </div>
+        {props.showNewBadge ? (
+          <span
+            className="shrink-0 rounded border border-amber-500/35 bg-amber-500/15 px-0.5 py-px text-[10px] font-bold uppercase leading-none tracking-wide text-amber-800 dark:border-amber-400/30 dark:bg-amber-400/12 dark:text-amber-200"
+            aria-label="New model"
+          >
+            New
+          </span>
+        ) : null}
+      </div>
+      {props.showProvider && (
+        <div className="mt-1 flex items-center gap-1.5">
+          {ProviderIcon ? <ProviderIcon className="size-3 shrink-0" /> : null}
+          <span className="truncate text-xs font-normal leading-snug text-muted-foreground/70">
+            {providerLabel}
+          </span>
+        </div>
+      )}
+    </>
+  );
+
+  const contextWindowTokens = props.model.contextWindowTokens;
+  const capabilityLabels = getModelCapabilityLabels(props.model.capabilities ?? null);
+  const hasMetadata = contextWindowTokens !== undefined || capabilityLabels.length > 0;
   const row = (
     <ComboboxItem
       hideIndicator
@@ -58,40 +93,47 @@ export const ModelListRow = memo(function ModelListRow(props: {
           "data-disabled:pointer-events-auto data-disabled:cursor-not-allowed",
       )}
     >
-      <div className="min-w-0 flex-1 text-left">
-        <div className="flex min-w-0 items-center gap-2">
-          <div className="min-w-0 truncate text-xs font-medium leading-snug">
-            {props.useTriggerLabel
-              ? getTriggerDisplayModelLabel(props.model)
-              : getDisplayModelName(
-                  props.model,
-                  props.preferShortName ? { preferShortName: true } : undefined,
-                )}
-          </div>
-          {props.showNewBadge ? (
-            <span
-              className="shrink-0 rounded border border-update/35 bg-update/15 px-0.5 py-px text-3xs font-bold uppercase leading-none tracking-wide text-update-foreground"
-              aria-label="New model"
-            >
-              New
-            </span>
-          ) : null}
-          {props.unavailable ? (
-            <Badge variant="outline" size="sm">
-              Unavailable
-            </Badge>
-          ) : null}
-        </div>
-        {props.showProvider && (
-          <div className="mt-1 flex items-center gap-1.5">
-            {ProviderIcon ? <ProviderIcon className="size-3 shrink-0" /> : null}
-            <span className="truncate text-xs font-normal leading-snug text-muted-foreground/70">
-              {providerLabel}
-            </span>
-          </div>
-        )}
-      </div>
-
+      {!hasMetadata ? (
+        <div className="min-w-0 flex-1 text-left">{modelLabel}</div>
+      ) : (
+        <Tooltip>
+          <TooltipTrigger
+            render={<div className="min-w-0 flex-1 text-left" data-model-context-trigger />}
+          >
+            {modelLabel}
+          </TooltipTrigger>
+          <TooltipPopup side="left" align="center" className="max-w-64">
+            <div className="space-y-1.5">
+              {contextWindowTokens !== undefined ? (
+                <div className="flex items-center gap-4">
+                  <span className="text-muted-foreground">Context window</span>
+                  <span className="ml-auto font-medium">
+                    {formatModelContextWindowTokens(contextWindowTokens)} tokens
+                  </span>
+                </div>
+              ) : null}
+              {capabilityLabels.length > 0 ? (
+                <div className="border-t border-border/60 pt-1.5">
+                  <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
+                    Capabilities
+                  </div>
+                  <div className="flex flex-wrap gap-x-3 gap-y-1">
+                    {capabilityLabels.map((label) => (
+                      <span
+                        key={label}
+                        className="inline-flex items-center gap-1.5 whitespace-nowrap text-muted-foreground"
+                      >
+                        <span className="size-1 rounded-full bg-muted-foreground/70" />
+                        {label}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </TooltipPopup>
+        </Tooltip>
+      )}
       <div className="flex shrink-0 items-center gap-1.5">
         {props.showSelection && props.isSelected ? (
           <CheckIcon className="size-3.5" aria-hidden="true" />
