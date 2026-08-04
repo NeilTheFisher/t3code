@@ -14,6 +14,13 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
 import { modelPickerModelKey } from "./modelPickerKeys";
 
+export function formatModelContextWindowTokens(
+  tokens: number,
+  locales?: Intl.LocalesArgument,
+): string {
+  return new Intl.NumberFormat(locales).format(tokens);
+}
+
 export const ModelListRow = memo(function ModelListRow(props: {
   index: number;
   model: ModelEsque;
@@ -127,7 +134,8 @@ export const ModelListRow = memo(function ModelListRow(props: {
     </ComboboxItem>
   );
 
-  if (!props.disabledReason) {
+  const contextWindowTokens = props.model.contextWindowTokens;
+  if (!props.disabledReason && contextWindowTokens === undefined) {
     return row;
   }
 
@@ -135,7 +143,15 @@ export const ModelListRow = memo(function ModelListRow(props: {
     <Tooltip>
       <TooltipTrigger render={row} />
       <TooltipPopup side="left" align="center" className="max-w-64 text-balance leading-snug">
-        {props.disabledReason}
+        {props.disabledReason ??
+          (contextWindowTokens === undefined ? null : (
+            <div className="flex items-center gap-4">
+              <span className="text-muted-foreground">Context window</span>
+              <span className="ml-auto font-medium">
+                {formatModelContextWindowTokens(contextWindowTokens)} tokens
+              </span>
+            </div>
+          ))}
       </TooltipPopup>
     </Tooltip>
   );

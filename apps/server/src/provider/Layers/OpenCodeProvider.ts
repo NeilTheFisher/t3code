@@ -269,10 +269,12 @@ function flattenOpenCodeModels(input: OpenCodeInventory): ReadonlyArray<ServerPr
       }
 
       const subProvider = nonEmptyTrimmed(provider.name);
+      const contextWindowTokens = model.limit?.context;
       models.push({
         slug: `${provider.id}/${model.id}`,
         name,
         ...(subProvider ? { subProvider } : {}),
+        ...(contextWindowTokens && contextWindowTokens > 0 ? { contextWindowTokens } : {}),
         isCustom: false,
         capabilities: openCodeCapabilitiesForModel({
           providerID: provider.id,
