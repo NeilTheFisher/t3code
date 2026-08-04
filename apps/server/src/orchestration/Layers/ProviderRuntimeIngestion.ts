@@ -23,12 +23,9 @@ import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import * as Encoding from "effect/Encoding";
-import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
-import * as Path from "effect/Path";
 import * as Stream from "effect/Stream";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import { formatTokens } from "@t3tools/shared/usageFormat";
@@ -166,58 +163,11 @@ function maxCheckpointTurnCount(
   return maxTurnCount;
 }
 
+// Fork bound (upstream: 180): tool details, error reasons, and task text ship
+// rich — the adapters already cap their own summaries (e.g. Claude's
+// summarizeToolRequest at 16k), so clipping here would undo that work.
 function truncateDetail(value: string, limit = 16000): string {
   return value.length > limit ? `${value.slice(0, limit - 3)}...` : value;
-}
-
-function eventHasFileChanges(event: ProviderRuntimeEvent): boolean {
-  if (event.type !== "item.completed") return false;
-  const data =
-    event.payload.data && typeof event.payload.data === "object"
-      ? (event.payload.data as Record<string, unknown>)
-      : undefined;
-  const item =
-    data?.item && typeof data.item === "object"
-      ? (data.item as Record<string, unknown>)
-      : undefined;
-  return Array.isArray(data?.changes) || Array.isArray(item?.changes);
-}
-
-const SUBAGENT_DETAIL_LIMIT = 16000;
-
-function subagentItemRole(itemType: string): "assistant" | "user" | "tool" {
-  if (isToolLifecycleItemType(itemType)) {
-    return "tool";
-  }
-  return itemType === "user_message" ? "user" : "assistant";
-}
-
-function subagentItemActivity(
-  event: Extract<
-    ProviderRuntimeEvent,
-    { type: "item.started" | "item.updated" | "item.completed" }
-  >,
-  maybeSequence: { sequence?: number },
-): OrchestrationThreadActivity {
-  return {
-    id: event.eventId,
-    createdAt: event.createdAt,
-    tone: "tool",
-    kind: "subagent.item",
-    summary: event.payload.title ?? "Subagent activity",
-    payload: {
-      itemType: event.payload.itemType,
-      ...(event.itemId ? { itemId: event.itemId } : {}),
-      parentItemId: event.parentItemId,
-      role: subagentItemRole(event.payload.itemType),
-      ...(event.payload.detail
-        ? { detail: truncateDetail(event.payload.detail, SUBAGENT_DETAIL_LIMIT) }
-        : {}),
-      ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
-    },
-    turnId: toTurnId(event.turnId) ?? null,
-    ...maybeSequence,
-  };
 }
 
 function normalizeProposedPlanMarkdown(planMarkdown: string | undefined): string | undefined {
@@ -402,6 +352,57 @@ function taskLinkageActivityFields(payload: Record<string, unknown>): Record<str
   return fields;
 }
 
+/**
+ * Items attributed to a sub-agent conversation (parentItemId set, e.g. an
+ * OpenCode child session or a Claude Task child) belong in the Agents
+ * surface, never the parent timeline. Project them as `subagent.item`
+ * activities carrying the linkage the client fold needs. Applies to every
+ * item lifecycle event — including non-tool itemTypes like
+ * `assistant_message`, which the tool-lifecycle branches below would drop.
+ */
+function projectSubagentItemActivity(
+  event: Extract<
+    ProviderRuntimeEvent,
+    { type: "item.started" | "item.updated" | "item.completed" }
+  >,
+  maybeSequence: { readonly sequence?: number },
+): OrchestrationThreadActivity | undefined {
+  if (event.parentItemId === undefined) {
+    return undefined;
+  }
+  const role = event.payload.itemType === "assistant_message" ? "assistant" : "tool";
+  const detail =
+    event.payload.detail !== undefined ? truncateDetail(event.payload.detail) : undefined;
+  const summary =
+    event.payload.title ??
+    (detail !== undefined ? detail.slice(0, 120) : undefined) ??
+    "Subagent activity";
+  return projectActivityPayload({
+    id: event.eventId,
+    createdAt: event.createdAt,
+    tone: "tool",
+    kind: "subagent.item",
+    summary,
+    payload: {
+      itemType: event.payload.itemType,
+      ...(event.itemId !== undefined ? { itemId: event.itemId } : {}),
+      parentItemId: event.parentItemId,
+      role,
+      ...(event.payload.status ? { status: event.payload.status } : {}),
+      ...(event.payload.title ? { title: event.payload.title } : {}),
+      ...(detail !== undefined ? { detail } : {}),
+      ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
+      ...(event.payload.agentId ? { agentId: event.payload.agentId } : {}),
+      ...(event.payload.parentToolUseId ? { parentToolUseId: event.payload.parentToolUseId } : {}),
+      ...(event.payload.toolSurface ? { toolSurface: event.payload.toolSurface } : {}),
+      ...(event.payload.toolIcon ? { toolIcon: event.payload.toolIcon } : {}),
+      ...(event.payload.toolSource ? { toolSource: event.payload.toolSource } : {}),
+    },
+    turnId: toTurnId(event.turnId) ?? null,
+    ...maybeSequence,
+  });
+}
+
 export function runtimeEventToActivities(
   event: ProviderRuntimeEvent,
   taskTitle?: string,
@@ -473,15 +474,13 @@ export function runtimeEventToActivities(
     }
 
     case "runtime.error": {
-      const errorMessage =
-        event.payload.message === "Aborted" ? "Interrupted" : event.payload.message;
       return [
         {
           id: event.eventId,
           createdAt: event.createdAt,
           tone: "error",
           kind: "runtime.error",
-          summary: truncateDetail(errorMessage, 120),
+          summary: "Runtime error",
           payload: {
             message: truncateDetail(event.payload.message),
           },
@@ -843,8 +842,9 @@ export function runtimeEventToActivities(
     }
 
     case "item.updated": {
-      if (event.parentItemId !== undefined) {
-        return [subagentItemActivity(event, maybeSequence)];
+      const subagentActivity = projectSubagentItemActivity(event, maybeSequence);
+      if (subagentActivity) {
+        return [subagentActivity];
       }
       if (!isToolLifecycleItemType(event.payload.itemType)) {
         return [];
@@ -885,8 +885,9 @@ export function runtimeEventToActivities(
     }
 
     case "item.completed": {
-      if (event.parentItemId !== undefined) {
-        return [subagentItemActivity(event, maybeSequence)];
+      const subagentActivity = projectSubagentItemActivity(event, maybeSequence);
+      if (subagentActivity) {
+        return [subagentActivity];
       }
       if (!isToolLifecycleItemType(event.payload.itemType)) {
         return [];
@@ -920,8 +921,9 @@ export function runtimeEventToActivities(
     }
 
     case "item.started": {
-      if (event.parentItemId !== undefined) {
-        return [subagentItemActivity(event, maybeSequence)];
+      const subagentActivity = projectSubagentItemActivity(event, maybeSequence);
+      if (subagentActivity) {
+        return [subagentActivity];
       }
       if (!isToolLifecycleItemType(event.payload.itemType)) {
         return [];
@@ -965,8 +967,6 @@ const make = Effect.gen(function* () {
   const threadBackgroundLiveness = yield* ThreadBackgroundLivenessService;
   const threadPlanProgress = yield* ThreadPlanProgressService;
   const crypto = yield* Crypto.Crypto;
-  const fileSystem = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const providerService = yield* ProviderService;
@@ -980,58 +980,6 @@ const make = Effect.gen(function* () {
     crypto.randomUUIDv4.pipe(
       Effect.map((uuid) => CommandId.make(`provider:${event.eventId}:${tag}:${uuid}`)),
     );
-
-  const attachPostFileHashes = Effect.fn("attachPostFileHashes")(function* (
-    event: ProviderRuntimeEvent,
-    cwd: string,
-  ) {
-    if (event.type !== "item.completed") {
-      return event;
-    }
-    const data =
-      event.payload.data && typeof event.payload.data === "object"
-        ? (event.payload.data as Record<string, unknown>)
-        : undefined;
-    const item =
-      data?.item && typeof data.item === "object"
-        ? (data.item as Record<string, unknown>)
-        : undefined;
-    const changes = Array.isArray(data?.changes)
-      ? data.changes
-      : Array.isArray(item?.changes)
-        ? item.changes
-        : undefined;
-    if (!changes) return event;
-
-    const hashedChanges = yield* Effect.forEach(
-      changes,
-      (candidate) =>
-        Effect.gen(function* () {
-          if (!candidate || typeof candidate !== "object") return candidate;
-          const change = candidate as Record<string, unknown>;
-          if (typeof change.path !== "string") return candidate;
-          const filePath = path.resolve(cwd, change.path);
-          const relativePath = path.relative(cwd, filePath);
-          if (
-            relativePath === ".." ||
-            relativePath.startsWith(`..${path.sep}`) ||
-            path.isAbsolute(relativePath)
-          ) {
-            return candidate;
-          }
-          const contents = yield* fileSystem.readFileString(filePath);
-          const postFileHash = yield* crypto
-            .digest("SHA-256", new TextEncoder().encode(contents))
-            .pipe(Effect.map(Encoding.encodeHex));
-          return { ...change, postFileHash };
-        }).pipe(Effect.orElseSucceed(() => candidate)),
-      { concurrency: 4 },
-    );
-    const nextData = Array.isArray(data?.changes)
-      ? { ...data, changes: hashedChanges }
-      : { ...data, item: { ...item, changes: hashedChanges } };
-    return { ...event, payload: { ...event.payload, data: nextData } } as ProviderRuntimeEvent;
-  });
 
   const turnMessageIdsByTurnKey = yield* Cache.make<string, Set<MessageId>>({
     capacity: TURN_MESSAGE_IDS_BY_TURN_CACHE_CAPACITY,
@@ -1655,6 +1603,12 @@ const make = Effect.gen(function* () {
             if (conflictsWithActiveTurn || missingTurnForActiveTurn) {
               return false;
             }
+            // A pending turn start owns a starting session: an abort must not
+            // settle the lifecycle (or clear a queued start's state) for a
+            // turn the provider has not confirmed as started.
+            if (event.type === "turn.aborted" && hasPendingTurnStart) {
+              return false;
+            }
             // Only the active turn may close the lifecycle state.
             if (activeTurnId !== null && eventTurnId !== undefined) {
               return sameId(activeTurnId, eventTurnId);
@@ -1691,7 +1645,9 @@ const make = Effect.gen(function* () {
             case "session.exited":
               return "stopped";
             case "turn.aborted":
-              return "interrupted";
+              // Fork: stopping the active turn returns the session to ready
+              // (idle), not an interruption state.
+              return "ready";
             case "turn.completed":
               return normalizeRuntimeTurnState(event.payload.state) === "failed"
                 ? "error"
@@ -1866,9 +1822,7 @@ const make = Effect.gen(function* () {
       }
 
       const assistantCompletion =
-        event.type === "item.completed" &&
-        event.payload.itemType === "assistant_message" &&
-        event.parentItemId === undefined
+        event.type === "item.completed" && event.payload.itemType === "assistant_message"
           ? {
               messageId: MessageId.make(
                 `assistant:${event.itemId ?? event.turnId ?? event.eventId}`,
@@ -2055,7 +2009,7 @@ const make = Effect.gen(function* () {
                 : {}),
               runtimeMode: thread.session?.runtimeMode ?? "full-access",
               activeTurnId: eventTurnId ?? null,
-              lastError: runtimeErrorMessage === "Aborted" ? "Interrupted" : runtimeErrorMessage,
+              lastError: runtimeErrorMessage,
               updatedAt: now,
             },
             createdAt: now,
@@ -2245,13 +2199,7 @@ const make = Effect.gen(function* () {
           };
         }
       }
-const checkpointContext = eventHasFileChanges(event)
-        ? yield* projectionSnapshotQuery
-            .getThreadCheckpointContext(thread.id)
-            .pipe(Effect.map(Option.getOrUndefined))
-        : undefined;
-      const workspaceCwd = checkpointContext?.worktreePath ?? checkpointContext?.workspaceRoot;
-      const activityEvent = workspaceCwd ? yield* attachPostFileHashes(event, workspaceCwd) : event;
+
       const activities = runtimeEventToActivities(activityEvent, taskTitle);
       yield* Effect.forEach(activities, (activity) =>
         providerCommandId(event, "thread-activity-append").pipe(

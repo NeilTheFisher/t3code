@@ -142,6 +142,7 @@ function createProviderServiceHarness() {
     },
     rollbackConversation: () => unsupported(),
     uploadFeedback: () => unsupported(),
+    compactConversation: () => unsupported(),
     get streamEvents() {
       return Stream.fromPubSub(runtimeEventPubSub).pipe(
         Stream.flatMap(({ events, enqueued }) =>
@@ -474,14 +475,16 @@ describe("ProviderRuntimeIngestion", () => {
 
     await harness.drain();
     const thread = (await harness.readModel()).threads.find((entry) => entry.id === threadId);
+    // Fork semantics: aborting the active turn returns the session to ready
+    // and settles the turn as completed (interruption state is not kept).
     expect(thread?.session).toMatchObject({
-      status: "interrupted",
+      status: "ready",
       activeTurnId: null,
       lastError: null,
     });
     expect(thread?.latestTurn).toMatchObject({
       turnId,
-      state: "interrupted",
+      state: "completed",
       completedAt: "2026-01-01T00:00:02.000Z",
     });
     expect(thread?.messages).toEqual([
@@ -845,6 +848,98 @@ describe("ProviderRuntimeIngestion", () => {
     expect(thread.session?.status).toBe("ready");
     expect(thread.session?.activeTurnId).toBeNull();
     expect(thread.session?.lastError).toBeNull();
+  });
+
+  it("settles the active turn when the provider reports it was aborted", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+    const turnId = asTurnId("turn-aborted");
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-aborted"),
+      provider: ProviderDriverKind.make("opencode"),
+      threadId: asThreadId("thread-1"),
+      turnId,
+      createdAt: now,
+    });
+
+    await waitForThread(
+      harness.readModel,
+      (thread) => thread.session?.status === "running" && thread.session?.activeTurnId === turnId,
+    );
+
+    harness.emit({
+      type: "turn.aborted",
+      eventId: asEventId("evt-turn-aborted"),
+      provider: ProviderDriverKind.make("opencode"),
+      threadId: asThreadId("thread-1"),
+      turnId,
+      createdAt: "2026-01-01T00:00:01.000Z",
+      payload: { reason: "Interrupted by user." },
+    });
+
+    const thread = await waitForThread(
+      harness.readModel,
+      (entry) => entry.session?.status === "ready" && entry.session?.activeTurnId === null,
+    );
+    expect(thread.session?.lastError).toBeNull();
+  });
+
+  it("rejects a turn.aborted while a pending turn start owns a starting session", async () => {
+    const harness = await createHarness();
+    const threadId = asThreadId("thread-1");
+    const staleTurnId = asTurnId("turn-stale-during-starting");
+
+    // A turn start is queued and the provider session is (re)starting. The
+    // session still carries the previous turn id as its active turn, so the
+    // abort would pass the same-turn guard without the pending-start rule.
+    await harness.dispatch({
+      type: "thread.turn.start",
+      commandId: CommandId.make("cmd-turn-start-pending-abort-guard"),
+      threadId,
+      message: {
+        messageId: asMessageId("message-pending-abort-guard"),
+        role: "user",
+        text: "queued while the provider restarts",
+        attachments: [],
+      },
+      interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+      runtimeMode: "approval-required",
+      createdAt: "2026-01-01T00:00:01.000Z",
+    });
+    await harness.dispatch({
+      type: "thread.session.set",
+      commandId: CommandId.make("cmd-session-starting-pending-abort-guard"),
+      threadId,
+      session: {
+        threadId,
+        status: "starting",
+        providerName: "opencode",
+        runtimeMode: "approval-required",
+        activeTurnId: staleTurnId,
+        lastError: null,
+        updatedAt: "2026-01-01T00:00:01.000Z",
+      },
+      createdAt: "2026-01-01T00:00:01.000Z",
+    });
+
+    harness.emit({
+      type: "turn.aborted",
+      eventId: asEventId("evt-turn-aborted-during-starting"),
+      provider: ProviderDriverKind.make("opencode"),
+      threadId,
+      turnId: staleTurnId,
+      createdAt: "2026-01-01T00:00:02.000Z",
+      payload: { reason: "Interrupted by user." },
+    });
+    await harness.drain();
+
+    // The abort must not settle the starting session back to ready while a
+    // queued turn start is still waiting for the provider.
+    const thread = (await harness.readModel()).threads.find((entry) => entry.id === threadId);
+    expect(thread?.session?.status).toBe("starting");
+    expect(thread?.session?.activeTurnId).toBe(staleTurnId);
   });
 
   effectIt.effect(
