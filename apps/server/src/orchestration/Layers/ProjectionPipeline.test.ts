@@ -3253,6 +3253,7 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
   );
 
   it.effect("maintains shell summaries without decoding message or plan bodies", () =>
+  it.effect("clears pending user input when the provider session is gone", () =>
     Effect.gen(function* () {
       const projectionPipeline = yield* OrchestrationProjectionPipeline;
       const eventStore = yield* OrchestrationEventStore;
@@ -3280,6 +3281,22 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
           scripts: [],
           createdAt: "2026-03-01T08:00:00.000Z",
           updatedAt: "2026-03-01T08:00:00.000Z",
+        eventId: EventId.make("evt-no-session-input-1"),
+        aggregateKind: "project",
+        aggregateId: ProjectId.make("project-no-session-input"),
+        occurredAt: "2026-02-26T12:35:00.000Z",
+        commandId: CommandId.make("cmd-no-session-input-1"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-no-session-input-1"),
+        metadata: {},
+        payload: {
+          projectId: ProjectId.make("project-no-session-input"),
+          title: "Project No Session Input",
+          workspaceRoot: "/tmp/project-no-session-input",
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: "2026-02-26T12:35:00.000Z",
+          updatedAt: "2026-02-26T12:35:00.000Z",
         },
       });
 
@@ -3297,6 +3314,18 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
           threadId: ThreadId.make("thread-shell-summary"),
           projectId: ProjectId.make("project-shell-summary"),
           title: "Thread Shell Summary",
+        eventId: EventId.make("evt-no-session-input-2"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-no-session-input"),
+        occurredAt: "2026-02-26T12:35:01.000Z",
+        commandId: CommandId.make("cmd-no-session-input-2"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-no-session-input-2"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.make("thread-no-session-input"),
+          projectId: ProjectId.make("project-no-session-input"),
+          title: "Thread No Session Input",
           modelSelection: {
             instanceId: ProviderInstanceId.make("codex"),
             model: "gpt-5-codex",
@@ -3433,6 +3462,25 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
           threadId: ThreadId.make("thread-shell-summary"),
           activity: {
             id: EventId.make("activity-shell-summary-user-input"),
+          createdAt: "2026-02-26T12:35:01.000Z",
+          updatedAt: "2026-02-26T12:35:01.000Z",
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.activity-appended",
+        eventId: EventId.make("evt-no-session-input-3"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-no-session-input"),
+        occurredAt: "2026-02-26T12:35:02.000Z",
+        commandId: CommandId.make("cmd-no-session-input-3"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-no-session-input-3"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.make("thread-no-session-input"),
+          activity: {
+            id: EventId.make("activity-no-session-input-requested"),
             tone: "info",
             kind: "user-input.requested",
             summary: "User input requested",
@@ -3449,6 +3497,23 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
             },
             turnId: TurnId.make("turn-shell-summary-1"),
             createdAt: "2026-03-01T08:00:05.000Z",
+              requestId: "user-input-request-no-session-1",
+              questions: [
+                {
+                  id: "sandbox_mode",
+                  header: "Sandbox",
+                  question: "Which mode should be used?",
+                  options: [
+                    {
+                      label: "workspace-write",
+                      description: "Allow workspace writes only",
+                    },
+                  ],
+                },
+              ],
+            },
+            turnId: null,
+            createdAt: "2026-02-26T12:35:02.000Z",
           },
         },
       });
@@ -3565,6 +3630,45 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
   );
 
   it.effect("restores pending approvals when a provider reply fails", () =>
+      yield* appendAndProject({
+        type: "thread.activity-appended",
+        eventId: EventId.make("evt-no-session-input-4"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-no-session-input"),
+        occurredAt: "2026-02-26T12:35:03.000Z",
+        commandId: CommandId.make("cmd-no-session-input-4"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-no-session-input-4"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.make("thread-no-session-input"),
+          activity: {
+            id: EventId.make("activity-no-session-input-failed"),
+            tone: "error",
+            kind: "provider.user-input.respond.failed",
+            summary: "Provider user input response failed",
+            payload: {
+              requestId: "user-input-request-no-session-1",
+              detail: "No active provider session is bound to this thread.",
+            },
+            turnId: null,
+            createdAt: "2026-02-26T12:35:03.000Z",
+          },
+        },
+      });
+
+      const threadRows = yield* sql<{
+        readonly pendingUserInputCount: number;
+      }>`
+        SELECT pending_user_input_count AS "pendingUserInputCount"
+        FROM projection_threads
+        WHERE thread_id = 'thread-no-session-input'
+      `;
+      assert.deepEqual(threadRows, [{ pendingUserInputCount: 0 }]);
+    }),
+  );
+
+  it.effect("ignores non-stale provider approval response failures", () =>
     Effect.gen(function* () {
       const projectionPipeline = yield* OrchestrationProjectionPipeline;
       const eventStore = yield* OrchestrationEventStore;
