@@ -126,7 +126,8 @@ function isStalePendingApprovalFailureDetail(detail: string | null): boolean {
   return (
     detail.includes("stale pending approval request") ||
     detail.includes("unknown pending approval request") ||
-    detail.includes("unknown pending permission request")
+    detail.includes("unknown pending permission request") ||
+    detail.includes("no active provider session is bound to this thread")
   );
 }
 
@@ -190,7 +191,8 @@ function derivePendingUserInputCountFromActivities(
       (detail.includes("stale pending user-input request") ||
         detail.includes("unknown pending user-input request") ||
         detail.includes("unknown pending user input request") ||
-        detail.includes("unknown pending codex user input request"))
+        detail.includes("unknown pending codex user input request") ||
+        detail.includes("no active provider session is bound to this thread"))
     ) {
       openRequestIds.delete(requestId);
     }
