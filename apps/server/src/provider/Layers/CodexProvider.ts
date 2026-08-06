@@ -7,6 +7,9 @@ import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Types from "effect/Types";
+import * as NodeFS from "node:fs/promises";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import * as CodexClient from "effect-codex-app-server/client";
@@ -199,6 +202,48 @@ function parseCodexModelListResponse(
     ...(model.isDefault ? { isDefault: true } : {}),
     capabilities: mapCodexModelCapabilities(model),
   }));
+}
+
+export function enrichCodexModelsFromCache(
+  models: ReadonlyArray<ServerProviderModel>,
+  cache: unknown,
+): ReadonlyArray<ServerProviderModel> {
+  if (!cache || typeof cache !== "object" || !("models" in cache) || !Array.isArray(cache.models)) {
+    return models;
+  }
+  const contextWindows = new Map<string, number>();
+  for (const entry of cache.models) {
+    if (!entry || typeof entry !== "object") continue;
+    const slug = "slug" in entry && typeof entry.slug === "string" ? entry.slug : undefined;
+    const tokens =
+      "max_context_window" in entry && typeof entry.max_context_window === "number"
+        ? entry.max_context_window
+        : "context_window" in entry && typeof entry.context_window === "number"
+          ? entry.context_window
+          : undefined;
+    if (slug && tokens && Number.isFinite(tokens) && tokens > 0) {
+      contextWindows.set(slug, Math.round(tokens));
+    }
+  }
+  return models.map((model) => {
+    const contextWindowTokens = contextWindows.get(model.slug);
+    return contextWindowTokens === undefined ? model : { ...model, contextWindowTokens };
+  });
+}
+
+async function readCodexModelCache(homePath: string | undefined): Promise<unknown> {
+  const defaultHome = NodePath.join(NodeOS.homedir(), ".codex");
+  const candidates = homePath && homePath !== defaultHome ? [homePath, defaultHome] : [defaultHome];
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(
+        await NodeFS.readFile(NodePath.join(candidate, "models_cache.json"), "utf8"),
+      );
+    } catch {
+      // A custom Codex home may share the default home's downloaded model catalog.
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -396,7 +441,7 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
     } satisfies CodexAppServerProviderSnapshot;
   }
 
-  const [skillsResponse, models, rateLimits] = yield* Effect.all(
+  const [skillsResponse, models, rateLimits, modelCache] = yield* Effect.all(
     [
       client.request("skills/list", {
         cwds: [input.cwd],
@@ -409,6 +454,9 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
         : Effect.void.pipe(
             Effect.as(undefined as CodexSchema.V2GetAccountRateLimitsResponse | undefined),
           ),
+      Effect.tryPromise(() => readCodexModelCache(resolvedHomePath)).pipe(
+        Effect.orElseSucceed(() => undefined),
+      ),
     ],
     { concurrency: "unbounded" },
   );
@@ -418,7 +466,10 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
     ...(rateLimits ? { rateLimits } : {}),
     version,
     models: applyPreferredCodexDefaultModel(
-      appendCustomCodexModels(models, input.customModels ?? []),
+      appendCustomCodexModels(
+        enrichCodexModelsFromCache(models, modelCache),
+        input.customModels ?? [],
+      ),
     ),
     skills: parseCodexSkillsListResponse(skillsResponse, input.cwd),
   } satisfies CodexAppServerProviderSnapshot;

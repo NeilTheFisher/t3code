@@ -79,6 +79,25 @@ describe("instance-scoped model selection", () => {
     );
   });
 
+  it("preserves server-provided context window metadata", () => {
+    const baseProvider = provider({
+      instanceId: "opencode",
+      provider: ProviderDriverKind.make("opencode"),
+      models: ["opencode/deepseek-v4-flash-free"],
+    });
+    const providers = [
+      {
+        ...baseProvider,
+        models: [{ ...baseProvider.models[0]!, contextWindowTokens: 200_000 }],
+      },
+    ];
+    const entry = deriveProviderInstanceEntries(providers)[0]!;
+
+    expect(
+      getAppModelOptionsForInstance(DEFAULT_UNIFIED_SETTINGS, entry)[0]?.contextWindowTokens,
+    ).toBe(200_000);
+  });
+
   it("keeps custom models on the provider instance that declared them", () => {
     const providers = [
       provider({

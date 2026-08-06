@@ -78,27 +78,7 @@ export interface AppModelOption {
   isCustom: boolean;
   isDefault?: boolean;
   isLegacy?: boolean;
-  isUnavailable?: boolean;
-}
-
-function appendUnavailableOpenCodeSelection(
-  options: AppModelOption[],
-  rawModels: ReadonlyArray<ServerProvider["models"][number]>,
-  provider: ProviderDriverKind,
-  selectedModel: string | null | undefined,
-  hiddenModels: ReadonlyArray<string>,
-): AppModelOption[] {
-  if (provider !== "opencode") return options;
-  const slug = normalizeCustomModelSlug(selectedModel);
-  if (!slug) return options;
-
-  // A model that exists in the raw catalog can be absent from `options`
-  // because the user hid it. Keep that preference authoritative.
-  if (rawModels.some((model) => model.slug === slug)) return options;
-  if (hiddenModels.includes(slug)) return options;
-  if (options.some((option) => option.slug === slug)) return options;
-
-  return [...options, { slug, name: slug, isCustom: false, isUnavailable: true }];
+  contextWindowTokens?: number;
 }
 
 function toAppModelOption(model: ServerProvider["models"][number]): AppModelOption {
@@ -111,6 +91,9 @@ function toAppModelOption(model: ServerProvider["models"][number]): AppModelOpti
   if (model.subProvider) option.subProvider = model.subProvider;
   if (model.isDefault) option.isDefault = true;
   if (model.isLegacy) option.isLegacy = true;
+  if (model.contextWindowTokens !== undefined) {
+    option.contextWindowTokens = model.contextWindowTokens;
+  }
   return option;
 }
 

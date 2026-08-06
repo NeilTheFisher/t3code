@@ -1,6 +1,40 @@
 import { assert, it } from "@effect/vitest";
 
-import { applyPreferredCodexDefaultModel, mapCodexModelCapabilities } from "./CodexProvider.ts";
+import {
+  applyPreferredCodexDefaultModel,
+  enrichCodexModelsFromCache,
+  isLegacyCodexModel,
+  mapCodexModelCapabilities,
+} from "./CodexProvider.ts";
+
+it("adds per-model context windows from the Codex cache", () => {
+  const models = enrichCodexModelsFromCache(
+    [{ slug: "gpt-test", name: "GPT Test", isCustom: false, capabilities: null }],
+    { models: [{ slug: "gpt-test", context_window: 272_000, max_context_window: 1_000_000 }] },
+  );
+  assert.strictEqual(models[0]?.contextWindowTokens, 1_000_000);
+});
+
+it("keeps only the GPT-5.6 Codex family out of legacy models", () => {
+  assert.deepStrictEqual(
+    [
+      "gpt-5.6-luna",
+      "gpt-5.6-terra",
+      "gpt-5.6-sol",
+      "gpt-daybreak-blue-latest",
+      "gpt-daybreak-red-latest",
+      "gpt-5.4",
+    ].map((model) => [model, isLegacyCodexModel(model)]),
+    [
+      ["gpt-5.6-luna", false],
+      ["gpt-5.6-terra", false],
+      ["gpt-5.6-sol", false],
+      ["gpt-daybreak-blue-latest", false],
+      ["gpt-daybreak-red-latest", false],
+      ["gpt-5.4", true],
+    ],
+  );
+});
 
 it("maps current Codex model capability fields", () => {
   const capabilities = mapCodexModelCapabilities({

@@ -53,7 +53,7 @@ type ModelPickerItem = {
   instanceAccentColor?: string | undefined;
   continuationGroupKey?: string | undefined;
   isLegacy?: boolean | undefined;
-  isUnavailable?: boolean | undefined;
+  contextWindowTokens?: number | undefined;
 };
 
 export function shouldIncludeModelPickerOption(input: {
@@ -257,7 +257,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           ...(model.shortName ? { shortName: model.shortName } : {}),
           ...(model.subProvider ? { subProvider: model.subProvider } : {}),
           ...(model.isLegacy ? { isLegacy: true } : {}),
-          ...(model.isUnavailable ? { isUnavailable: true } : {}),
+          ...(model.contextWindowTokens !== undefined
+            ? { contextWindowTokens: model.contextWindowTokens }
+            : {}),
           instanceId,
           driverKind: entry.driverKind,
           instanceDisplayName: entry.displayName,

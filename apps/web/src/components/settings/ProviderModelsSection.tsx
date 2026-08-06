@@ -24,6 +24,7 @@ import { MAX_CUSTOM_MODEL_LENGTH } from "../../modelSelection";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { formatModelContextWindowTokens, getModelCapabilityLabels } from "../modelMetadata";
 
 /**
  * Placeholder text for the "add a custom model" input, keyed by driver
@@ -195,8 +196,7 @@ export function ProviderModelsSection({
         className="mt-2 max-h-40 overflow-y-auto pb-1 lg:min-h-0 lg:max-h-none lg:flex-1"
       >
         {orderedModels.map((model, index) => {
-          const caps = model.capabilities;
-          const capLabels: string[] = [];
+          const capLabels = getModelCapabilityLabels(model.capabilities);
           const isHidden = !model.isCustom && hiddenModelSet.has(model.slug);
           const isFavorite = favoriteModelSet.has(model.slug);
           const previousModel = orderedModels[index - 1];
@@ -205,26 +205,10 @@ export function ProviderModelsSection({
             previousModel !== undefined && favoriteModelSet.has(previousModel.slug) === isFavorite;
           const canMoveDown =
             nextModel !== undefined && favoriteModelSet.has(nextModel.slug) === isFavorite;
-          const descriptors = caps?.optionDescriptors ?? [];
-          if (descriptors.some((descriptor) => descriptor.id === "fastMode")) {
-            capLabels.push("Fast mode");
-          }
-          if (descriptors.some((descriptor) => descriptor.id === "thinking")) {
-            capLabels.push("Thinking");
-          }
-          if (
-            descriptors.some(
-              (descriptor) =>
-                descriptor.type === "select" &&
-                (descriptor.id === "reasoningEffort" ||
-                  descriptor.id === "effort" ||
-                  descriptor.id === "reasoning" ||
-                  descriptor.id === "variant"),
-            )
-          ) {
-            capLabels.push("Reasoning");
-          }
-          const hasDetails = capLabels.length > 0 || model.name !== model.slug;
+          const hasDetails =
+            capLabels.length > 0 ||
+            model.name !== model.slug ||
+            model.contextWindowTokens !== undefined;
 
           return (
             <div
@@ -260,6 +244,14 @@ export function ProviderModelsSection({
                     <TooltipPopup side="top" className="max-w-56">
                       <div className="space-y-1">
                         <code className="block text-[11px] text-foreground">{model.slug}</code>
+                        {model.contextWindowTokens !== undefined ? (
+                          <div className="flex items-center gap-4 text-[10px]">
+                            <span className="text-muted-foreground">Context window</span>
+                            <span className="ml-auto text-foreground">
+                              {formatModelContextWindowTokens(model.contextWindowTokens)} tokens
+                            </span>
+                          </div>
+                        ) : null}
                         {capLabels.length > 0 ? (
                           <div className="flex flex-wrap gap-x-2 gap-y-0.5">
                             {capLabels.map((label) => (

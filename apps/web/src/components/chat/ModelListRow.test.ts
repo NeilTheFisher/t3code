@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { formatModelContextWindowTokens } from "./ModelListRow";
+import { formatModelContextWindowTokens } from "../modelMetadata";
 
 describe("formatModelContextWindowTokens", () => {
   it("formats the full context limit with locale separators", () => {
