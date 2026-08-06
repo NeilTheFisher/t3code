@@ -110,6 +110,7 @@ function appendUnavailableDynamicModelSelection(
   if (options.some((option) => option.slug === slug)) return options;
 
   return [...options, { slug, name: slug, isCustom: false, isUnavailable: true }];
+  contextWindowTokens?: number;
 }
 
 function toAppModelOption(model: ServerProvider["models"][number]): AppModelOption {
@@ -124,6 +125,9 @@ function toAppModelOption(model: ServerProvider["models"][number]): AppModelOpti
   if (model.badge) option.badge = model.badge;
   if (model.isDefault) option.isDefault = true;
   if (model.isLegacy) option.isLegacy = true;
+  if (model.contextWindowTokens !== undefined) {
+    option.contextWindowTokens = model.contextWindowTokens;
+  }
   return option;
 }
 
