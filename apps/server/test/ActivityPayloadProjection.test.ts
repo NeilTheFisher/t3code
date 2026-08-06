@@ -173,7 +173,8 @@ describe("projectActivityPayload", () => {
         command: "fallback data",
         toolCallId: "tool-command",
         kind: "execute",
-        rawOutput: { content: "first useful line" },
+        // Fork-rich: rawOutput.content (≤4k) ships verbatim, fences included.
+        rawOutput: { output: "```\nfirst useful line\nsecond line" },
       },
     });
 
@@ -251,11 +252,14 @@ describe("projectActivityPayload", () => {
     for (const activity of fixtures) {
       const projected = projectActivityPayload(activity);
       if (activity === fixtures[0]) {
+        // The projection keeps the command identity fields; the row detail
+        // stays the payload detail (the output survives as a bounded
+        // rawOutput summary).
         expect(deriveWorkLogEntries([projected])).toMatchObject([
           {
             command: "pnpm test",
             rawCommand: 'bash -lc "pnpm test"',
-            detail: "first useful line",
+            detail: "command_execution detail",
           },
         ]);
         expect(comparableThreadFeed([projected])).toMatchObject([
@@ -264,7 +268,9 @@ describe("projectActivityPayload", () => {
             activities: [
               {
                 detail: "pnpm test",
-                fullDetail: 'bash -lc "pnpm test"\n\nfirst useful line',
+                // Mobile expanded body = rawCommand + verbatim {output}
+                // (fences included — the fork ships raw output).
+                fullDetail: 'bash -lc "pnpm test"\n\n```\nfirst useful line\nsecond line',
               },
             ],
           },
@@ -319,6 +325,66 @@ describe("projectActivityPayload", () => {
         expect(mobileGroup.activities[0]?.status).toBe("failure");
       }
     }
+  });
+
+  it("keeps Bash input and output visible after projection for every native provider", () => {
+    const command = "printf hello";
+    const makeProviderCommandActivity = (
+      id: string,
+      detail: string,
+      data: Record<string, unknown>,
+    ): OrchestrationThreadActivity => {
+      const base = makeActivity(id, "command_execution", data);
+      return {
+        ...base,
+        payload: {
+          ...(base.payload as Record<string, unknown>),
+          title: "Bash",
+          detail,
+          data,
+        },
+      };
+    };
+    const providerActivities = [
+      makeProviderCommandActivity("codex-command", "/bin/bash -lc 'printf hello'", {
+        item: {
+          type: "commandExecution",
+          command: "/bin/bash -lc 'printf hello'",
+          aggregatedOutput: "hello from codex\n<exited with exit code 0>",
+        },
+      }),
+      makeProviderCommandActivity("claude-command", `Bash: ${command}`, {
+        toolName: "Bash",
+        input: { command },
+        result: {
+          type: "tool_result",
+          content: [{ type: "text", text: "hello from claude\n" }],
+        },
+      }),
+      makeProviderCommandActivity("opencode-command", "hello from opencode", {
+        tool: "bash",
+        state: {
+          status: "completed",
+          input: { command },
+          output: "hello from opencode",
+          metadata: { output: "hello from opencode", exit: 0, truncated: false },
+          title: command,
+        },
+      }),
+    ] satisfies ReadonlyArray<OrchestrationThreadActivity>;
+
+    const expected = [
+      { command, detail: "hello from codex" },
+      { command, detail: "hello from claude" },
+      { command, detail: "hello from opencode" },
+    ];
+
+    providerActivities.forEach((activity, index) => {
+      const [before] = deriveWorkLogEntries([activity]);
+      const [after] = deriveWorkLogEntries([projectActivityPayload(activity)]);
+      expect(before).toMatchObject(expected[index]!);
+      expect(after).toMatchObject(expected[index]!);
+    });
   });
 
   it("projects snapshot and event transports without mutating their sources", () => {
