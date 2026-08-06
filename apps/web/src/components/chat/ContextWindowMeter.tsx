@@ -20,6 +20,9 @@ export function ContextWindowMeter(props: {
   providerDisplayName?: string | null;
   providerUsageLimits?: ServerProviderUsageLimits | undefined;
   timestampFormat: TimestampFormat;
+  onCompact: () => void;
+  compactDisabled?: boolean;
+  canCompact: boolean;
 }) {
   const { usage, providerDisplayName } = props;
   const usedPercentage = formatPercentage(usage.usedPercentage);
@@ -137,6 +140,16 @@ export function ContextWindowMeter(props: {
             <div className="mt-1 text-pretty text-[11px] font-medium text-muted-foreground/70">
               {providerDisplayName ?? "It"} automatically compacts its context when needed.
             </div>
+          ) : null}
+          {props.canCompact ? (
+            <button
+              type="button"
+              className="mt-1 rounded-md border border-border/60 px-2 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={props.compactDisabled}
+              onClick={props.onCompact}
+            >
+              Compact context now
+            </button>
           ) : null}
           {props.providerUsageLimits ? (
             <div className="mt-1 grid gap-2.5 border-t border-border/60 pt-2.5">

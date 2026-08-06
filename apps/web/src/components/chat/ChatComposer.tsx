@@ -432,6 +432,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   compact: boolean;
   activeContextWindow: ReturnType<typeof deriveLatestContextWindowSnapshot>;
   activeThreadProviderDisplayName: string | null;
+  canCompact: boolean;
   activeProviderUsageLimits: ServerProvider["usageLimits"] | undefined;
   timestampFormat: UnifiedSettings["timestampFormat"];
   isPreparingWorktree: boolean;
@@ -453,6 +454,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   preserveComposerFocusOnPointerDown?: boolean;
   onPreviousPendingQuestion: () => void;
   onInterrupt: () => void;
+  onCompact: () => void;
   onImplementPlanInNewThread: () => void;
 }) {
   return (
@@ -463,6 +465,9 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
           providerDisplayName={props.activeThreadProviderDisplayName}
           providerUsageLimits={props.activeProviderUsageLimits}
           timestampFormat={props.timestampFormat}
+          onCompact={props.onCompact}
+          compactDisabled={props.isRunning}
+          canCompact={props.canCompact}
         />
       ) : null}
       {props.isPreparingWorktree ? (
@@ -624,6 +629,7 @@ export interface ChatComposerProps {
   // Callbacks
   onSend: (e?: { preventDefault: () => void }) => void;
   onInterrupt: () => void;
+  onCompact: () => void;
   onImplementPlanInNewThread: () => void;
   onRespondToApproval: (
     requestId: ApprovalRequestId,
@@ -711,6 +717,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     composerElementContextsRef,
     onSend,
     onInterrupt,
+    onCompact,
     onImplementPlanInNewThread,
     onRespondToApproval,
     onSelectActivePendingUserInputOption,
@@ -1007,6 +1014,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       return getProviderDisplayName(providerStatuses, entry.driver);
     }
     return formatProviderDisplayName(activeThreadModelSelection.instanceId);
+  }, [providerStatuses, activeThreadModelSelection]);
+  const activeThreadCanCompact = useMemo(() => {
+    if (!activeThreadModelSelection) return false;
+    const provider = providerStatuses.find(
+      (entry) => entry.instanceId === activeThreadModelSelection.instanceId,
+    );
+    return provider
+      ? provider.driver === "codex" ||
+          provider.driver === "claude" ||
+          provider.driver === "opencode"
+      : false;
   }, [providerStatuses, activeThreadModelSelection]);
   const activeThreadProviderInstanceId =
     activeThread?.session?.providerInstanceId ?? activeThreadModelSelection?.instanceId;
@@ -3311,6 +3329,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   compact={isComposerPrimaryActionsCompact}
                   activeContextWindow={activeContextWindow}
                   activeThreadProviderDisplayName={activeThreadProviderDisplayName}
+                  canCompact={activeThreadCanCompact}
                   activeProviderUsageLimits={activeProviderUsageLimits}
                   timestampFormat={settings.timestampFormat}
                   pendingAction={pendingPrimaryAction}
@@ -3330,6 +3349,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   preserveComposerFocusOnPointerDown={isMobileViewport}
                   onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
                   onInterrupt={handleInterruptPrimaryAction}
+                  onCompact={onCompact}
                   onImplementPlanInNewThread={handleImplementPlanInNewThreadPrimaryAction}
                 />
               </div>

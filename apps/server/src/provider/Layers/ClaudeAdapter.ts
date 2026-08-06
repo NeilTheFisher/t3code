@@ -4682,6 +4682,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     },
   );
 
+  const compactSession: NonNullable<ClaudeAdapterShape["compactSession"]> = (threadId) =>
+    sendTurn({ threadId, input: "/compact" }).pipe(Effect.asVoid);
+
   const readThread: ClaudeAdapterShape["readThread"] = Effect.fn("readThread")(
     function* (threadId) {
       const context = yield* requireSession(threadId);
@@ -4787,6 +4790,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     startSession,
     sendTurn,
     interruptTurn,
+    compactSession,
     readThread,
     rollbackThread,
     respondToRequest,
