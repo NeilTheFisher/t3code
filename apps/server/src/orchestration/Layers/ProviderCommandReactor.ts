@@ -73,6 +73,7 @@ type ProviderIntentEvent = Extract<
       | "thread.runtime-mode-set"
       | "thread.turn-start-requested"
       | "thread.turn-interrupt-requested"
+      | "thread.compact-requested"
       | "thread.approval-response-requested"
       | "thread.user-input-response-requested"
       | "thread.session-stop-requested"
@@ -1626,6 +1627,14 @@ const make = Effect.gen(function* () {
       .pipe(Effect.catchCause(recoverInterruptFailure));
   });
 
+  const processCompactRequested = Effect.fn("processCompactRequested")(function* (
+    event: Extract<ProviderIntentEvent, { type: "thread.compact-requested" }>,
+  ) {
+    const thread = yield* resolveThread(event.payload.threadId);
+    if (!thread?.session || thread.session.status === "stopped") return;
+    yield* providerService.compactConversation({ threadId: event.payload.threadId });
+  });
+
   const processApprovalResponseRequested = Effect.fn("processApprovalResponseRequested")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.approval-response-requested" }>,
   ) {
@@ -1815,6 +1824,9 @@ const make = Effect.gen(function* () {
       case "thread.turn-interrupt-requested":
         yield* processTurnInterruptRequested(event);
         return;
+      case "thread.compact-requested":
+        yield* processCompactRequested(event);
+        return;
       case "thread.approval-response-requested":
         yield* processApprovalResponseRequested(event);
         return;
@@ -1878,6 +1890,7 @@ const make = Effect.gen(function* () {
         event.type === "thread.runtime-mode-set" ||
         event.type === "thread.turn-start-requested" ||
         event.type === "thread.turn-interrupt-requested" ||
+        event.type === "thread.compact-requested" ||
         event.type === "thread.approval-response-requested" ||
         event.type === "thread.user-input-response-requested" ||
         event.type === "thread.session-stop-requested" ||

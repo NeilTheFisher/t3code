@@ -4122,6 +4122,15 @@ export function makeOpenCodeAdapter(
       },
     );
 
+    const compactSession: NonNullable<OpenCodeAdapterShape["compactSession"]> = Effect.fn(
+      "compactSession",
+    )(function* (threadId) {
+      const context = yield* requireSession(threadId);
+      yield* runOpenCodeSdk("session.compact", () =>
+        context.client.session.compact({ sessionID: context.openCodeSessionId }),
+      ).pipe(Effect.mapError(toRequestError));
+    });
+
     const respondToRequest: OpenCodeAdapterShape["respondToRequest"] = Effect.fn(
       "respondToRequest",
     )(function* (threadId, requestId, decision) {
@@ -4337,6 +4346,7 @@ export function makeOpenCodeAdapter(
       sendTurn,
       compaction: { type: "native", start: compactThread },
       interruptTurn,
+      compactSession,
       respondToRequest,
       respondToUserInput,
       stopSession,

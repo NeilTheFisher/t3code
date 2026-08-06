@@ -10,6 +10,7 @@ import {
 import {
   type ArchiveThreadInput,
   type CreateThreadInput,
+  type CompactThreadInput,
   type DeleteThreadInput,
   type InterruptThreadTurnInput,
   type LinkThreadPullRequestInput,
@@ -34,6 +35,7 @@ import {
   type UpdateThreadMetadataInput,
   archiveThread,
   createThread,
+  compactThread,
   deleteThread,
   interruptThreadTurn,
   linkThreadPullRequest,
@@ -62,6 +64,7 @@ import type { EnvironmentRegistry } from "../connection/registry.ts";
 export type {
   ArchiveThreadInput,
   CreateThreadInput,
+  CompactThreadInput,
   DeleteThreadInput,
   InterruptThreadTurnInput,
   LinkThreadPullRequestInput,
@@ -207,6 +210,12 @@ export function createThreadEnvironmentAtoms<R, E>(
     interruptTurn: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:interrupt-turn",
       execute: (input: InterruptThreadTurnInput) => interruptThreadTurn(input),
+      scheduler,
+      concurrency,
+    }),
+    compact: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:compact",
+      execute: (input: CompactThreadInput) => compactThread(input),
       scheduler,
       concurrency,
     }),
