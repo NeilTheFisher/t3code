@@ -8,6 +8,7 @@ import {
   type ProviderSession,
   RuntimeItemId,
   RuntimeRequestId,
+  RuntimeTaskId,
   ThreadId,
   type ToolLifecycleItemType,
   type TurnTokenUsage,
@@ -174,6 +175,14 @@ export function isSameOpenCodeDirectory(
 interface OpenCodeTurnSnapshot {
   readonly id: TurnId;
   readonly items: Array<unknown>;
+}
+
+interface OpenCodeChildSession {
+  parentCallId: string | undefined;
+  description: string;
+  role: string | undefined;
+  turnId: TurnId | undefined;
+  started: boolean;
 }
 
 type OpenCodeSubscribedEvent =
@@ -352,6 +361,12 @@ interface OpenCodeSessionContext {
   // until native removal or session teardown, but do not retain other part payloads.
   readonly textPartsByMessageId: Map<string, Map<string, OpenCodeTextPartState>>;
   turnTokenUsage: OpenCodeTurnTokenUsageAccumulator | undefined;
+  readonly partById: Map<string, Part>;
+  /** Child OpenCode sessions and the task metadata used by the Agents surface. */
+  readonly childSessions: Map<string, OpenCodeChildSession>;
+  readonly emittedTextByPartId: Map<string, string>;
+  readonly completedAssistantPartIds: Set<string>;
+  readonly turns: Array<OpenCodeTurnSnapshot>;
   activeTurnId: TurnId | undefined;
   activeAgent: string | undefined;
   activeVariant: string | undefined;
@@ -1823,6 +1838,158 @@ export function makeOpenCodeAdapter(
               decision: "acceptForSession",
               label: "Allow for workspace",
               warning: "Applies to matching requests in other OpenCode sessions in this workspace.",
+    const emitChildTaskStarted = Effect.fn("emitChildTaskStarted")(function* (
+      context: OpenCodeSessionContext,
+      childSessionId: string,
+      raw: unknown,
+    ) {
+      const child = context.childSessions.get(childSessionId);
+      if (!child || child.started) {
+        return;
+      }
+      child.started = true;
+      yield* emit({
+        ...(yield* buildEventBase({
+          threadId: context.session.threadId,
+          turnId: child.turnId,
+          raw,
+        })),
+        type: "task.started",
+        payload: {
+          taskId: RuntimeTaskId.make(childSessionId),
+          description: child.description,
+          title: child.description,
+          taskType: "local_agent",
+          ...(child.role ? { role: child.role } : {}),
+          timelineBypass: true,
+        },
+      });
+    });
+
+    /**
+     * Handle an event from a known child (sub-agent) session. Task lifecycle
+     * events feed the live Agents surface; completed transcript items retain
+     * parentItemId attribution for the nested activity history.
+     */
+    const handleChildSessionEvent = Effect.fn("handleChildSessionEvent")(function* (
+      context: OpenCodeSessionContext,
+      childSessionId: string,
+      event: OpenCodeSubscribedEvent,
+    ) {
+      const child = context.childSessions.get(childSessionId);
+      if (!child) {
+        return;
+      }
+      yield* emitChildTaskStarted(context, childSessionId, event);
+
+      if (event.type === "message.updated") {
+        context.messageRoleById.set(event.properties.info.id, event.properties.info.role);
+        return;
+      }
+      if (event.type === "session.status") {
+        const status = event.properties.status.type;
+        yield* emit({
+          ...(yield* buildEventBase({
+            threadId: context.session.threadId,
+            turnId: child.turnId,
+            raw: event,
+          })),
+          type: "task.updated",
+          payload: {
+            taskId: RuntimeTaskId.make(childSessionId),
+            status: status === "idle" ? "idle" : status === "retry" ? "waiting" : "running",
+            description: child.description,
+            title: child.description,
+            taskType: "local_agent",
+            ...(child.role ? { role: child.role } : {}),
+            timelineBypass: true,
+          },
+        });
+        return;
+      }
+      if (event.type !== "message.part.updated") {
+        return;
+      }
+      const turnId = child.turnId;
+      const part = event.properties.part;
+      context.partById.set(part.id, part);
+
+      if (part.type === "text") {
+        if (child.parentCallId === undefined) {
+          return;
+        }
+        const role = messageRoleForPart(context, part) ?? "assistant";
+        const completed = role === "user" || part.time?.end !== undefined;
+        if (!completed || context.completedAssistantPartIds.has(part.id)) {
+          return;
+        }
+        if (part.text.trim().length === 0) {
+          return;
+        }
+        context.completedAssistantPartIds.add(part.id);
+        yield* emit({
+          ...(yield* buildEventBase({
+            threadId: context.session.threadId,
+            turnId,
+            itemId: part.id,
+            parentItemId: child.parentCallId,
+            createdAt: part.time?.end !== undefined ? isoFromEpochMs(part.time.end) : undefined,
+            raw: event,
+          })),
+          type: "item.updated",
+          payload: {
+            itemType: role === "user" ? "user_message" : "assistant_message",
+            status: "completed",
+            detail: part.text,
+          },
+        });
+        return;
+      }
+
+      if (part.type === "tool") {
+        const detail = detailFromToolPart(part);
+        yield* emit({
+          ...(yield* buildEventBase({
+            threadId: context.session.threadId,
+            turnId,
+            raw: event,
+          })),
+          type: "task.progress",
+          payload: {
+            taskId: RuntimeTaskId.make(childSessionId),
+            description: child.description,
+            ...(detail ? { summary: detail } : {}),
+            lastToolName: part.tool,
+            title: child.description,
+            taskType: "local_agent",
+            ...(child.role ? { role: child.role } : {}),
+            timelineBypass: true,
+          },
+        });
+        if (part.state.status !== "completed" && part.state.status !== "error") {
+          return;
+        }
+        if (child.parentCallId === undefined) {
+          return;
+        }
+        yield* emit({
+          ...(yield* buildEventBase({
+            threadId: context.session.threadId,
+            turnId,
+            itemId: part.callID,
+            parentItemId: child.parentCallId,
+            createdAt: toolStateCreatedAt(part),
+            raw: event,
+          })),
+          type: "item.updated",
+          payload: {
+            itemType: toToolLifecycleItemType(part.tool),
+            status: part.state.status === "error" ? "failed" : "completed",
+            title: part.tool,
+            ...(detail ? { detail } : {}),
+            data: {
+              tool: part.tool,
+              state: part.state,
             },
             { decision: "decline", label: "Deny" },
           ],
@@ -2310,6 +2477,21 @@ export function makeOpenCodeAdapter(
             yield* scheduleRequestRelationRetry(context, event);
             return;
           }
+          const childSessionId = event.properties.info.id;
+          if (!context.childSessions.has(childSessionId)) {
+            context.childSessions.set(childSessionId, {
+              parentCallId: undefined,
+              description: event.properties.info.title?.trim() || "OpenCode subagent",
+              role: undefined,
+              turnId: context.activeTurnId,
+              started: false,
+            });
+          }
+          yield* emitChildTaskStarted(context, childSessionId, event);
+          return;
+        }
+        if (typeof payloadSessionId === "string" && context.childSessions.has(payloadSessionId)) {
+          yield* handleChildSessionEvent(context, payloadSessionId, event);
         }
       }
       const isChildRequestEvent =
@@ -2582,6 +2764,37 @@ export function makeOpenCodeAdapter(
           }
 
           if (part.type === "tool") {
+            // Task tool parts expose the spawned child session id in their
+            // state metadata; map it to this tool call so child-session events
+            // can be attributed to the right parent item.
+            const metadataSessionId =
+              part.state.status !== "pending" &&
+              part.state.metadata !== undefined &&
+              typeof part.state.metadata.sessionID === "string"
+                ? part.state.metadata.sessionID
+                : undefined;
+            if (metadataSessionId !== undefined && metadataSessionId.length > 0) {
+              const descriptionInput = part.state.input.description;
+              const roleInput = part.state.input.subagent_type;
+              const description =
+                (typeof descriptionInput === "string" && descriptionInput.trim().length > 0
+                  ? descriptionInput.trim()
+                  : (part.state.status === "running" || part.state.status === "completed") &&
+                    part.state.title?.trim()) || "OpenCode subagent";
+              const role =
+                typeof roleInput === "string" && roleInput.trim().length > 0
+                  ? roleInput.trim()
+                  : undefined;
+              const existingChild = context.childSessions.get(metadataSessionId);
+              context.childSessions.set(metadataSessionId, {
+                parentCallId: part.callID,
+                description,
+                role,
+                turnId: turnId ?? existingChild?.turnId,
+                started: existingChild?.started ?? false,
+              });
+              yield* emitChildTaskStarted(context, metadataSessionId, event);
+            }
             const itemType = toToolLifecycleItemType(part.tool);
             // For command executions OpenCode sets state.title to the command
             // itself; use the tool name so the command stays in the preview,
@@ -2639,6 +2852,30 @@ export function makeOpenCodeAdapter(
               payload,
             };
             yield* emit(runtimeEvent);
+
+            if (
+              metadataSessionId !== undefined &&
+              (part.state.status === "completed" || part.state.status === "error")
+            ) {
+              const child = context.childSessions.get(metadataSessionId);
+              yield* emit({
+                ...(yield* buildEventBase({
+                  threadId: context.session.threadId,
+                  turnId: child?.turnId ?? turnId,
+                  raw: event,
+                })),
+                type: "task.completed",
+                payload: {
+                  taskId: RuntimeTaskId.make(metadataSessionId),
+                  status: part.state.status === "error" ? "failed" : "completed",
+                  ...(detail ? { summary: detail } : {}),
+                  title: child?.description ?? "OpenCode subagent",
+                  taskType: "local_agent",
+                  ...(child?.role ? { role: child.role } : {}),
+                  timelineBypass: true,
+                },
+              });
+            }
 
             // Emit plan update when todowrite tool input is parsed
             if (isOpenCodeTodoTool(part.tool)) {
@@ -3223,6 +3460,9 @@ export function makeOpenCodeAdapter(
           textPartsByMessageId: new Map(),
           messageRoleById: new Map(),
           turnTokenUsage: undefined,
+          childSessions: new Map(),
+          completedAssistantPartIds: new Set(),
+          turns: [],
           activeTurnId: undefined,
           activeAgent: undefined,
           activeVariant: undefined,

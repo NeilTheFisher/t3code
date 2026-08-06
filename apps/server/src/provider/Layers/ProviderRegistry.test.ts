@@ -425,7 +425,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             Effect.succeed(
               makeCodexProbeSnapshot({
                 rateLimits: {
-                  rateLimits: {
+                  snapshot: {
                     primary: { usedPercent: 20, windowDurationMins: 300 },
                     secondary: { usedPercent: 40, windowDurationMins: 10_080 },
                   },
@@ -435,8 +435,20 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           );
 
           assert.deepStrictEqual(status.usageLimits?.windows, [
-            { label: "Session", usedPercent: 20, windowDurationMins: 300 },
-            { label: "Weekly", usedPercent: 40, windowDurationMins: 10_080 },
+            {
+              id: "primary",
+              kind: "session",
+              label: "Session",
+              usedPercent: 20,
+              windowDurationMins: 300,
+            },
+            {
+              id: "secondary",
+              kind: "weekly",
+              label: "Weekly",
+              usedPercent: 40,
+              windowDurationMins: 10_080,
+            },
           ]);
         }),
       );
@@ -2367,8 +2379,11 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
       // A binary path change must rebuild Codex and publish its new probe result.
       it.effect("re-probes when settings change the codex binaryPath", () =>
         Effect.gen(function* () {
-          const firstMissing = `t3code_codex_first_`;
-          const secondMissing = `t3code_codex_second_`;
+          // Use explicit nonexistent paths so this regression test does not
+          // depend on the host PATH size or filesystem latency while the
+          // maintenance resolver searches for a deliberately missing command.
+          const firstMissing = `/t3code-tests/missing/codex-first`;
+          const secondMissing = `/t3code-tests/missing/codex-second`;
           const spawnedCommands: Array<string> = [];
           const secondProbeStarted = yield* Deferred.make<void>();
           const releaseSecondProbe = yield* Deferred.make<void>();
@@ -2725,10 +2740,19 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           const status = yield* checkClaudeProviderStatus(
             defaultClaudeSettings,
             claudeCapabilities(),
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            // The driver owns the cached usage probe; it hands the layer a
+            // resolver like this one, which falls back to the CLI print probe.
+            () => probeClaudeUsageLimits(defaultClaudeSettings),
           );
           assert.strictEqual(status.status, "ready");
           assert.deepStrictEqual(status.usageLimits?.windows, [
             {
+              id: "five_hour",
+              kind: "session",
               label: "Session",
               usedPercent: 30,
               windowDurationMins: 300,
@@ -3053,6 +3077,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           const status = yield* checkClaudeProviderStatus(
             defaultClaudeSettings,
             claudeCapabilities({ tokenSource: "ANTHROPIC_AUTH_TOKEN" }),
+            undefined,
+            undefined,
             undefined,
             undefined,
             () => {
