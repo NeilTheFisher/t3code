@@ -353,7 +353,7 @@ describe("projectActivityPayload", () => {
       },
     ];
     const projected = projectActivityPayload(
-      makeActivity({
+      activity({
         itemType: "file_change",
         data: {
           completedAtMs: 1,

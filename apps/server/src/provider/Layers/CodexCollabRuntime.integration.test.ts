@@ -83,6 +83,54 @@ function buildScript() {
   };
 }
 
+/**
+ * Newer Codex builds can identify a child only through the parent
+ * collabAgentToolCall receiver list. No thread_spawn source or
+ * subAgentActivity registration is guaranteed in this sequence.
+ */
+function buildReceiverOnlyScript() {
+  const childStatus = wireFixture.notifications[3];
+  const childTurnStarted = wireFixture.notifications[7];
+  const childTokenUsage = wireFixture.notifications[18];
+  const childTurnCompleted = wireFixture.notifications[20];
+  assert.isDefined(childStatus);
+  assert.isDefined(childTurnStarted);
+  assert.isDefined(childTokenUsage);
+  assert.isDefined(childTurnCompleted);
+
+  return {
+    rootThreadId: ROOT,
+    notifications: [
+      {
+        method: "item/completed",
+        params: {
+          threadId: ROOT,
+          turnId: "turn-receiver-only",
+          item: {
+            type: "collabAgentToolCall",
+            id: "call_receiver_only_spawn",
+            tool: "spawnAgent",
+            status: "completed",
+            senderThreadId: ROOT,
+            receiverThreadIds: [CHILD_A],
+            prompt: "Inspect the adapter",
+            model: null,
+            reasoningEffort: null,
+            agentsStates: {
+              [CHILD_A]: { status: "pendingInit", message: null },
+            },
+          },
+          completedAtMs: 1,
+        },
+      },
+      childStatus,
+      childTurnStarted,
+      childTokenUsage,
+      childTurnCompleted,
+    ],
+  };
+}
+
 function capturedStartedActivity(childId = CHILD_A) {
   const captured = wireFixture.notifications.find((entry) => {
     const item = (entry.params as { item?: { type?: string; kind?: string } }).item;
@@ -166,71 +214,59 @@ const peerPath = NodePath.join(
 );
 
 describe("CodexSessionRuntime collab integration", () => {
-  it.effect("looks up child model metadata once after activity registration", () =>
+  it.effect("registers receiver-only children while retaining the parent spawn event", () =>
     Effect.gen(function* () {
-      const script = {
-        rootThreadId: ROOT,
-        recordRequests: true,
-        notifications: [
-          capturedStartedActivity(),
-          capturedStartedActivity(),
-          {
-            ...capturedStartedActivity(CHILD_B),
-            params: {
-              ...capturedStartedActivity(CHILD_B).params,
-              item: { ...capturedStartedActivity(CHILD_B).params.item, kind: "interacted" },
-            },
-          },
-          { method: "thread/closed", params: { threadId: CHILD_B } },
-          capturedSpawnedThread(ROOT),
-        ],
-        childResumeSnapshots: {
-          [CHILD_A]: { model: "gpt-5.6-luna", reasoningEffort: "low" },
-        },
-      };
       // @effect-diagnostics-next-line preferSchemaOverJson:off
-      NodeFS.writeFileSync(scriptPath, JSON.stringify(script), "utf8");
-      NodeFS.rmSync(`${scriptPath}.requests`, { force: true });
+      NodeFS.writeFileSync(scriptPath, JSON.stringify(buildReceiverOnlyScript()), "utf8");
       yield* Effect.addFinalizer(() =>
-        Effect.sync(() => {
-          NodeFS.rmSync(scriptPath, { force: true });
-          NodeFS.rmSync(`${scriptPath}.requests`, { force: true });
-        }),
+        Effect.sync(() => NodeFS.rmSync(scriptPath, { force: true })),
       );
 
       const runtime = yield* makeCodexSessionRuntime({
-        threadId: ThreadId.make("thread-collab-model-activity"),
+        threadId: ThreadId.make("thread-collab-receiver-only"),
         binaryPath: peerPath,
         cwd: NodeOS.tmpdir(),
         runtimeMode: "full-access",
         environment: { ...process.env, T3_CODEX_COLLAB_SCRIPT: scriptPath },
       });
-      const metadataFiber = yield* runtime.events.pipe(
-        Stream.filter(
-          (event) =>
-            event.method === "collabAgent/metadataUpdated" &&
-            (event.payload as { agentThreadId?: string }).agentThreadId === CHILD_A,
-        ),
-        Stream.take(1),
+      const eventsFiber = yield* runtime.events.pipe(
+        Stream.takeUntil((event) => event.method === "turn/completed"),
         Stream.runCollect,
         Effect.forkScoped,
       );
 
-      const session = yield* runtime.start();
-      assert.equal(session.model, "gpt-5.6-sol");
-      yield* runtime.sendTurn({ input: "start one child" });
-      const metadataEvents = Array.from(yield* Fiber.join(metadataFiber));
-      assert.deepInclude(metadataEvents[0]?.payload, {
-        agentThreadId: CHILD_A,
-        model: "gpt-5.6-luna",
-        effort: "low",
-      });
-      assert.deepEqual(readRecordedRequests(), [
-        {
-          method: "thread/resume",
-          params: { threadId: CHILD_A, excludeTurns: true },
-        },
-      ]);
+      yield* runtime.start();
+      yield* runtime.sendTurn({ input: "spawn one child" });
+
+      const events = Array.from(yield* Fiber.join(eventsFiber));
+      const childMethods = events
+        .filter(
+          (event) =>
+            (event.payload as { agentThreadId?: string } | undefined)?.agentThreadId === CHILD_A,
+        )
+        .map((event) => event.method);
+      assert.include(childMethods, "collabAgent/started");
+      assert.include(childMethods, "collabAgent/turnStarted");
+      assert.include(childMethods, "collabAgent/tokenUsage");
+      assert.include(childMethods, "collabAgent/turnCompleted");
+      const started = events.find(
+        (event) =>
+          event.method === "collabAgent/started" &&
+          (event.payload as { agentThreadId?: string }).agentThreadId === CHILD_A,
+      );
+      assert.equal(
+        (started?.payload as { nickname?: string } | undefined)?.nickname,
+        "Inspect the adapter",
+      );
+      assert.isTrue(
+        events.some(
+          (event) =>
+            event.method === "item/completed" &&
+            (event.payload as { item?: { id?: string } } | undefined)?.item?.id ===
+              "call_receiver_only_spawn",
+        ),
+        "the parent spawn tool call remains in the parent event stream",
+      );
 
       yield* runtime.close;
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
