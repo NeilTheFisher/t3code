@@ -36,7 +36,7 @@ import {
 import { resolveClaudeSdkExecutablePath } from "../Drivers/ClaudeExecutable.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
 import { discoverClaudeSkills } from "../Drivers/ClaudeSkills.ts";
-import { makeUnavailableUsageLimits } from "../providerUsageLimits.ts";
+import { makeUnavailableUsageLimits, parseClaudeUsageLimitsJson } from "../providerUsageLimits.ts";
 import {
   type ClaudeScopedLimitNames,
   claudeUsageResponseToLimits,
@@ -48,7 +48,6 @@ import {
   formatClaudeVersionUpgradeMessage,
   resolveClaudeModelsForVersion,
 } from "../ClaudeModelCatalog.ts";
-import { parseClaudeUsageLimitsJson } from "../providerUsageLimits.ts";
 
 const DEFAULT_CLAUDE_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [],
@@ -172,7 +171,6 @@ function apiProviderAuthMetadata(
 // account info. The previous 8s budget expired mid-init, so the probe returned
 // `undefined` and left the provider unverified and unselectable in the picker.
 const CAPABILITIES_PROBE_TIMEOUT_MS = 25_000;
-const USAGE_PROBE_TIMEOUT_MS = 4_000;
 
 /**
  * Keep workspace-scoped command discovery intact while isolating the periodic
@@ -422,6 +420,13 @@ const runClaudeCommand = Effect.fn("runClaudeCommand")(function* (
   return yield* spawnAndCollect(claudeSettings.binaryPath, command);
 });
 
+const USAGE_PROBE_TIMEOUT_MS = 4_000;
+
+/**
+ * Fork: fallback Claude usage probe. Runs `claude --print /usage` and parses
+ * the human output when the SDK's `get_usage` read cannot answer (older CLIs,
+ * SDK transport failures).
+ */
 export const probeClaudeUsageLimits = Effect.fn("probeClaudeUsageLimits")(function* (
   claudeSettings: ClaudeSettings,
   environment?: NodeJS.ProcessEnv,
@@ -474,6 +479,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   modelCatalog: ClaudeModelCatalog = BUNDLED_CLAUDE_MODEL_CATALOG,
   /** Shared with the adapter so turn events reuse the scoped-bucket names this probe saw. */
   scopedLimitNames?: Ref.Ref<ClaudeScopedLimitNames>,
+  /** Fork: cached per-account usage probe supplied by the driver; skips the print fallback. */
   resolveUsage?: (
     accountIdentity: string | undefined,
   ) => Effect.Effect<ServerProviderUsageLimits | undefined>,
@@ -614,18 +620,18 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   const usageLimits =
     authMetadata?.type === "apiKey" || authMetadata?.type === "bedrock"
       ? undefined
-      : !capabilities.usage
-        ? makeUnavailableUsageLimits({ checkedAt, reason: "probeFailed" })
-        : scopedLimitNames
-          ? yield* recordClaudeUsageResponse(scopedLimitNames, {
-              response: capabilities.usage,
-              checkedAt,
-            })
-          : resolveUsage
-            ? yield* resolveUsage(capabilities.email?.trim() || undefined).pipe(
-                Effect.catchCause(() => Effect.void),
-              )
-            : yield* probeClaudeUsageLimits(claudeSettings, resolvedEnvironment, cwd);
+      : resolveUsage
+        ? yield* resolveUsage(capabilities.email?.trim() || undefined).pipe(
+            Effect.catchCause(() => Effect.succeed(undefined)),
+          )
+        : !capabilities.usage
+          ? makeUnavailableUsageLimits({ checkedAt, reason: "probeFailed" })
+          : scopedLimitNames
+            ? yield* recordClaudeUsageResponse(scopedLimitNames, {
+                response: capabilities.usage,
+                checkedAt,
+              })
+            : claudeUsageResponseToLimits({ response: capabilities.usage, checkedAt }).limits;
   return buildServerProvider({
     presentation: CLAUDE_PRESENTATION,
     enabled: claudeSettings.enabled,
@@ -642,8 +648,8 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
         ...(capabilities.email ? { email: capabilities.email } : {}),
         ...(authMetadata ? authMetadata : {}),
       },
-      ...(usageLimits ? { usageLimits } : {}),
       ...(versionUpgradeMessage ? { message: versionUpgradeMessage } : {}),
+      ...(usageLimits !== undefined ? { usageLimits } : {}),
     },
   });
 });
