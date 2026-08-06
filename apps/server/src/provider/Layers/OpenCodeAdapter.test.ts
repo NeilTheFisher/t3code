@@ -954,6 +954,148 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
     }),
   );
 
+  it.effect("emits live task lifecycle for a running child session", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-live-subagent");
+      runtimeMock.state.subscribedEvents = [
+        {
+          type: "message.part.updated",
+          properties: {
+            sessionID: "http://127.0.0.1:9999/session",
+            part: {
+              id: "part-task-live",
+              sessionID: "http://127.0.0.1:9999/session",
+              messageID: "msg-main-live",
+              type: "tool",
+              callID: "call-task-live",
+              tool: "task",
+              state: {
+                status: "running",
+                input: {
+                  description: "Investigate the adapter",
+                  subagent_type: "explore",
+                },
+                title: "Investigate the adapter",
+                metadata: { sessionID: "child-session-live" },
+                time: { start: 1 },
+              },
+            },
+          },
+        },
+        {
+          type: "session.created",
+          properties: {
+            info: {
+              id: "child-session-live",
+              parentID: "http://127.0.0.1:9999/session",
+              title: "Investigate the adapter",
+            },
+          },
+        },
+        {
+          type: "message.part.updated",
+          properties: {
+            sessionID: "child-session-live",
+            part: {
+              id: "part-child-live-tool",
+              sessionID: "child-session-live",
+              messageID: "msg-child-live",
+              type: "tool",
+              callID: "child-call-live",
+              tool: "grep",
+              state: {
+                status: "running",
+                input: { pattern: "subagent" },
+                title: "Search source",
+                metadata: {},
+                time: { start: 2 },
+              },
+            },
+          },
+        },
+        {
+          type: "session.status",
+          properties: {
+            sessionID: "child-session-live",
+            status: { type: "idle" },
+          },
+        },
+        {
+          type: "message.part.updated",
+          properties: {
+            sessionID: "http://127.0.0.1:9999/session",
+            part: {
+              id: "part-task-live",
+              sessionID: "http://127.0.0.1:9999/session",
+              messageID: "msg-main-live",
+              type: "tool",
+              callID: "call-task-live",
+              tool: "task",
+              state: {
+                status: "completed",
+                input: {
+                  description: "Investigate the adapter",
+                  subagent_type: "explore",
+                },
+                output: "Investigation complete",
+                title: "Investigate the adapter",
+                metadata: { sessionID: "child-session-live" },
+                time: { start: 1, end: 3 },
+              },
+            },
+          },
+        },
+      ];
+
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter(
+          (event) =>
+            event.threadId === threadId &&
+            (event.type === "task.started" ||
+              event.type === "task.progress" ||
+              event.type === "task.updated" ||
+              event.type === "task.completed"),
+        ),
+        Stream.take(4),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      const events = Array.from(yield* Fiber.join(eventsFiber).pipe(Effect.timeout("1 second")));
+      const [started, progress, idle, completed] = events;
+      NodeAssert.equal(started?.type, "task.started");
+      if (started?.type === "task.started") {
+        NodeAssert.equal(String(started.payload.taskId), "child-session-live");
+        NodeAssert.equal(started.payload.description, "Investigate the adapter");
+        NodeAssert.equal(started.payload.taskType, "local_agent");
+        NodeAssert.equal(started.payload.role, "explore");
+        NodeAssert.equal(started.payload.timelineBypass, true);
+      }
+      NodeAssert.equal(progress?.type, "task.progress");
+      if (progress?.type === "task.progress") {
+        NodeAssert.equal(String(progress.payload.taskId), "child-session-live");
+        NodeAssert.equal(progress.payload.lastToolName, "grep");
+        NodeAssert.equal(progress.payload.timelineBypass, true);
+      }
+      NodeAssert.equal(idle?.type, "task.updated");
+      if (idle?.type === "task.updated") {
+        NodeAssert.equal(idle.payload.status, "idle");
+      }
+      NodeAssert.equal(completed?.type, "task.completed");
+      if (completed?.type === "task.completed") {
+        NodeAssert.equal(completed.payload.status, "completed");
+        NodeAssert.equal(completed.payload.summary, "Investigation complete");
+      }
+    }),
+  );
+
   it.effect("writes provider-native observability records using the session thread id", () =>
     Effect.gen(function* () {
       const nativeEvents: Array<{

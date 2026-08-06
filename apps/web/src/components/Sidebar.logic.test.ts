@@ -28,6 +28,7 @@ import {
   sortSettledThreadsForSidebarV2,
   sortThreadsForSidebarV2,
   sortProjectsForSidebar,
+  sortScopedProjectsForSidebar,
   threadNeedsAttention,
   THREAD_JUMP_HINT_SHOW_DELAY_MS,
 } from "./Sidebar.logic";

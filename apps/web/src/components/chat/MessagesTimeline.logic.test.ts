@@ -6,7 +6,47 @@ import {
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
   resolveAssistantMessagePlayState,
+  resolveOlderHistoryAutoLoad,
 } from "./MessagesTimeline.logic";
+
+describe("resolveOlderHistoryAutoLoad", () => {
+  it("dispatches only once while the viewport remains at the top", () => {
+    const first = resolveOlderHistoryAutoLoad({
+      isAtStart: true,
+      hasMoreOlder: true,
+      loadingOlder: false,
+      requestedAtStart: false,
+    });
+    expect(first).toEqual({ requestedAtStart: true, shouldLoad: true });
+    expect(
+      resolveOlderHistoryAutoLoad({
+        isAtStart: true,
+        hasMoreOlder: true,
+        loadingOlder: false,
+        requestedAtStart: first.requestedAtStart,
+      }),
+    ).toEqual({ requestedAtStart: true, shouldLoad: false });
+  });
+
+  it("rearms after leaving the top without resetting on unavailable list state", () => {
+    expect(
+      resolveOlderHistoryAutoLoad({
+        isAtStart: undefined,
+        hasMoreOlder: true,
+        loadingOlder: false,
+        requestedAtStart: true,
+      }),
+    ).toEqual({ requestedAtStart: true, shouldLoad: false });
+    expect(
+      resolveOlderHistoryAutoLoad({
+        isAtStart: false,
+        hasMoreOlder: true,
+        loadingOlder: false,
+        requestedAtStart: true,
+      }),
+    ).toEqual({ requestedAtStart: false, shouldLoad: false });
+  });
+});
 
 describe("computeMessageDurationStart", () => {
   it("returns message createdAt when there is no preceding user message", () => {

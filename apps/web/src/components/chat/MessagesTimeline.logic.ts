@@ -22,6 +22,32 @@ export interface TimelineEndState {
   readonly isNearEnd?: boolean;
 }
 
+export interface OlderHistoryAutoLoadInput {
+  readonly isAtStart: boolean | undefined;
+  readonly hasMoreOlder: boolean;
+  readonly loadingOlder: boolean;
+  readonly requestedAtStart: boolean;
+}
+
+/** Permit one automatic history request per visit to the top of the list. */
+export function resolveOlderHistoryAutoLoad(input: OlderHistoryAutoLoadInput): {
+  readonly requestedAtStart: boolean;
+  readonly shouldLoad: boolean;
+} {
+  if (input.isAtStart === false) {
+    return { requestedAtStart: false, shouldLoad: false };
+  }
+  if (
+    input.isAtStart !== true ||
+    input.requestedAtStart ||
+    !input.hasMoreOlder ||
+    input.loadingOlder
+  ) {
+    return { requestedAtStart: input.requestedAtStart, shouldLoad: false };
+  }
+  return { requestedAtStart: true, shouldLoad: true };
+}
+
 export function resolveTimelineIsAtEnd(state: TimelineEndState | undefined): boolean | undefined {
   return state?.isNearEnd ?? state?.isAtEnd;
 }

@@ -70,10 +70,116 @@ function buildScript() {
   };
 }
 
+/**
+ * Newer Codex builds can identify a child only through the parent
+ * collabAgentToolCall receiver list. No thread_spawn source or
+ * subAgentActivity registration is guaranteed in this sequence.
+ */
+function buildReceiverOnlyScript() {
+  const childStatus = wireFixture.notifications[3];
+  const childTurnStarted = wireFixture.notifications[7];
+  const childTokenUsage = wireFixture.notifications[18];
+  const childTurnCompleted = wireFixture.notifications[20];
+  assert.isDefined(childStatus);
+  assert.isDefined(childTurnStarted);
+  assert.isDefined(childTokenUsage);
+  assert.isDefined(childTurnCompleted);
+
+  return {
+    rootThreadId: ROOT,
+    notifications: [
+      {
+        method: "item/completed",
+        params: {
+          threadId: ROOT,
+          turnId: "turn-receiver-only",
+          item: {
+            type: "collabAgentToolCall",
+            id: "call_receiver_only_spawn",
+            tool: "spawnAgent",
+            status: "completed",
+            senderThreadId: ROOT,
+            receiverThreadIds: [CHILD_A],
+            prompt: "Inspect the adapter",
+            model: null,
+            reasoningEffort: null,
+            agentsStates: {
+              [CHILD_A]: { status: "pendingInit", message: null },
+            },
+          },
+          completedAtMs: 1,
+        },
+      },
+      childStatus,
+      childTurnStarted,
+      childTokenUsage,
+      childTurnCompleted,
+    ],
+  };
+}
+
 const scriptPath = NodePath.join(import.meta.dirname, "../testFixtures/.collab-script.json");
 const peerPath = NodePath.join(import.meta.dirname, "../testFixtures/codexCollabMockPeer.sh");
 
 describe("CodexSessionRuntime collab integration", () => {
+  it.effect("registers receiver-only children while retaining the parent spawn event", () =>
+    Effect.gen(function* () {
+      // @effect-diagnostics-next-line preferSchemaOverJson:off
+      NodeFS.writeFileSync(scriptPath, JSON.stringify(buildReceiverOnlyScript()), "utf8");
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => NodeFS.rmSync(scriptPath, { force: true })),
+      );
+
+      const runtime = yield* makeCodexSessionRuntime({
+        threadId: ThreadId.make("thread-collab-receiver-only"),
+        binaryPath: peerPath,
+        cwd: "/tmp",
+        runtimeMode: "full-access",
+        environment: { ...process.env, T3_CODEX_COLLAB_SCRIPT: scriptPath },
+      });
+      const eventsFiber = yield* runtime.events.pipe(
+        Stream.takeUntil((event) => event.method === "turn/completed"),
+        Stream.runCollect,
+        Effect.forkScoped,
+      );
+
+      yield* runtime.start();
+      yield* runtime.sendTurn({ input: "spawn one child" });
+
+      const events = Array.from(yield* Fiber.join(eventsFiber));
+      const childMethods = events
+        .filter(
+          (event) =>
+            (event.payload as { agentThreadId?: string } | undefined)?.agentThreadId === CHILD_A,
+        )
+        .map((event) => event.method);
+      assert.include(childMethods, "collabAgent/started");
+      assert.include(childMethods, "collabAgent/turnStarted");
+      assert.include(childMethods, "collabAgent/tokenUsage");
+      assert.include(childMethods, "collabAgent/turnCompleted");
+      const started = events.find(
+        (event) =>
+          event.method === "collabAgent/started" &&
+          (event.payload as { agentThreadId?: string }).agentThreadId === CHILD_A,
+      );
+      assert.equal(
+        (started?.payload as { nickname?: string } | undefined)?.nickname,
+        "Inspect the adapter",
+      );
+      assert.isTrue(
+        events.some(
+          (event) =>
+            event.method === "item/completed" &&
+            (event.payload as { item?: { id?: string } } | undefined)?.item?.id ===
+              "call_receiver_only_spawn",
+        ),
+        "the parent spawn tool call remains in the parent event stream",
+      );
+
+      yield* runtime.close;
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("replays the captured fan-out into synthetic agent events without child leaks", () =>
     Effect.gen(function* () {
       // @effect-diagnostics-next-line preferSchemaOverJson:off

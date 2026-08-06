@@ -298,11 +298,15 @@ it.effect("coalesces concurrent ref pages into one repository snapshot", () =>
           args.includes("refs/heads") &&
           args.includes("refs/remotes"),
       );
-      const worktreeScans = firstSnapshotCommands.filter(
-        (args) => args.includes("worktree") && args.includes("--porcelain"),
+      const worktreeNullScans = firstSnapshotCommands.filter(
+        (args) => args.includes("worktree") && args.includes("--porcelain") && args.includes("-z"),
+      );
+      const worktreeFallbackScans = firstSnapshotCommands.filter(
+        (args) => args.includes("worktree") && args.includes("--porcelain") && !args.includes("-z"),
       );
       assert.equal(snapshotRefScans.length, 1);
-      assert.equal(worktreeScans.length, 1);
+      assert.equal(worktreeNullScans.length, 1);
+      assert.isAtMost(worktreeFallbackScans.length, 1);
 
       yield* driver.createRef({ cwd, refName: "feature/cache-invalidation" });
       const refreshed = yield* driver.listRefs({ cwd, limit: 100 });

@@ -605,17 +605,16 @@ function readRouteFields(notification: CodexServerNotification): {
  * full app-server threads: identity arrives on `thread/started` with
  * source.subAgent.thread_spawn, lifecycle on `subAgentActivity` items and the
  * child thread's own turn/status/tokenUsage notifications. The runtime
- * registers children from those explicit signals, intercepts their
+ * registers children from those signals or a collab tool call's receiver
+ * list, intercepts their
  * notifications before parent-timeline mapping, and re-emits them as
  * synthetic `collabAgent/*` provider events the adapter turns into task.*
  * runtime events (timelineBypass keeps them out of the parent chat).
  *
- * WIP, probe-gated: registration is deliberately explicit-signals-only. The
- * spec's "provisionally treat unknown foreign thread ids as v2 children" rule
- * needs a live wire capture of the packaged binary before it lands — blind
- * capture risks eating unrelated traffic. Until then a child whose first
- * notification precedes registration passes through as today (no regression
- * vs main, which passes everything through).
+ * A receiver id is safe registration evidence because the typed
+ * collabAgentToolCall explicitly identifies its child threads. Arbitrary
+ * foreign thread ids remain untrusted and follow the conservative suppression
+ * path below.
  */
 interface CollabChildAgentState {
   readonly agentThreadId: string;
@@ -974,6 +973,68 @@ export const makeCodexSessionRuntime = (
       );
 
     /**
+     * Register children named by a parent collab tool call. Some Codex builds
+     * emit no thread_spawn source or subAgentActivity item, but still include
+     * the child ids in spawnAgent.receiverThreadIds. Registering here lets the
+     * immediately-following child notifications feed the Agents pane while the
+     * parent tool notification continues through the ordinary work log.
+     */
+    const registerCollabReceiverChildren = Effect.fn("registerCollabReceiverChildren")(function* (
+      notification: CodexServerNotification,
+      spawnTurnId: TurnId | undefined,
+    ) {
+      if (
+        (notification.method !== "item/started" && notification.method !== "item/completed") ||
+        notification.params.item.type !== "collabAgentToolCall"
+      ) {
+        return;
+      }
+      const item = notification.params.item;
+      if (item.receiverThreadIds.length === 0) {
+        return;
+      }
+      const promptTitle = item.prompt?.trim().slice(0, 160) || undefined;
+      const rootProviderThreadId = currentProviderThreadId(yield* Ref.get(sessionRef));
+      const newlyRegistered: CollabChildAgentState[] = [];
+      yield* Ref.update(collabChildAgentsRef, (current) => {
+        const next = new Map(current);
+        for (const agentThreadId of item.receiverThreadIds) {
+          if (agentThreadId === rootProviderThreadId || next.has(agentThreadId)) {
+            continue;
+          }
+          const state: CollabChildAgentState = {
+            agentThreadId,
+            nickname: promptTitle,
+            role: undefined,
+            agentPath: undefined,
+            depth: undefined,
+            parentThreadId: item.senderThreadId,
+            spawnTurnId,
+          };
+          next.set(agentThreadId, state);
+          newlyRegistered.push(state);
+        }
+        return next;
+      });
+      yield* Effect.forEach(
+        newlyRegistered,
+        (state) =>
+          emitEvent({
+            kind: "notification",
+            threadId: options.threadId,
+            ...(state.spawnTurnId ? { turnId: state.spawnTurnId } : {}),
+            method: "collabAgent/started",
+            payload: {
+              agentThreadId: state.agentThreadId,
+              ...(state.nickname ? { nickname: state.nickname } : {}),
+              ...(state.parentThreadId ? { parentThreadId: state.parentThreadId } : {}),
+            },
+          }),
+        { discard: true },
+      );
+    });
+
+    /**
      * Registers v2 collab children and re-emits their notifications as
      * synthetic `collabAgent/*` events for the adapter's task.* synthesis.
      * Returns true when the notification was fully handled (must not reach
@@ -1260,6 +1321,10 @@ export const makeCodexSessionRuntime = (
         })();
 
         rememberCollabReceiverTurns(collabReceiverTurns, notification, route.turnId);
+        yield* registerCollabReceiverChildren(
+          notification,
+          childParentTurnId ?? route.turnId ?? (yield* Ref.get(sessionRef)).activeTurnId,
+        );
         // Interception FIRST: a registered v2 child is usually also in the
         // receiver-turn map (collabAgentToolCall.receiverThreadIds), and the
         // legacy suppressor below would drop its lifecycle before it could

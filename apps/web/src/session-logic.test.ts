@@ -2007,6 +2007,47 @@ describe("deriveWorkLogEntries quiet-timeline guarantee", () => {
     expect(entries[0]!.agentSpawn?.agentTaskIds).toEqual(["child-1", "child-2"]);
   });
 
+  it("retains the raw Codex SpawnAgent tool row alongside the Agents CTA", () => {
+    const entries = deriveWorkLogEntries([
+      makeActivity({
+        kind: "tool.completed",
+        summary: "SpawnAgent",
+        tone: "tool",
+        payload: {
+          itemType: "collab_agent_tool_call",
+          title: "SpawnAgent",
+          data: {
+            item: {
+              type: "collabAgentToolCall",
+              tool: "spawnAgent",
+              prompt: "Investigate the adapter",
+              status: "completed",
+            },
+          },
+        },
+        turnId: "turn-spawn",
+        sequence: 1,
+      }),
+      makeActivity({
+        kind: "task.started",
+        summary: "Agent started",
+        tone: "info",
+        payload: {
+          taskId: "child-1",
+          title: "explorer",
+          role: "explorer",
+          timelineBypass: true,
+        },
+        turnId: "turn-spawn",
+        sequence: 2,
+      }),
+    ]);
+
+    expect(entries).toHaveLength(2);
+    expect(entries[0]!.itemType).toBe("collab_agent_tool_call");
+    expect(entries[1]!.agentSpawn?.agentTaskIds).toEqual(["child-1"]);
+  });
+
   it("timelineBypass non-agent rows (background shells) stay suppressed", () => {
     const entries = deriveWorkLogEntries([
       makeActivity({
