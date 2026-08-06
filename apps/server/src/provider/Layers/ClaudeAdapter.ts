@@ -3099,6 +3099,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     const assistantParentToolUseId = (message as { parent_tool_use_id?: string | null })
       .parent_tool_use_id;
     if (assistantParentToolUseId !== null && assistantParentToolUseId !== undefined) {
+      // Preserve the complete child snapshot as nested subagent activity. It
+      // remains out of the parent transcript because emitSubagentItem stamps
+      // parentItemId and ingestion projects it as subagent.item.
+      yield* handleSubagentAssistantMessage(context, assistantParentToolUseId, message);
       // The snapshot's message.model is the authoritative API model the
       // subagent actually ran on — refine the seeded launch-time value.
       const owningTaskId = agentIdForParentToolUse(context.taskAgents, assistantParentToolUseId);

@@ -1733,8 +1733,11 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
       //
       it.effect("re-probes when settings change the codex binaryPath", () =>
         Effect.gen(function* () {
-          const firstMissing = `t3code_codex_first_`;
-          const secondMissing = `t3code_codex_second_`;
+          // Use explicit nonexistent paths so this regression test does not
+          // depend on the host PATH size or filesystem latency while the
+          // maintenance resolver searches for a deliberately missing command.
+          const firstMissing = `/t3code-tests/missing/codex-first`;
+          const secondMissing = `/t3code-tests/missing/codex-second`;
           const spawnedCommands: Array<string> = [];
           const serverSettings = yield* makeMutableServerSettingsService(
             decodeServerSettings(

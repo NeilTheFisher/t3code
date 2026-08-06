@@ -242,7 +242,7 @@ function paginateBranches(input: {
   };
 }
 
-function parseWorktreeBranchPaths(stdout: string): ReadonlyMap<string, string> {
+function parseNullSeparatedWorktreeBranchPaths(stdout: string): ReadonlyMap<string, string> {
   const worktreePaths = new Map<string, string>();
   let currentPath: string | null = null;
   let currentBranch: string | null = null;
@@ -269,6 +269,38 @@ function parseWorktreeBranchPaths(stdout: string): ReadonlyMap<string, string> {
     }
   }
   flush();
+
+  return worktreePaths;
+}
+
+/**
+ * Git versions before `worktree list -z` preserve literal newlines in the
+ * porcelain path field. Parse records structurally so those paths still round
+ * trip instead of treating each path line as a separate field.
+ */
+function parseLineSeparatedWorktreeBranchPaths(stdout: string): ReadonlyMap<string, string> {
+  const worktreePaths = new Map<string, string>();
+  const worktreePrefix = "worktree ";
+  const headMarker = "\nHEAD ";
+  const branchMarker = "\nbranch refs/heads/";
+
+  for (const record of stdout.split("\n\n")) {
+    if (!record.startsWith(worktreePrefix) || record.includes("\nprunable")) {
+      continue;
+    }
+    const branchIndex = record.lastIndexOf(branchMarker);
+    const headIndex = branchIndex < 0 ? -1 : record.lastIndexOf(headMarker, branchIndex);
+    if (headIndex < 0 || branchIndex < 0) {
+      continue;
+    }
+    const branchStart = branchIndex + branchMarker.length;
+    const branchEnd = record.indexOf("\n", branchStart);
+    const branch = record.slice(branchStart, branchEnd < 0 ? undefined : branchEnd);
+    const worktreePath = record.slice(worktreePrefix.length, headIndex);
+    if (branch.length > 0 && worktreePath.length > 0) {
+      worktreePaths.set(branch, worktreePath);
+    }
+  }
 
   return worktreePaths;
 }
@@ -2542,50 +2574,65 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     const fetchCwd =
       path.basename(gitCommonDir) === ".git" ? path.dirname(gitCommonDir) : gitCommonDir;
     const gitDirArgs = ["--git-dir", gitCommonDir] as const;
-    const [refsResult, defaultRefResult, worktreeListResult, remoteNamesResult] = yield* Effect.all(
-      [
-        executeGitWithStableDiagnostics(
-          "GitVcsDriver.listRefs.snapshotRefs",
-          fetchCwd,
-          [
-            ...gitDirArgs,
-            "for-each-ref",
-            "--format=%(refname)%09%(committerdate:unix)%09%(symref)",
-            "refs/heads",
-            "refs/remotes",
-          ],
-          {
-            timeoutMs: 30_000,
-            maxOutputBytes: 16 * 1024 * 1024,
-            fallbackErrorDetail: "Git ref snapshot enumeration failed.",
-          },
-        ),
-        executeGit(
-          "GitVcsDriver.listRefs.defaultRef",
-          fetchCwd,
-          [...gitDirArgs, "symbolic-ref", "refs/remotes/origin/HEAD"],
-          {
+    const [refsResult, defaultRefResult, worktreeListNullResult, remoteNamesResult] =
+      yield* Effect.all(
+        [
+          executeGitWithStableDiagnostics(
+            "GitVcsDriver.listRefs.snapshotRefs",
+            fetchCwd,
+            [
+              ...gitDirArgs,
+              "for-each-ref",
+              "--format=%(refname)%09%(committerdate:unix)%09%(symref)",
+              "refs/heads",
+              "refs/remotes",
+            ],
+            {
+              timeoutMs: 30_000,
+              maxOutputBytes: 16 * 1024 * 1024,
+              fallbackErrorDetail: "Git ref snapshot enumeration failed.",
+            },
+          ),
+          executeGit(
+            "GitVcsDriver.listRefs.defaultRef",
+            fetchCwd,
+            [...gitDirArgs, "symbolic-ref", "refs/remotes/origin/HEAD"],
+            {
+              timeoutMs: 5_000,
+              allowNonZeroExit: true,
+            },
+          ),
+          executeGit(
+            "GitVcsDriver.listRefs.worktreeList",
+            fetchCwd,
+            [...gitDirArgs, "worktree", "list", "--porcelain", "-z"],
+            {
+              timeoutMs: 30_000,
+              allowNonZeroExit: true,
+              maxOutputBytes: 16 * 1024 * 1024,
+            },
+          ),
+          executeGit("GitVcsDriver.listRefs.remoteNames", fetchCwd, [...gitDirArgs, "remote"], {
             timeoutMs: 5_000,
             allowNonZeroExit: true,
-          },
-        ),
-        executeGit(
-          "GitVcsDriver.listRefs.worktreeList",
+          }),
+        ],
+        { concurrency: 2 },
+      );
+
+    const worktreeListSupportsNulls = worktreeListNullResult.exitCode === 0;
+    const worktreeListResult = worktreeListSupportsNulls
+      ? worktreeListNullResult
+      : yield* executeGit(
+          "GitVcsDriver.listRefs.worktreeListFallback",
           fetchCwd,
-          [...gitDirArgs, "worktree", "list", "--porcelain", "-z"],
+          [...gitDirArgs, "worktree", "list", "--porcelain"],
           {
             timeoutMs: 30_000,
             allowNonZeroExit: true,
             maxOutputBytes: 16 * 1024 * 1024,
           },
-        ),
-        executeGit("GitVcsDriver.listRefs.remoteNames", fetchCwd, [...gitDirArgs, "remote"], {
-          timeoutMs: 5_000,
-          allowNonZeroExit: true,
-        }),
-      ],
-      { concurrency: 2 },
-    );
+        );
 
     const remoteNames =
       remoteNamesResult.exitCode === 0 ? parseRemoteNames(remoteNamesResult.stdout) : [];
@@ -2600,7 +2647,11 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         : null;
     const parsedWorktreeEntries =
       worktreeListResult.exitCode === 0
-        ? [...parseWorktreeBranchPaths(worktreeListResult.stdout)].map(
+        ? [
+            ...(worktreeListSupportsNulls
+              ? parseNullSeparatedWorktreeBranchPaths(worktreeListResult.stdout)
+              : parseLineSeparatedWorktreeBranchPaths(worktreeListResult.stdout)),
+          ].map(
             ([branchName, worktreePath]) =>
               [branchName, path.normalize(path.resolve(worktreePath))] as const,
           )
