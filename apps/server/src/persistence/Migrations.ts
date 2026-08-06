@@ -97,8 +97,12 @@ export const migrationEntries = [
   [33, "ProjectionThreadsSettled", Migration0033],
   [34, "ProjectionThreadsSnoozed", Migration0034],
   [35, "ProjectionThreadTitleRegeneration", Migration0035],
-  [36, "ProjectionThreadsPinned", Migration0036],
-  [37, "ProjectionThreadPendingBackgroundTasks", Migration0037],
+  // Migration 36 shipped in the personal fork before upstream assigned the
+  // same id to pinned threads. Keep that id for existing fork databases and
+  // reserve 37 because an earlier rebase build briefly used it for the same
+  // fork migration. Run upstream's idempotent pinned-thread migration at 38.
+  [36, "ProjectionThreadPendingBackgroundTasks", Migration0037],
+  [38, "ProjectionThreadsPinned", Migration0036],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

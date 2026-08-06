@@ -77,6 +77,7 @@ export interface AppModelOption {
   isCustom: boolean;
   isDefault?: boolean;
   isLegacy?: boolean;
+  contextWindowTokens?: number;
 }
 
 function toAppModelOption(model: ServerProvider["models"][number]): AppModelOption {
@@ -89,6 +90,9 @@ function toAppModelOption(model: ServerProvider["models"][number]): AppModelOpti
   if (model.subProvider) option.subProvider = model.subProvider;
   if (model.isDefault) option.isDefault = true;
   if (model.isLegacy) option.isLegacy = true;
+  if (model.contextWindowTokens !== undefined) {
+    option.contextWindowTokens = model.contextWindowTokens;
+  }
   return option;
 }
 
