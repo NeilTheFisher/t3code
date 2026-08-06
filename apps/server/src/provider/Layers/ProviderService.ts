@@ -945,6 +945,24 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     },
   );
 
+  const compactConversation: ProviderServiceMethod<"compactConversation"> = Effect.fn(
+    "compactConversation",
+  )(function* (input) {
+    const routed = yield* resolveRoutableSession({
+      threadId: input.threadId,
+      operation: "ProviderService.compactConversation",
+      allowRecovery: true,
+    });
+    if (!routed.adapter.compactSession) {
+      return yield* new ProviderAdapterRequestError({
+        provider: routed.adapter.provider,
+        method: "thread/compact",
+        detail: "This provider does not support manual context compaction.",
+      });
+    }
+    yield* routed.adapter.compactSession(routed.threadId);
+  });
+
   const respondToRequest: ProviderServiceMethod<"respondToRequest"> = Effect.fn("respondToRequest")(
     function* (rawInput) {
       const input = yield* decodeInputOrValidationError({
@@ -1312,6 +1330,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     startSession,
     sendTurn,
     interruptTurn,
+    compactConversation,
     respondToRequest,
     respondToUserInput,
     stopSession,
