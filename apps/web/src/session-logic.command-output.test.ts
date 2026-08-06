@@ -67,6 +67,63 @@ describe("deriveWorkLogEntries command output", () => {
     });
   });
 
+  it("uses Claude SDK tool input and result content", () => {
+    const [entry] = deriveWorkLogEntries([
+      makeCommandActivity(
+        "claude-sdk-command",
+        {
+          itemType: "command_execution",
+          title: "Bash",
+          detail: "Bash: printf hello",
+          data: {
+            toolName: "Bash",
+            input: { command: "printf hello" },
+            result: {
+              type: "tool_result",
+              content: [{ type: "text", text: "hello from claude sdk\n" }],
+            },
+          },
+        },
+        "Bash",
+      ),
+    ]);
+
+    expect(entry).toMatchObject({
+      command: "printf hello",
+      detail: "hello from claude sdk",
+    });
+  });
+
+  it("uses OpenCode state input and output", () => {
+    const command = "cd /workspace && bun run test:ci > /tmp/test.log 2>&1 &\necho PID: $!";
+    const output = "PID: 3933101\n\n#45 [tester 2/2] RUN bun test";
+    const [entry] = deriveWorkLogEntries([
+      makeCommandActivity(
+        "opencode-command",
+        {
+          itemType: "command_execution",
+          detail: output,
+          data: {
+            tool: "bash",
+            state: {
+              status: "completed",
+              input: { command },
+              output,
+              metadata: { output, exit: 0, truncated: false },
+              title: command,
+            },
+          },
+        },
+        "bash",
+      ),
+    ]);
+
+    expect(entry).toMatchObject({
+      command,
+      detail: output,
+    });
+  });
+
   it("drops a shell-wrapped Codex command restated as detail", () => {
     const [entry] = deriveWorkLogEntries([
       makeCommandActivity(

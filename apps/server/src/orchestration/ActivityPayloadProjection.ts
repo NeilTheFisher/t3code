@@ -33,6 +33,87 @@ function projectToolOutput(value: unknown): string | null {
   return `${output.slice(0, contentLength)}${TOOL_OUTPUT_TRUNCATED_MARKER}`;
 }
 
+function textFromToolContent(value: unknown): string | null {
+  const direct = asTrimmedString(value);
+  if (direct) {
+    return direct;
+  }
+  if (Array.isArray(value)) {
+    const chunks: string[] = [];
+    for (const entryValue of value) {
+      const entry = asRecord(entryValue);
+      if (!entry) {
+        continue;
+      }
+      const text =
+        asTrimmedString(entry.text) ??
+        (entry.type === "content" ? textFromToolContent(entry.content) : null);
+      if (text) {
+        chunks.push(text);
+      }
+    }
+    return chunks.length > 0 ? chunks.join("\n") : null;
+  }
+  const record = asRecord(value);
+  return record ? textFromToolContent(record.content) : null;
+}
+
+function firstProjectedToolOutput(candidates: ReadonlyArray<unknown>): string | null {
+  for (const candidate of candidates) {
+    const output = projectToolOutput(textFromToolContent(candidate));
+    if (output) {
+      return output;
+    }
+  }
+  return null;
+}
+
+function projectCommandExecutionFields(data: Record<string, unknown>): Record<string, unknown> {
+  const projected: Record<string, unknown> = {};
+  const input = asRecord(data.input);
+  const state = asRecord(data.state);
+  const stateInput = asRecord(state?.input);
+  const stateMetadata = asRecord(state?.metadata);
+  const result = asRecord(data.result);
+  const rawOutput = asRecord(data.rawOutput);
+
+  const command = firstProjectedToolOutput([
+    data.command,
+    input?.command,
+    input?.cmd,
+    stateInput?.command,
+    stateInput?.cmd,
+  ]);
+  if (command) {
+    projected.command = command;
+  }
+
+  const outputStreams = [rawOutput?.stdout, rawOutput?.stderr]
+    .map(asTrimmedString)
+    .filter((value): value is string => value !== null);
+  const output = firstProjectedToolOutput([
+    typeof data.rawOutput === "string" ? data.rawOutput : null,
+    rawOutput?.content,
+    outputStreams.length > 0 ? outputStreams.join("\n") : null,
+    rawOutput?.output,
+    data.output,
+    result?.content,
+    state?.output,
+    stateMetadata?.output,
+    data.content,
+  ]);
+  if (output) {
+    projected.rawOutput = { output };
+  }
+
+  const toolName = asTrimmedString(data.toolName) ?? asTrimmedString(data.tool);
+  if (toolName) {
+    projected.toolName = toolName;
+  }
+
+  return projected;
+}
+
 function pushChangedFile(target: string[], seen: Set<string>, value: unknown): void {
   const normalized = asTrimmedString(value);
   if (!normalized || seen.has(normalized)) {
@@ -405,6 +486,9 @@ export function projectActivityPayload(
   if (command !== undefined) {
     projectedData.command = command;
   }
+  if (payload.itemType === "command_execution") {
+    Object.assign(projectedData, projectCommandExecutionFields(data));
+  }
 
   const changedFiles: string[] = [];
   collectChangedFiles(data, changedFiles, new Set<string>(), 0);
@@ -430,9 +514,11 @@ export function projectActivityPayload(
     projectedData.kind = data.kind;
   }
 
-  const rawOutput = projectRawOutput(data.rawOutput) ?? projectAcpContent(data.content);
-  if (rawOutput) {
-    projectedData.rawOutput = rawOutput;
+  if (!("rawOutput" in projectedData)) {
+    const rawOutput = projectRawOutput(data.rawOutput) ?? projectAcpContent(data.content);
+    if (rawOutput) {
+      projectedData.rawOutput = rawOutput;
+    }
   }
 
   return {

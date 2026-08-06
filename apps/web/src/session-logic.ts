@@ -1613,11 +1613,39 @@ function extractAcpTextContent(value: unknown): string | null {
   return chunks.length > 0 ? chunks.join("\n") : null;
 }
 
+function extractToolTextContent(value: unknown): string | null {
+  const direct = asTrimmedString(value);
+  if (direct) {
+    return direct;
+  }
+  if (Array.isArray(value)) {
+    const chunks: string[] = [];
+    for (const entryValue of value) {
+      const entry = asRecord(entryValue);
+      if (!entry) {
+        continue;
+      }
+      const text =
+        asTrimmedString(entry.text) ??
+        (entry.type === "content" ? extractToolTextContent(entry.content) : null);
+      if (text) {
+        chunks.push(text);
+      }
+    }
+    return chunks.length > 0 ? chunks.join("\n") : null;
+  }
+  const record = asRecord(value);
+  return record ? extractToolTextContent(record.content) : null;
+}
+
 function extractToolOutput(payload: Record<string, unknown> | null): string | null {
   const data = asRecord(payload?.data);
   const item = asRecord(data?.item);
   const itemResult = asRecord(item?.result);
+  const dataResult = asRecord(data?.result);
   const rawOutput = asRecord(data?.rawOutput);
+  const state = asRecord(data?.state);
+  const stateMetadata = asRecord(state?.metadata);
 
   const outputStreams: string[] = [];
   const stdout = asTrimmedString(rawOutput?.stdout);
@@ -1636,6 +1664,10 @@ function extractToolOutput(payload: Record<string, unknown> | null): string | nu
     rawOutput?.content,
     outputStreams.length > 0 ? outputStreams.join("\n") : null,
     rawOutput?.output,
+    data?.output,
+    extractToolTextContent(dataResult?.content),
+    state?.output,
+    stateMetadata?.output,
     extractAcpTextContent(data?.content),
   ];
 
@@ -1651,6 +1683,25 @@ function extractToolOutput(payload: Record<string, unknown> | null): string | nu
   }
 
   return null;
+}
+
+function stripToolNamePrefix(
+  detail: string,
+  payload: Record<string, unknown> | null,
+  heading: string,
+): string {
+  const data = asRecord(payload?.data);
+  const state = asRecord(data?.state);
+  const labels = [payload?.title, heading, data?.toolName, data?.tool, state?.tool]
+    .map(asTrimmedString)
+    .filter((value): value is string => value !== null);
+  for (const label of labels) {
+    const prefix = `${label}:`;
+    if (detail.slice(0, prefix.length).toLowerCase() === prefix.toLowerCase()) {
+      return detail.slice(prefix.length).trimStart();
+    }
+  }
+  return detail;
 }
 
 function isCommandToolDetail(payload: Record<string, unknown> | null, heading: string): boolean {
@@ -1683,9 +1734,18 @@ function extractToolDetail(
     commandTool && command
       ? normalizePreviewForComparison(unwrapKnownShellCommandWrapper(detail ?? ""))
       : null;
+  const detailWithoutToolName = detail ? stripToolNamePrefix(detail, payload, heading) : null;
+  const normalizedDetailWithoutToolName = normalizePreviewForComparison(detailWithoutToolName);
+  const normalizedUnwrappedDetailWithoutToolName =
+    commandTool && command
+      ? normalizePreviewForComparison(unwrapKnownShellCommandWrapper(detailWithoutToolName ?? ""))
+      : null;
   const detailMatchesCommand =
     normalizedCommand !== null &&
-    (normalizedCommand === normalizedDetail || normalizedCommand === normalizedUnwrappedDetail);
+    (normalizedCommand === normalizedDetail ||
+      normalizedCommand === normalizedUnwrappedDetail ||
+      normalizedCommand === normalizedDetailWithoutToolName ||
+      normalizedCommand === normalizedUnwrappedDetailWithoutToolName);
 
   if (detail && normalizedHeading !== normalizedDetail && (!commandTool || !detailMatchesCommand)) {
     return detail;

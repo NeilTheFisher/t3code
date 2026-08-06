@@ -212,6 +212,85 @@ describe("projectActivityPayload", () => {
     expect(JSON.stringify(projected.payload).length).toBeLessThan(500);
   });
 
+  it("preserves OpenCode command input and output in a bounded canonical shape", () => {
+    const command = "cd /workspace && bun run test:ci > /tmp/test.log 2>&1 &\necho PID: $!";
+    const output = "PID: 3933101\n\n#45 [tester 2/2] RUN bun test";
+    const projected = projectActivityPayload(
+      activity({
+        itemType: "command_execution",
+        detail: output,
+        data: {
+          tool: "bash",
+          state: {
+            status: "completed",
+            input: { command },
+            output,
+            metadata: { output, exit: 0, truncated: false },
+            title: command,
+          },
+        },
+      }),
+    );
+
+    expect(projected.payload).toMatchObject({
+      data: {
+        command,
+        rawOutput: { output },
+      },
+    });
+  });
+
+  it("preserves Claude command input and result content in a bounded canonical shape", () => {
+    const projected = projectActivityPayload(
+      activity({
+        itemType: "command_execution",
+        title: "Bash",
+        detail: "Bash: printf hello",
+        data: {
+          toolName: "Bash",
+          input: { command: "printf hello" },
+          result: {
+            type: "tool_result",
+            content: [{ type: "text", text: "hello from claude sdk\n" }],
+          },
+        },
+      }),
+    );
+
+    expect(projected.payload).toMatchObject({
+      data: {
+        command: "printf hello",
+        rawOutput: { output: "hello from claude sdk" },
+      },
+    });
+  });
+
+  it("keeps Codex command input and aggregated output", () => {
+    const projected = projectActivityPayload(
+      activity({
+        itemType: "command_execution",
+        title: "Bash",
+        detail: "/bin/bash -lc 'printf hello'",
+        data: {
+          item: {
+            type: "commandExecution",
+            command: "/bin/bash -lc 'printf hello'",
+            aggregatedOutput: "hello from codex\n<exited with exit code 0>",
+          },
+        },
+      }),
+    );
+
+    expect(projected.payload).toMatchObject({
+      data: {
+        item: {
+          command: "/bin/bash -lc 'printf hello'",
+          aggregatedOutput: "hello from codex\n<exited with exit code 0>",
+        },
+      },
+    });
+  });
+
   it("passes task lifecycle payloads (no data field) through untouched", () => {
     const source = activity({
       taskId: "task-9",
