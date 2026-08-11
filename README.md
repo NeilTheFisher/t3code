@@ -93,6 +93,7 @@ These capability groups are rebase invariants, not an exhaustive changelog. See
 upstream.
 
 There's no public docs site yet, checkout the miscellaneous markdown files in [docs](./docs).
+
 ## Documentation
 
 Full docs live in [docs/](./docs). There's no docs site yet.
