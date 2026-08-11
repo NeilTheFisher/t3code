@@ -231,7 +231,7 @@ function projectCommandData(data: Record<string, unknown>): Record<string, unkno
   const resultContent = projectToolOutput(result?.content);
   if (resultContent) {
     projectedItem.result = {
-      ...(asRecord(projectedItem.result) ?? {}),
+      ...asRecord(projectedItem.result),
       content: resultContent,
     };
   }

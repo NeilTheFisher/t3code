@@ -407,7 +407,6 @@ it.effect(
           getThreadDetailById: () => Effect.die("unused"),
           getThreadDetailSnapshot: () => Effect.die("unused"),
           searchThreads: () => Effect.succeed({ matches: [] }),
-          getThreadActivitiesPage: () => Effect.die("unused"),
         }),
         Effect.provideService(OrchestrationEngine.OrchestrationEngineService, {
           readEvents: () => Stream.empty,
