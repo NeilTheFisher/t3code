@@ -1386,6 +1386,11 @@ const make = Effect.gen(function* () {
     );
 
   const worker = yield* makeDrainableWorker(processDomainEventSafely);
+  // Interrupts are latency-sensitive and must not wait behind provider
+  // lifecycle work on the general worker. A session start/stop or recovery can
+  // block on an unhealthy provider indefinitely; serializing Stop behind it
+  // leaves the active turn running even though the command was accepted.
+  const interruptWorker = yield* makeDrainableWorker(processDomainEventSafely);
 
   const start: ProviderCommandReactorShape["start"] = Effect.fn("start")(function* () {
     const interruptedTitleRegenerations = yield* findInterruptedThreadTitleRegenerations().pipe(
@@ -1409,7 +1414,9 @@ const make = Effect.gen(function* () {
         event.type === "thread.user-input-response-requested" ||
         event.type === "thread.session-stop-requested"
       ) {
-        return yield* worker.enqueue(event);
+        return yield* event.type === "thread.turn-interrupt-requested"
+          ? interruptWorker.enqueue(event)
+          : worker.enqueue(event);
       }
     });
 
@@ -1445,6 +1452,7 @@ const make = Effect.gen(function* () {
     start,
     drain: Effect.gen(function* () {
       yield* worker.drain;
+      yield* interruptWorker.drain;
       yield* threadTitleRegenerationWorker.drain;
     }),
   } satisfies ProviderCommandReactorShape;
