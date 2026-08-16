@@ -523,15 +523,33 @@ interface OpenCodeChildTaskState {
   readonly description: string | undefined;
   readonly role: string | undefined;
   readonly title: string | undefined;
+  /** A `background: true` task keeps running after its parent tool part returns. */
+  isBackground: boolean;
   taskStarted: boolean;
   taskCompleted: boolean;
 }
 
-function openCodeTaskToolChildSessionId(part: Extract<Part, { type: "tool" }>): string | undefined {
+export function openCodeTaskToolIsBackground(part: Extract<Part, { type: "tool" }>): boolean {
+  if (part.tool.toLowerCase() !== "task" || part.state.status === "pending") {
+    return false;
+  }
+  const metadata = part.state.metadata as Record<string, unknown> | undefined;
+  return metadata?.background === true;
+}
+
+export function openCodeTaskToolChildSessionId(
+  part: Extract<Part, { type: "tool" }>,
+): string | undefined {
   if (part.tool.toLowerCase() !== "task") {
     return undefined;
   }
-  const sessionID = part.state.status === "pending" ? undefined : part.state.metadata?.sessionID;
+  if (part.state.status === "pending") {
+    return undefined;
+  }
+  const metadata = part.state.metadata as Record<string, unknown> | undefined;
+  // OpenCode's `task` tool reports the child session as `sessionId`; accept the
+  // legacy `sessionID` spelling too so older payloads keep working.
+  const sessionID = metadata?.sessionId ?? metadata?.sessionID;
   return typeof sessionID === "string" && sessionID.trim().length > 0 ? sessionID : undefined;
 }
 
@@ -2072,6 +2090,7 @@ export function makeOpenCodeAdapter(
       input: Record<string, unknown>,
       title: string | undefined,
       turnId: TurnId | undefined,
+      isBackground: boolean,
       raw: unknown,
     ) {
       addRelatedOpenCodeSession(context, childSessionId);
@@ -2082,10 +2101,15 @@ export function makeOpenCodeAdapter(
           description: openCodeTaskDescription(input),
           role: openCodeTaskRole(input),
           title,
+          isBackground,
           taskStarted: false,
           taskCompleted: false,
         };
         context.childTasks.set(childSessionId, child);
+      } else if (isBackground) {
+        // The background flag is only stamped once the parent tool part
+        // completes, which can be after the child is first registered.
+        child.isBackground = true;
       }
       if (child.taskStarted) {
         return;
@@ -2176,6 +2200,7 @@ export function makeOpenCodeAdapter(
                 openCodeTaskToolInput(part),
                 nestedTitle,
                 turnId,
+                openCodeTaskToolIsBackground(part),
                 event,
               );
             }
@@ -2273,6 +2298,19 @@ export function makeOpenCodeAdapter(
           }
           const idle = event.type === "session.idle" || event.properties.status.type === "idle";
           if (!idle) {
+            return;
+          }
+          // A background child outlives its parent turn, so its own idle is the
+          // terminal signal: close the row instead of leaving it "running".
+          if (child.isBackground) {
+            yield* settleOpenCodeChildTask(
+              context,
+              childSessionId,
+              "completed",
+              undefined,
+              turnId,
+              event,
+            );
             return;
           }
           yield* emit({
@@ -3128,6 +3166,7 @@ export function makeOpenCodeAdapter(
             if (isParentEvent) {
               const taskChildId = openCodeTaskToolChildSessionId(part);
               if (taskChildId !== undefined) {
+                const isBackground = openCodeTaskToolIsBackground(part);
                 yield* registerOpenCodeChildTask(
                   context,
                   part.callID,
@@ -3135,9 +3174,16 @@ export function makeOpenCodeAdapter(
                   openCodeTaskToolInput(part),
                   title,
                   turnId,
+                  isBackground,
                   event,
                 );
-                if (part.state.status === "completed" || part.state.status === "error") {
+                // A background task's tool part completes as soon as it is
+                // launched, but the child session keeps running; settle it from
+                // the child's own idle instead so the row is not closed early.
+                if (
+                  !isBackground &&
+                  (part.state.status === "completed" || part.state.status === "error")
+                ) {
                   yield* settleOpenCodeChildTask(
                     context,
                     taskChildId,
@@ -4429,15 +4475,6 @@ export function makeOpenCodeAdapter(
       },
     );
 
-    const compactSession: NonNullable<OpenCodeAdapterShape["compactSession"]> = Effect.fn(
-      "compactSession",
-    )(function* (threadId) {
-      const context = yield* requireSession(threadId);
-      yield* runOpenCodeSdk("session.compact", () =>
-        context.client.session.compact({ sessionID: context.openCodeSessionId }),
-      ).pipe(Effect.mapError(toRequestError));
-    });
-
     const respondToRequest: OpenCodeAdapterShape["respondToRequest"] = Effect.fn(
       "respondToRequest",
     )(function* (threadId, requestId, decision) {
@@ -4728,7 +4765,6 @@ export function makeOpenCodeAdapter(
       sendTurn,
       compaction: { type: "native", start: compactThread },
       interruptTurn,
-      compactSession,
       respondToRequest,
       respondToUserInput,
       stopSession,

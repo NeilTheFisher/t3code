@@ -21,7 +21,11 @@ function asTrimmedString(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+// Fork bounds: this is a single-user server (loopback + T3 Connect relay), so
+// command/tool output ships near-verbatim instead of upstream's one-line
+// summaries. Keep these caps when rebasing; upstream resets them to 400/200.
 const MAX_PROJECTED_TOOL_OUTPUT_CHARS = 16_000;
+const MAX_PROJECTED_COMMAND_OUTPUT_CHARS = 4_000;
 const TOOL_OUTPUT_TRUNCATED_MARKER = "\n\n[truncated]";
 
 function projectToolOutput(value: unknown): string | null {
@@ -69,52 +73,6 @@ function firstProjectedToolOutput(candidates: ReadonlyArray<unknown>): string | 
     }
   }
   return null;
-}
-
-function projectCommandExecutionFields(data: Record<string, unknown>): Record<string, unknown> {
-  const projected: Record<string, unknown> = {};
-  const input = asRecord(data.input);
-  const state = asRecord(data.state);
-  const stateInput = asRecord(state?.input);
-  const stateMetadata = asRecord(state?.metadata);
-  const result = asRecord(data.result);
-  const rawOutput = asRecord(data.rawOutput);
-
-  const command = firstProjectedToolOutput([
-    data.command,
-    input?.command,
-    input?.cmd,
-    stateInput?.command,
-    stateInput?.cmd,
-  ]);
-  if (command) {
-    projected.command = command;
-  }
-
-  const outputStreams = [rawOutput?.stdout, rawOutput?.stderr]
-    .map(asTrimmedString)
-    .filter((value): value is string => value !== null);
-  const output = firstProjectedToolOutput([
-    typeof data.rawOutput === "string" ? data.rawOutput : null,
-    rawOutput?.content,
-    outputStreams.length > 0 ? outputStreams.join("\n") : null,
-    rawOutput?.output,
-    data.output,
-    result?.content,
-    state?.output,
-    stateMetadata?.output,
-    data.content,
-  ]);
-  if (output) {
-    projected.rawOutput = { output };
-  }
-
-  const toolName = asTrimmedString(data.toolName) ?? asTrimmedString(data.tool);
-  if (toolName) {
-    projected.toolName = toolName;
-  }
-
-  return projected;
 }
 
 function pushChangedFile(target: string[], seen: Set<string>, value: unknown): void {
@@ -189,21 +147,18 @@ function projectCommandData(data: Record<string, unknown>): Record<string, unkno
   if ("command" in item) {
     projectedItem.command = item.command;
   }
-  const aggregatedOutput = projectToolOutput(item.aggregatedOutput);
+
+  const aggregatedOutputValue = asTrimmedString(item.aggregatedOutput);
+  const aggregatedOutput =
+    aggregatedOutputValue && aggregatedOutputValue.length > MAX_PROJECTED_COMMAND_OUTPUT_CHARS
+      ? summarizeToolTextOutput(aggregatedOutputValue)
+      : projectToolOutput(aggregatedOutputValue);
   if (aggregatedOutput) {
     projectedItem.aggregatedOutput = aggregatedOutput;
   }
   const tool = asTrimmedString(item.tool);
   if (tool) {
     projectedItem.tool = tool;
-  }
-
-  const aggregatedOutput = asTrimmedString(item.aggregatedOutput);
-  if (aggregatedOutput) {
-    const summary = summarizeToolTextOutput(aggregatedOutput);
-    if (summary) {
-      projectedItem.aggregatedOutput = summary;
-    }
   }
 
   const input = asRecord(item.input);
@@ -228,6 +183,7 @@ function projectCommandData(data: Record<string, unknown>): Record<string, unkno
       projectedItem.result = projectedResult;
     }
   }
+  // Verbatim result content wins over the one-line summary above (fork-rich).
   const resultContent = projectToolOutput(result?.content);
   if (resultContent) {
     projectedItem.result = {
@@ -255,6 +211,61 @@ function projectCommandValue(data: Record<string, unknown>): unknown {
   }
 
   return undefined;
+}
+
+/**
+ * Fork-rich command rows: the command text stays verbatim up to 16k and the
+ * first output channel found (rawOutput.content, stdout+stderr,
+ * rawOutput.output, data.output, result.content, state.output,
+ * state.metadata.output, ACP content) ships verbatim as
+ * `data.rawOutput = {output}` up to 4k. A bare-string data.rawOutput is left
+ * to the compact fallback in projectActivityPayload. Rows above 4k keep no
+ * rawOutput here; that fallback fills those with a one-line summary. The
+ * web's expanded row reads `rawOutput.output`.
+ */
+function projectCommandExecutionFields(data: Record<string, unknown>): Record<string, unknown> {
+  const projected: Record<string, unknown> = {};
+  const input = asRecord(data.input);
+  const state = asRecord(data.state);
+  const stateInput = asRecord(state?.input);
+  const stateMetadata = asRecord(state?.metadata);
+  const result = asRecord(data.result);
+  const rawOutput = asRecord(data.rawOutput);
+
+  const command = firstProjectedToolOutput([
+    data.command,
+    input?.command,
+    input?.cmd,
+    stateInput?.command,
+    stateInput?.cmd,
+  ]);
+  if (command) {
+    projected.command = command;
+  }
+
+  const outputStreams = [rawOutput?.stdout, rawOutput?.stderr]
+    .map(asTrimmedString)
+    .filter((value): value is string => value !== null);
+  const output = firstProjectedToolOutput([
+    rawOutput?.content,
+    outputStreams.length > 0 ? outputStreams.join("\n") : null,
+    rawOutput?.output,
+    data.output,
+    result?.content,
+    state?.output,
+    stateMetadata?.output,
+    data.content,
+  ]);
+  if (output && output.length <= MAX_PROJECTED_COMMAND_OUTPUT_CHARS) {
+    projected.rawOutput = { output };
+  }
+
+  const toolName = asTrimmedString(data.toolName) ?? asTrimmedString(data.tool);
+  if (toolName) {
+    projected.toolName = toolName;
+  }
+
+  return projected;
 }
 
 function projectViewedImagePath(data: Record<string, unknown>): string | undefined {
@@ -543,6 +554,13 @@ export function projectActivityPayload(
     return activity;
   }
 
+  // Subagent items render in the Agents surface, whose fold reads `data`
+  // verbatim (toolName/input); the work-log slimming below would rewrite it
+  // into command/rawOutput shapes the fold does not understand.
+  if (activity.kind === "subagent.item") {
+    return activity;
+  }
+
   const itemStatus = asRecord(data.item)?.status;
   const statusPayload =
     payload.status === "completed" && (itemStatus === "failed" || itemStatus === "declined")
@@ -576,6 +594,7 @@ export function projectActivityPayload(
   const imagePath = projectViewedImagePath(data);
   if (imagePath) {
     projectedData.imagePath = imagePath;
+  }
   if (payload.itemType === "command_execution") {
     Object.assign(projectedData, projectCommandExecutionFields(data));
   }
@@ -607,14 +626,13 @@ export function projectActivityPayload(
     projectedData.toolName = data.toolName;
   }
 
-  const rawOutput =
-    projectRawOutput(data.rawOutput) ??
-    projectAcpContent(data.content) ??
-    (payload.itemType === "command_execution" ? summarizeMcpResult(data.result) : undefined);
-  if (rawOutput) {
-    projectedData.rawOutput = rawOutput;
+  // The command row's own `{output}` (verbatim, ≤4k) wins; the compact
+  // one-line fallbacks only fill rows the fork-rich pass above left empty.
   if (!("rawOutput" in projectedData)) {
-    const rawOutput = projectRawOutput(data.rawOutput) ?? projectAcpContent(data.content);
+    const rawOutput =
+      projectRawOutput(data.rawOutput) ??
+      projectAcpContent(data.content) ??
+      (payload.itemType === "command_execution" ? summarizeMcpResult(data.result) : undefined);
     if (rawOutput) {
       projectedData.rawOutput = rawOutput;
     }

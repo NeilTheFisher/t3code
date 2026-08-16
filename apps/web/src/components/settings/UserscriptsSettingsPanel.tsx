@@ -1,14 +1,16 @@
-import { useCallback, useId, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { PlusIcon, Trash2Icon } from "lucide-react";
 import type { Userscript } from "@t3tools/contracts";
 import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
 import { getDeviceId } from "../../lib/deviceId";
 import { Button } from "../ui/button";
 import { Switch } from "../ui/switch";
-import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
+import { SettingsPageContainer, SettingsSection } from "./settingsLayout";
 
+let userscriptIdCounter = 0;
 function generateId(): string {
-  return crypto.randomUUID();
+  userscriptIdCounter += 1;
+  return `userscript-${Date.now().toString(36)}-${userscriptIdCounter.toString(36)}`;
 }
 
 function getDeviceScripts(userscripts: Record<string, readonly Userscript[]>): Userscript[] {
@@ -18,7 +20,6 @@ function getDeviceScripts(userscripts: Record<string, readonly Userscript[]>): U
 export function UserscriptsSettingsPanel() {
   const settings = usePrimarySettings();
   const updateSettings = useUpdatePrimarySettings();
-  const formId = useId();
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const deviceId = useMemo(() => getDeviceId(), []);

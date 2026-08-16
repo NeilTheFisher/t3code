@@ -61,7 +61,6 @@ import { isTerminalUrl, resolvePathLinkTarget } from "../terminal-links";
 import {
   isDiffToggleShortcut,
   isTerminalClearShortcut,
-  isTerminalCloseShortcut,
   isTerminalNewShortcut,
   isTerminalPasteShortcut,
   isTerminalSplitShortcut,
