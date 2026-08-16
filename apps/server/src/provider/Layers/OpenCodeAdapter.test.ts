@@ -1,6 +1,7 @@
 import * as NodeAssert from "node:assert/strict";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, it } from "@effect/vitest";
+import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
@@ -131,6 +132,15 @@ const runtimeMock = {
     questionListImplementation: null as (() => Promise<Array<QuestionRequest>>) | null,
     sessionUpdateCalls: [] as Array<{ sessionID: string; permission: unknown }>,
     forkCalls: [] as Array<{ sessionID: string; directory?: string }>,
+    providerListCalls: 0,
+    providerListPayload: undefined as
+      | {
+          all: Array<{
+            id: string;
+            models: Record<string, { limit: { context: number; output: number } }>;
+          }>;
+        }
+      | undefined,
   },
   reset() {
     this.state.startCalls.length = 0;
@@ -187,6 +197,8 @@ const runtimeMock = {
     this.state.questionListImplementation = null;
     this.state.sessionUpdateCalls.length = 0;
     this.state.forkCalls.length = 0;
+    this.state.providerListCalls = 0;
+    this.state.providerListPayload = undefined;
   },
 };
 
@@ -290,6 +302,9 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
         },
         abort: async ({ sessionID }: { sessionID: string }, options?: { signal?: AbortSignal }) => {
           runtimeMock.state.abortCalls.push(sessionID);
+          if (options?.signal) {
+            runtimeMock.state.abortSignals.push(options.signal);
+          }
           if (runtimeMock.state.abortError) {
             throw runtimeMock.state.abortError;
           }
@@ -498,6 +513,12 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
           runtimeMock.state.pendingQuestions = runtimeMock.state.pendingQuestions.filter(
             (request) => request.id !== requestID,
           );
+        },
+      },
+      provider: {
+        list: async () => {
+          runtimeMock.state.providerListCalls += 1;
+          return { data: runtimeMock.state.providerListPayload };
         },
       },
     }) as unknown as ReturnType<OpenCodeRuntimeShape["createOpenCodeSdkClient"]>,
@@ -1464,7 +1485,9 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       });
 
       // Steer: OpenCode queues the prompt into the busy session, so the
-      // active turn id is reused instead of opening a new turn.
+      // active turn id is reused instead of opening a new turn. It must use
+      // the same compatibility prompt stream as fresh turns because the
+      // adapter projects that stream's events.
       const steeredTurn = yield* adapter.sendTurn({
         threadId,
         input: "actually run 15",
@@ -1480,6 +1503,24 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       NodeAssert.equal(session?.status, "running");
       NodeAssert.equal(String(session?.activeTurnId), String(turn.turnId));
       NodeAssert.equal(runtimeMock.state.promptCalls.length, 2);
+      const steerCallRaw = runtimeMock.state.promptCalls.at(-1) as {
+        messageID: string;
+        [key: string]: unknown;
+      };
+      // Steers reuse the same prompt shape as fresh turns (messageID +
+      // runtime instructions); the steer invariant is that the active turn is
+      // reused rather than a new one opened.
+      const { messageID, ...steerCall } = steerCallRaw;
+      NodeAssert.match(messageID, /^msg_[0-9a-f]{12}[0-9A-Za-z]{14}$/);
+      NodeAssert.deepEqual(steerCall, {
+        sessionID: "http://127.0.0.1:9999/session",
+        model: { providerID: "openai", modelID: "gpt-5" },
+        system: buildRuntimeInstructions({
+          harness: "OpenCode",
+          model: "openai/gpt-5",
+        }),
+        parts: [{ type: "text", text: "actually run 15" }],
+      });
     }),
   );
 
@@ -1527,6 +1568,47 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
     Effect.gen(function* () {
       const adapter = yield* OpenCodeAdapter;
       const threadId = asThreadId("thread-interrupt-failure");
+      // The remote abort the interrupt issues fails; the turn must still
+      // settle through the deferred idle status instead of blocking on it.
+      runtimeMock.state.abortError = new Error("remote abort failed");
+      const idleEvent = promiseWithResolvers<unknown>();
+      runtimeMock.state.subscribedEvents = [
+        {
+          type: "message.updated",
+          properties: {
+            sessionID: "http://127.0.0.1:9999/session",
+            info: { id: "msg-interrupt-failure", role: "assistant" },
+          },
+        },
+        {
+          type: "message.part.updated",
+          properties: {
+            sessionID: "http://127.0.0.1:9999/session",
+            part: {
+              id: "part-interrupt-failure",
+              sessionID: "http://127.0.0.1:9999/session",
+              messageID: "msg-interrupt-failure",
+              type: "text",
+              text: "Visible output",
+              time: { start: 1 },
+            },
+            time: 1,
+          },
+        },
+        idleEvent.promise,
+        // Keep the event stream open after the queued events.
+        promiseWithResolvers<unknown>().promise,
+      ];
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter(
+          (event) =>
+            event.threadId === threadId &&
+            (event.type === "content.delta" || event.type === "turn.completed"),
+        ),
+        Stream.take(2),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
       yield* adapter.startSession({
         provider: ProviderDriverKind.make("opencode"),
         threadId,
@@ -1541,6 +1623,15 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
           model: "openai/gpt-5",
         },
       });
+      yield* adapter.interruptTurn(threadId, turn.turnId).pipe(Effect.ignore);
+      idleEvent.resolve({
+        id: "evt-idle-interrupt-failure",
+        type: "session.status",
+        properties: {
+          sessionID: "http://127.0.0.1:9999/session",
+          status: { type: "idle" },
+        },
+      });
 
       const events = Array.from(yield* Fiber.join(eventsFiber).pipe(Effect.timeout("1 second")));
       NodeAssert.deepEqual(
@@ -1551,13 +1642,14 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       if (delta?.type === "content.delta") {
         NodeAssert.equal(delta.payload.delta, "Visible output");
       }
-      NodeAssert.equal(events[1]?.turnId, activeTurn.turnId);
+      NodeAssert.equal(events[1]?.turnId, turn.turnId);
       const sessions = yield* adapter.listSessions();
       const session = sessions.find((candidate) => candidate.threadId === threadId);
       NodeAssert.equal(session?.status, "ready");
       NodeAssert.equal(session?.activeTurnId, undefined);
 
       yield* adapter.stopSession(threadId);
+      NodeAssert.equal(yield* adapter.hasSession(threadId), false);
     }),
   );
 
@@ -1877,6 +1969,150 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
     }),
   );
 
+  it.effect("emits accumulated token usage for the context window circle", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-context-window-usage");
+      const busy = promiseWithResolvers<unknown>();
+      const firstStep = promiseWithResolvers<unknown>();
+      const secondStep = promiseWithResolvers<unknown>();
+      const idle = promiseWithResolvers<unknown>();
+      runtimeMock.state.providerListPayload = {
+        all: [
+          {
+            id: "opencode",
+            models: {
+              "kimi-k3": { limit: { context: 1_000, output: 100 } },
+            },
+          },
+        ],
+      };
+      runtimeMock.state.subscribedEvents = [
+        busy.promise,
+        firstStep.promise,
+        secondStep.promise,
+        idle.promise,
+      ];
+
+      const usageFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter(
+          (event) => event.threadId === threadId && event.type === "thread.token-usage.updated",
+        ),
+        Stream.take(2),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      const sendFiber = yield* adapter
+        .sendTurn({
+          threadId,
+          input: "Track the context window",
+          modelSelection: createModelSelection(
+            ProviderInstanceId.make("opencode"),
+            "opencode/kimi-k3",
+          ),
+        })
+        .pipe(Effect.forkChild);
+      busy.resolve({
+        id: "evt-context-usage-busy",
+        type: "session.status",
+        properties: {
+          sessionID: "http://127.0.0.1:9999/session",
+          status: { type: "busy" },
+        },
+      });
+      yield* Fiber.join(sendFiber);
+
+      firstStep.resolve({
+        id: "evt-context-usage-1",
+        type: "message.part.updated",
+        properties: {
+          sessionID: "http://127.0.0.1:9999/session",
+          part: {
+            id: "step-context-usage-1",
+            sessionID: "http://127.0.0.1:9999/session",
+            messageID: "assistant-context-usage-1",
+            type: "step-finish",
+            reason: "stop",
+            cost: 0,
+            tokens: { input: 300, output: 200, reasoning: 40, cache: { read: 100, write: 10 } },
+          },
+        },
+      });
+      secondStep.resolve({
+        id: "evt-context-usage-2",
+        type: "message.part.updated",
+        properties: {
+          sessionID: "http://127.0.0.1:9999/session",
+          part: {
+            id: "step-context-usage-2",
+            sessionID: "http://127.0.0.1:9999/session",
+            messageID: "assistant-context-usage-2",
+            type: "step-finish",
+            reason: "stop",
+            cost: 0,
+            tokens: { input: 500, output: 250, reasoning: 10, cache: { read: 300, write: 0 } },
+          },
+        },
+      });
+      idle.resolve({
+        id: "evt-context-usage-idle",
+        type: "session.status",
+        properties: {
+          sessionID: "http://127.0.0.1:9999/session",
+          status: { type: "idle" },
+        },
+      });
+
+      const usageEvents = yield* Fiber.join(usageFiber).pipe(Effect.timeout("1 second"));
+      NodeAssert.equal(usageEvents.length, 2);
+      const [firstUsage, secondUsage] = usageEvents;
+      if (
+        firstUsage === undefined ||
+        secondUsage === undefined ||
+        firstUsage.type !== "thread.token-usage.updated" ||
+        secondUsage.type !== "thread.token-usage.updated"
+      ) {
+        throw new Error("Expected thread.token-usage.updated events");
+      }
+      NodeAssert.deepStrictEqual(firstUsage.payload.usage, {
+        usedTokens: 600,
+        maxTokens: 1_000,
+        inputTokens: 300,
+        outputTokens: 200,
+        reasoningOutputTokens: 40,
+        cachedInputTokens: 100,
+        lastUsedTokens: 500,
+        lastInputTokens: 300,
+        lastOutputTokens: 200,
+        lastReasoningOutputTokens: 40,
+        lastCachedInputTokens: 100,
+        compactsAutomatically: true,
+      });
+      NodeAssert.deepStrictEqual(secondUsage.payload.usage, {
+        usedTokens: 1_000,
+        maxTokens: 1_000,
+        totalProcessedTokens: 1_250,
+        inputTokens: 800,
+        outputTokens: 450,
+        reasoningOutputTokens: 50,
+        cachedInputTokens: 400,
+        lastUsedTokens: 750,
+        lastInputTokens: 500,
+        lastOutputTokens: 250,
+        lastReasoningOutputTokens: 10,
+        lastCachedInputTokens: 300,
+        compactsAutomatically: true,
+      });
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
   it.effect("keeps the next turn usage while the prior completion is delayed", () =>
     Effect.gen(function* () {
       const threadId = asThreadId("thread-token-usage-terminal-handoff");
@@ -1905,11 +2141,19 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       const terminalUuidRelease = yield* Deferred.make<void>();
       let blockFirstStepWrite = true;
       let blockNextUuid = false;
+      // The restored token-usage emit draws an event id from the step-finish
+      // part before the terminal turn-completed event does; let that first
+      // id through and gate only the terminal one.
+      let ungatedUuidsBeforeTerminal = 1;
       const nodeCrypto = yield* Crypto.Crypto;
       const gatedCrypto = {
         ...nodeCrypto,
         randomUUIDv4: Effect.suspend(() => {
           if (!blockNextUuid) return nodeCrypto.randomUUIDv4;
+          if (ungatedUuidsBeforeTerminal > 0) {
+            ungatedUuidsBeforeTerminal -= 1;
+            return nodeCrypto.randomUUIDv4;
+          }
           blockNextUuid = false;
           return Deferred.succeed(terminalUuidStarted, undefined).pipe(
             Effect.andThen(Deferred.await(terminalUuidRelease)),
@@ -5491,6 +5735,172 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
     }),
   );
 
+  it.effect("re-marks the session running when busy arrives after a terminal event", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-busy-after-terminal");
+      const sessionId = "http://127.0.0.1:9999/session";
+      const firstIdle = promiseWithResolvers<unknown>();
+      const strayBusy = promiseWithResolvers<unknown>();
+      const settleIdle = promiseWithResolvers<unknown>();
+      runtimeMock.state.subscribedEvents = [
+        firstIdle.promise,
+        strayBusy.promise,
+        settleIdle.promise,
+        // Keep the event stream open after the queued events.
+        promiseWithResolvers<unknown>().promise,
+      ];
+
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter(
+          (event) =>
+            event.threadId === threadId &&
+            (event.type === "turn.completed" || event.type === "session.state.changed"),
+        ),
+        Stream.take(3),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      const turn = yield* adapter.sendTurn({
+        threadId,
+        input: "Keep working after a spurious completion",
+        modelSelection: createModelSelection(
+          ProviderInstanceId.make("opencode"),
+          "opencode/kimi-k3",
+        ),
+      });
+
+      // Spurious idle completes the turn while OpenCode keeps working.
+      firstIdle.resolve({
+        id: "evt-busy-after-terminal-idle",
+        type: "session.status",
+        properties: { sessionID: sessionId, status: { type: "idle" } },
+      });
+      for (let index = 0; index < 4; index += 1) {
+        yield* Effect.yieldNow;
+      }
+      const settledSession = (yield* adapter.listSessions()).find(
+        (candidate) => candidate.threadId === threadId,
+      );
+      NodeAssert.equal(settledSession?.status, "ready");
+      NodeAssert.equal(settledSession?.activeTurnId, undefined);
+
+      // OpenCode is still working: the turnless busy must re-arm running
+      // instead of being dropped.
+      strayBusy.resolve({
+        id: "evt-busy-after-terminal-stray-busy",
+        type: "session.status",
+        properties: { sessionID: sessionId, status: { type: "busy" } },
+      });
+      for (let index = 0; index < 4; index += 1) {
+        yield* Effect.yieldNow;
+      }
+      const rearmedSession = (yield* adapter.listSessions()).find(
+        (candidate) => candidate.threadId === threadId,
+      );
+      NodeAssert.equal(rearmedSession?.status, "running");
+      NodeAssert.equal(rearmedSession?.activeTurnId, undefined);
+
+      // OpenCode finally goes idle: the session-state path settles ready.
+      settleIdle.resolve({
+        id: "evt-busy-after-terminal-settle-idle",
+        type: "session.status",
+        properties: { sessionID: sessionId, status: { type: "idle" } },
+      });
+      const events = Array.from(yield* Fiber.join(eventsFiber).pipe(Effect.timeout("1 second")));
+      NodeAssert.deepEqual(
+        events.map((event) => ({
+          type: event.type,
+          turnId: event.type === "session.state.changed" ? undefined : event.turnId,
+          state:
+            event.type === "session.state.changed"
+              ? (event.payload as { state: string }).state
+              : undefined,
+        })),
+        [
+          { type: "turn.completed", turnId: turn.turnId, state: undefined },
+          { type: "session.state.changed", turnId: undefined, state: "running" },
+          { type: "session.state.changed", turnId: undefined, state: "ready" },
+        ],
+      );
+      const finalSession = (yield* adapter.listSessions()).find(
+        (candidate) => candidate.threadId === threadId,
+      );
+      NodeAssert.equal(finalSession?.status, "ready");
+      NodeAssert.equal(finalSession?.activeTurnId, undefined);
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("completes the turn when OpenCode emits session.idle", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-session-idle-completion");
+      const sessionId = "http://127.0.0.1:9999/session";
+      const busy = promiseWithResolvers<unknown>();
+      const sessionIdle = promiseWithResolvers<unknown>();
+      runtimeMock.state.subscribedEvents = [
+        busy.promise,
+        sessionIdle.promise,
+        // Keep the event stream open after the queued events.
+        promiseWithResolvers<unknown>().promise,
+      ];
+
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.threadId === threadId && event.type === "turn.completed"),
+        Stream.take(1),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      const turn = yield* adapter.sendTurn({
+        threadId,
+        input: "Finish via the dedicated idle event",
+        modelSelection: createModelSelection(
+          ProviderInstanceId.make("opencode"),
+          "opencode/kimi-k3",
+        ),
+      });
+      busy.resolve({
+        id: "evt-session-idle-busy",
+        type: "session.status",
+        properties: { sessionID: sessionId, status: { type: "busy" } },
+      });
+      for (let index = 0; index < 4; index += 1) {
+        yield* Effect.yieldNow;
+      }
+
+      // Newer CLIs emit a dedicated `session.idle` event (no session.status
+      // flip alongside it). It must complete the turn like the status idle.
+      sessionIdle.resolve({
+        id: "evt-session-idle",
+        type: "session.idle",
+        properties: { sessionID: sessionId },
+      });
+
+      const events = Array.from(yield* Fiber.join(eventsFiber).pipe(Effect.timeout("1 second")));
+      NodeAssert.equal(events.length, 1);
+      NodeAssert.equal(events[0]?.turnId, turn.turnId);
+      const session = (yield* adapter.listSessions()).find(
+        (candidate) => candidate.threadId === threadId,
+      );
+      NodeAssert.equal(session?.status, "ready");
+      NodeAssert.equal(session?.activeTurnId, undefined);
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
   it.effect("keeps a genuine provider error visible during a pending user stop", () =>
     Effect.gen(function* () {
       const adapter = yield* OpenCodeAdapter;
@@ -6153,6 +6563,85 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
           .map((event) => event.payload.delta),
         ["Tool results received"],
       );
+    }),
+  );
+
+  it.effect("carries file changes on completed edit tool events for inline diffs", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-edit-file-changes");
+      const sessionID = "http://127.0.0.1:9999/session";
+      const start = promiseWithResolvers<OpenCodeEvent>();
+      runtimeMock.state.subscribedEvents = [
+        start.promise,
+        {
+          id: "evt-edit-tool",
+          type: "message.part.updated",
+          properties: {
+            sessionID,
+            time: 4,
+            part: {
+              id: "part-edit-1",
+              sessionID,
+              messageID: "msg-edit-1",
+              type: "tool",
+              callID: "call-edit-1",
+              tool: "edit",
+              state: {
+                status: "completed",
+                input: {
+                  filePath: "/repo/src/main.ts",
+                  oldString: "old",
+                  newString: "new",
+                },
+                title: "Edit main.ts",
+                metadata: {},
+                time: { start: 1, end: 2 },
+              },
+            },
+          },
+        },
+        {
+          id: "evt-edit-drained",
+          type: "session.compacted",
+          properties: { sessionID },
+        },
+      ];
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.threadId === threadId),
+        Stream.takeUntil((event) => event.type === "thread.state.changed"),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({
+        threadId,
+        input: "Edit the file",
+        modelSelection: createModelSelection(
+          ProviderInstanceId.make("opencode"),
+          "opencode/kimi-k3",
+        ),
+      });
+      start.resolve({
+        id: "evt-edit-started",
+        type: "session.status",
+        properties: { sessionID, status: { type: "busy" } },
+      });
+      const events = yield* Fiber.join(eventsFiber);
+      const completed = events.find(
+        (event) => event.type === "item.completed" && event.itemId === "call-edit-1",
+      );
+      NodeAssert.ok(completed);
+      NodeAssert.equal(completed.type, "item.completed");
+      NodeAssert.equal(completed.payload.itemType, "file_change");
+      NodeAssert.equal(completed.payload.status, "completed");
+      NodeAssert.deepEqual((completed.payload.data as { changes: unknown }).changes, [
+        { path: "/repo/src/main.ts", diff: "@@ -1,1 +1,1 @@\n-old\n+new" },
+      ]);
     }),
   );
 
