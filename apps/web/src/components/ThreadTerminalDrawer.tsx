@@ -47,7 +47,6 @@ import { isTerminalLinkActivation, isTerminalUrl, resolvePathLinkTarget } from "
 import {
   isDiffToggleShortcut,
   isTerminalClearShortcut,
-  isTerminalCloseShortcut,
   isTerminalNewShortcut,
   isTerminalPasteShortcut,
   isTerminalSplitShortcut,

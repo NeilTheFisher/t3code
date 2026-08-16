@@ -2882,43 +2882,41 @@ export function makeOpenCodeAdapter(
             });
           }
 
-          if (promptAdmission.cancelled || (yield* Ref.get(context.stopped))) {
-            yield* Deferred.succeed(promptAdmission.submissionSettled, undefined).pipe(
-              Effect.ignore,
-            );
-            const cancellation = context.cancellation;
-            if (cancellation?.turnId === turnId) {
-              yield* Deferred.await(cancellation.completion).pipe(Effect.result);
-            }
-            return yield* Effect.interrupt;
-          }
-
-          let promptTimedOut = false;
-          const promptEffect = runOpenCodeSdk("session.promptAsync", (signal) =>
-            context.client.session.promptAsync(
-              {
-                sessionID: context.openCodeSessionId,
-                messageID: messageId,
-                model: parsedModel,
-                ...(context.activeAgent ? { agent: context.activeAgent } : {}),
-                ...(context.activeVariant ? { variant: context.activeVariant } : {}),
-                parts: [...(text ? [{ type: "text" as const, text }] : []), ...fileParts],
-              },
-              { signal },
-            ),
-          ).pipe(
-            Effect.timeout("10 seconds"),
-            Effect.catchTags({
-              OpenCodeRuntimeError: (cause) => Effect.fail(toRequestError(cause)),
-              TimeoutError: (cause) => {
-                promptTimedOut = true;
-                return Effect.fail(
-                  new ProviderAdapterRequestError({
-                    provider: PROVIDER,
-                    method: "session.promptAsync",
-                    detail: "OpenCode prompt submission did not complete within 10 seconds.",
-                    cause,
-                  }),
+      // Keep prompts and subscribed events on the same compatibility stream.
+      // OpenCode accepts promptAsync while a tool is running and makes the
+      // user message visible to the next provider step after that tool. Mixing
+      // the native v2 prompt inbox with compatibility events starts a second,
+      // unobserved runner and strands the T3 message as pending.
+      yield* runOpenCodeSdk("session.promptAsync", () =>
+        context.client.session.promptAsync({
+          sessionID: context.openCodeSessionId,
+          model: parsedModel,
+          ...(context.activeAgent ? { agent: context.activeAgent } : {}),
+          ...(context.activeVariant ? { variant: context.activeVariant } : {}),
+          parts: [...(text ? [{ type: "text" as const, text }] : []), ...fileParts],
+        }),
+      ).pipe(
+        Effect.mapError(toRequestError),
+        // On failure of a fresh turn: clear active-turn state, flip the
+        // session back to ready with lastError set, emit turn.aborted, then
+        // let the typed error propagate. We don't need to rebuild the error
+        // here — `toRequestError` already produced the right shape. A failed
+        // steer leaves the still-running original turn untouched.
+        Effect.tapError((requestError) =>
+          steeringTurnId !== undefined
+            ? Effect.void
+            : Effect.gen(function* () {
+                context.activeTurnId = undefined;
+                context.activeAgent = undefined;
+                context.activeVariant = undefined;
+                yield* updateProviderSession(
+                  context,
+                  {
+                    status: "ready",
+                    model: modelSelection?.model ?? context.session.model,
+                    lastError: requestError.detail,
+                  },
+                  { clearActiveTurnId: true },
                 );
               },
             }),
@@ -3105,9 +3103,6 @@ export function makeOpenCodeAdapter(
     const interruptTurn: OpenCodeAdapterShape["interruptTurn"] = Effect.fn("interruptTurn")(
       function* (threadId, turnId) {
         const context = yield* ensureSessionContext(sessions, threadId);
-        yield* runOpenCodeSdk("session.abort", () =>
-          context.client.session.abort({ sessionID: context.openCodeSessionId }),
-        ).pipe(Effect.mapError(toRequestError));
         const targetTurnId = turnId ?? context.activeTurnId;
         if (targetTurnId) {
           yield* emit({

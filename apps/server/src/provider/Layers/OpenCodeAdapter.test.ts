@@ -1307,7 +1307,9 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       });
 
       // Steer: OpenCode queues the prompt into the busy session, so the
-      // active turn id is reused instead of opening a new turn.
+      // active turn id is reused instead of opening a new turn. It must use
+      // the same compatibility prompt stream as fresh turns because the
+      // adapter projects that stream's events.
       const steeredTurn = yield* adapter.sendTurn({
         threadId,
         input: "actually run 15",
@@ -1323,6 +1325,12 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       NodeAssert.equal(session?.status, "running");
       NodeAssert.equal(String(session?.activeTurnId), String(turn.turnId));
       NodeAssert.equal(runtimeMock.state.promptCalls.length, 2);
+      const steerCall = runtimeMock.state.promptCalls.at(-1) as Record<string, unknown>;
+      NodeAssert.deepEqual(steerCall, {
+        sessionID: "http://127.0.0.1:9999/session",
+        model: { providerID: "openai", modelID: "gpt-5" },
+        parts: [{ type: "text", text: "actually run 15" }],
+      });
     }),
   );
 

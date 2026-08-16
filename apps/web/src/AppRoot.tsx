@@ -13,14 +13,14 @@ import type { AppRouter } from "./router";
  * share the same atom registry as routed UI.
  */
 export function AppRoot({ router }: { readonly router: AppRouter }) {
-    return (
-      <AppAtomRegistryProvider>
+  return (
+    <AppAtomRegistryProvider>
       <VoiceSessionProvider>
         <RouterProvider router={router} />
         <PreviewAutomationHosts />
         <ElectronBrowserHost />
         <QuitHoldOverlay />
       </VoiceSessionProvider>
-      </AppAtomRegistryProvider>
+    </AppAtomRegistryProvider>
   );
 }

@@ -19,6 +19,7 @@ function asTrimmedString(value: unknown): string | null {
 }
 
 const MAX_PROJECTED_TOOL_OUTPUT_CHARS = 16_000;
+const MAX_PROJECTED_COMMAND_OUTPUT_CHARS = 4_000;
 const TOOL_OUTPUT_TRUNCATED_MARKER = "\n\n[truncated]";
 
 function projectToolOutput(value: unknown): string | null {
@@ -102,7 +103,7 @@ function projectCommandExecutionFields(data: Record<string, unknown>): Record<st
     stateMetadata?.output,
     data.content,
   ]);
-  if (output) {
+  if (output && output.length <= MAX_PROJECTED_COMMAND_OUTPUT_CHARS) {
     projected.rawOutput = { output };
   }
 
@@ -186,21 +187,17 @@ function projectCommandData(data: Record<string, unknown>): Record<string, unkno
   if ("command" in item) {
     projectedItem.command = item.command;
   }
-  const aggregatedOutput = projectToolOutput(item.aggregatedOutput);
+  const aggregatedOutputValue = asTrimmedString(item.aggregatedOutput);
+  const aggregatedOutput =
+    aggregatedOutputValue && aggregatedOutputValue.length > MAX_PROJECTED_COMMAND_OUTPUT_CHARS
+      ? summarizeToolTextOutput(aggregatedOutputValue)
+      : projectToolOutput(aggregatedOutputValue);
   if (aggregatedOutput) {
     projectedItem.aggregatedOutput = aggregatedOutput;
   }
   const tool = asTrimmedString(item.tool);
   if (tool) {
     projectedItem.tool = tool;
-  }
-
-  const aggregatedOutput = asTrimmedString(item.aggregatedOutput);
-  if (aggregatedOutput) {
-    const summary = summarizeToolTextOutput(aggregatedOutput);
-    if (summary) {
-      projectedItem.aggregatedOutput = summary;
-    }
   }
 
   const input = asRecord(item.input);

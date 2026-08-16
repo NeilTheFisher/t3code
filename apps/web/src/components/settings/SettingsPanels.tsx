@@ -513,7 +513,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.wordWrap !== DEFAULT_UNIFIED_SETTINGS.wordWrap ? ["Word wrap"] : []),
       ...getChangedTypographySettingLabels(settings),
       ...(settings.showProviderUsageInContextPopover !==
-         DEFAULT_UNIFIED_SETTINGS.showProviderUsageInContextPopover
+      DEFAULT_UNIFIED_SETTINGS.showProviderUsageInContextPopover
         ? ["Provider usage in chat"]
         : []),
       ...(settings.diffIgnoreWhitespace !== DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace
