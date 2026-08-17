@@ -1,4 +1,5 @@
 import {
+  type ChatAttachment,
   EventId,
   MAX_SCRIPT_ID_LENGTH,
   SCRIPT_RUN_COMMAND_PATTERN,
@@ -8,6 +9,7 @@ import {
   isImportedAgentSessionMessageId,
   type OrchestrationCommand,
   type OrchestrationEvent,
+  type OrchestrationMessage,
   type OrchestrationReadModel,
   type OrchestrationThread,
   type ThreadPullRequestKey,
@@ -29,6 +31,7 @@ import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
 import type * as PlatformError from "effect/PlatformError";
 
+import { createForkedAttachmentId } from "../attachmentStore.ts";
 import {
   OrchestrationCommandInvariantError,
   OrchestrationThreadSettleBlockedError,
@@ -54,6 +57,48 @@ const isScriptRunCommand = Schema.is(SCRIPT_RUN_COMMAND_PATTERN);
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 const decodeUserInputRequestedPayload = Schema.decodeUnknownOption(UserInputRequestedPayload);
 const threadPullRequestLinksEqual = Schema.toEquivalence(Schema.NullOr(ThreadLinkedPullRequest));
+
+// Session adoption takes seconds; a user message still unadopted after this
+// window is a failed/stale start, not pending work. Mirrors the client's
+// QUEUED_TURN_START_GRACE_MS in client-runtime threadSettled.ts.
+const QUEUED_TURN_START_GRACE_MS = 2 * 60 * 1_000;
+
+type ThreadForkCommand = Extract<OrchestrationCommand, { readonly type: "thread.fork" }>;
+
+function rebindForkAttachments(
+  command: ThreadForkCommand,
+  attachments: ReadonlyArray<ChatAttachment> | undefined,
+): Effect.Effect<ReadonlyArray<ChatAttachment> | undefined, OrchestrationCommandInvariantError> {
+  if (attachments === undefined) return Effect.succeed(undefined);
+
+  return Effect.forEach(attachments, (attachment) => {
+    const attachmentId = createForkedAttachmentId(command.threadId, attachment.id);
+    if (attachmentId !== null) return Effect.succeed({ ...attachment, id: attachmentId });
+
+    return Effect.fail(
+      new OrchestrationCommandInvariantError({
+        commandType: command.type,
+        detail: `Cannot fork attachment '${attachment.id}' into thread '${command.threadId}'.`,
+      }),
+    );
+  });
+}
+
+const inheritMessagesForFork = Effect.fn("inheritMessagesForFork")(function* (
+  command: ThreadForkCommand,
+  messages: ReadonlyArray<OrchestrationMessage>,
+) {
+  const settledMessages = messages.filter((message) => !message.streaming);
+  return yield* Effect.forEach(settledMessages, (message, index) =>
+    rebindForkAttachments(command, message.attachments).pipe(
+      Effect.map((attachments) => ({
+        ...message,
+        id: MessageId.make(`${command.threadId}:fork:${index}`),
+        ...(attachments !== undefined ? { attachments } : {}),
+      })),
+    ),
+  );
+});
 
 /**
  * Blocked-on-you work derived from the thread's retained activities: an
@@ -405,6 +450,73 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           interactionMode: command.interactionMode,
           branch: command.branch,
           worktreePath: command.worktreePath,
+          createdAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "thread.fork": {
+      const sourceThread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.sourceThreadId,
+      });
+      if (sourceThread.deletedAt !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Source thread '${sourceThread.id}' is deleted and cannot be forked.`,
+        });
+      }
+      yield* requireThreadAbsent({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+
+      const sourceMessageIndex = sourceThread.messages.findIndex(
+        (message) => message.id === command.sourceMessageId,
+      );
+      const sourceMessage = sourceThread.messages[sourceMessageIndex];
+      if (
+        !sourceMessage ||
+        sourceMessage.streaming ||
+        (sourceMessage.role !== "user" && sourceMessage.role !== "assistant")
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Message '${command.sourceMessageId}' was not found in source thread '${sourceThread.id}' or is not forkable.`,
+        });
+      }
+
+      const inheritedMessages = yield* inheritMessagesForFork(
+        command,
+        sourceThread.messages.slice(
+          0,
+          sourceMessageIndex + (sourceMessage.role === "assistant" ? 1 : 0),
+        ),
+      );
+
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.forked",
+        payload: {
+          threadId: command.threadId,
+          projectId: sourceThread.projectId,
+          title: command.title,
+          modelSelection: command.modelSelection,
+          runtimeMode: sourceThread.runtimeMode,
+          interactionMode: sourceThread.interactionMode,
+          branch: sourceThread.branch,
+          worktreePath: sourceThread.worktreePath,
+          sourceThreadId: sourceThread.id,
+          sourceMessageId: sourceMessage.id,
+          inheritedMessages,
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
         },

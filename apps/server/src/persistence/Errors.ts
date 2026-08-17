@@ -135,4 +135,20 @@ export type AuthPairingLinkRepositoryError = PersistenceSqlError | PersistenceDe
 export type AuthSessionRepositoryError = PersistenceSqlError | PersistenceDecodeError;
 export type PullRequestFilesViewedRepositoryError = PersistenceSqlError | PersistenceDecodeError;
 
-export type ProjectionRepositoryError = PersistenceSqlError | PersistenceDecodeError;
+export class ProjectionAttachmentMaterializationError extends Schema.TaggedError<ProjectionAttachmentMaterializationError>()(
+  "ProjectionAttachmentMaterializationError",
+  {
+    operation: Schema.String,
+    detail: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  override get message(): string {
+    return `Projection attachment materialization failed in ${this.operation}: ${this.detail}`;
+  }
+}
+
+export type ProjectionRepositoryError =
+  | PersistenceSqlError
+  | PersistenceDecodeError
+  | ProjectionAttachmentMaterializationError;

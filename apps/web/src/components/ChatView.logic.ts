@@ -12,6 +12,7 @@ import {
   type ProviderInteractionMode,
   ProviderDriverKind,
   type ProviderInstanceId,
+  type ChatAttachment,
   type ServerProvider,
   type ScopedProjectRef,
   type ScopedThreadRef,
@@ -57,6 +58,7 @@ import {
   resolveSelectableProviderInstanceEntry,
   type ProviderInstanceEntry,
 } from "../providerInstances";
+import { randomUUID } from "../lib/utils";
 
 export const LAST_INVOKED_SCRIPT_BY_PROJECT_KEY = "t3code:last-invoked-script-by-project";
 export const MAX_HIDDEN_MOUNTED_TERMINAL_THREADS = 10;
@@ -475,7 +477,7 @@ export function buildLocalDraftThread(
     id: threadId,
     environmentId: draftThread.environmentId,
     projectId: draftThread.projectId,
-    title: "New thread",
+    title: draftThread.title ?? "New thread",
     modelSelection: fallbackModelSelection,
     runtimeMode: draftThread.runtimeMode,
     interactionMode: draftThread.interactionMode,
@@ -694,6 +696,21 @@ export function revokeBlobPreviewUrl(previewUrl: string | undefined): void {
   URL.revokeObjectURL(previewUrl);
 }
 
+export async function loadVideoPreviewUrl(url: string, signal?: AbortSignal): Promise<string> {
+  const response = await fetch(url, signal ? { signal } : {});
+  if (!response.ok) throw new Error(`Could not load video (${response.status}).`);
+  return URL.createObjectURL(await response.blob());
+}
+
+export function isVideoPreviewRequestCurrent(
+  requestThreadKey: string,
+  currentThreadKey: string,
+  requestId: number,
+  currentRequestId: number,
+): boolean {
+  return requestThreadKey === currentThreadKey && requestId === currentRequestId;
+}
+
 /** Signs an attachment URL without reading its bytes, so video playback can request byte ranges. */
 export async function resolveFileAttachmentUrl(input: {
   attachment: ChatFileAttachment;
@@ -775,6 +792,48 @@ export function timelineHasEphemeralPreviewUrls(
       entry.message !== undefined &&
       collectUserMessageBlobPreviewUrls(entry.message).length > 0,
   );
+}
+
+export function revokeComposerImagePreviewUrls(
+  images: ReadonlyArray<ComposerImageAttachment>,
+): void {
+  for (const image of images) {
+    URL.revokeObjectURL(image.previewUrl);
+  }
+}
+
+export async function cloneUserMessageImagesForFork(
+  message: ChatMessage,
+): Promise<ComposerImageAttachment[]> {
+  const images: ComposerImageAttachment[] = [];
+  try {
+    for (const attachment of message.attachments ?? []) {
+      if (!isImageAttachment(attachment)) continue;
+      // ChatView augments server attachments with previewUrl at runtime
+      // (see displayServerMessages); the server type omits it.
+      const previewUrl = (attachment as ChatAttachment & { previewUrl?: string }).previewUrl;
+      if (!previewUrl) {
+        throw new Error(`The attachment '${attachment.name}' is not available to copy.`);
+      }
+      const response = await fetch(previewUrl);
+      if (!response.ok) {
+        throw new Error(`The attachment '${attachment.name}' could not be loaded.`);
+      }
+      const blob = await response.blob();
+      const file = new File([blob], attachment.name, { type: attachment.mimeType });
+      images.push({
+        ...attachment,
+        id: randomUUID(),
+        sizeBytes: blob.size,
+        previewUrl: URL.createObjectURL(file),
+        file,
+      });
+    }
+    return images;
+  } catch (error) {
+    revokeComposerImagePreviewUrls(images);
+    throw error;
+  }
 }
 
 export function collectUserMessageBlobPreviewUrls(message: ChatMessage): string[] {
@@ -1037,6 +1096,32 @@ export function deriveLockedProvider(input: {
   const narrowedSelectedProvider =
     selectedProvider && isProviderDriverKind(selectedProvider) ? selectedProvider : null;
   return narrowedThreadProvider ?? narrowedSelectedProvider ?? null;
+}
+
+export function shouldCanonicalizeDraftThread(input: {
+  serverThreadStarted: boolean;
+  forkDraft: boolean;
+}): boolean {
+  return input.serverThreadStarted && !input.forkDraft;
+}
+
+export function nextForkThreadTitle(
+  sourceTitle: string,
+  existingTitles: readonly string[],
+): string {
+  const sourceMatch = /^\[fork(?: \d+)?\] (.+)$/.exec(sourceTitle);
+  const baseTitle = sourceMatch?.[1] ?? sourceTitle;
+  const usedOrdinals = new Set<number>();
+
+  for (const title of existingTitles) {
+    const match = /^\[fork(?: (\d+))?\] (.+)$/.exec(title);
+    if (!match || match[2] !== baseTitle) continue;
+    usedOrdinals.add(match[1] ? Number(match[1]) : 1);
+  }
+
+  let ordinal = 1;
+  while (usedOrdinals.has(ordinal)) ordinal += 1;
+  return ordinal === 1 ? `[fork] ${baseTitle}` : `[fork ${ordinal}] ${baseTitle}`;
 }
 
 // Blocks in-thread model changes for providers that cannot resume their own
@@ -1318,6 +1403,13 @@ export function hasServerAcknowledgedLocalDispatch(input: {
     // message as the server acknowledgment so the composer does not remain
     // stuck in its local "Sending" state until the turn settles.
     if (latestUserMessageChanged) {
+      return true;
+    }
+    // A lost user-message projection leaves both the message id and the turn
+    // timestamps unchanged, stranding the spinner for the whole turn. Any
+    // session record update after the dispatch proves the server saw traffic,
+    // so treat that as acknowledgment too.
+    if (input.localDispatch.sessionUpdatedAt !== (session?.updatedAt ?? null)) {
       return true;
     }
     if (!latestTurnChanged) {

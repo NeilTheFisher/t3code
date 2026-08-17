@@ -1591,6 +1591,27 @@ it.effect("rejects thread history imports without messages", () =>
     );
 
     assert.strictEqual(result._tag, "Failure");
+it.effect("decodes a user-message fork with an explicit destination model", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeOrchestrationCommand({
+      type: "thread.fork",
+      commandId: "cmd-fork",
+      threadId: "thread-fork",
+      sourceThreadId: "thread-source",
+      sourceMessageId: "message-user-2",
+      title: "Source thread (fork)",
+      modelSelection: {
+        instanceId: "claudeAgent",
+        model: "claude-opus-4-6",
+      },
+      createdAt: "2026-08-16T12:00:00.000Z",
+    });
+
+    assert.strictEqual(parsed.type, "thread.fork");
+    if (parsed.type === "thread.fork") {
+      assert.strictEqual(parsed.sourceMessageId, "message-user-2");
+      assert.strictEqual(parsed.modelSelection.instanceId, "claudeAgent");
+    }
   }),
 );
 

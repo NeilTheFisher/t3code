@@ -68,6 +68,7 @@ import {
   DEFAULT_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
   type Project,
+  type SidebarThreadSummary,
   type Thread,
 } from "../types";
 
@@ -375,7 +376,6 @@ describe("hasUnseenCompletion", () => {
       hasUnseenCompletion({
         hasActionableProposedPlan: false,
         hasPendingApprovals: false,
-        hasPendingBackgroundTasks: false,
         hasPendingUserInput: false,
         interactionMode: "default",
         latestTurn: makeLatestTurn(),
@@ -390,7 +390,6 @@ describe("hasUnseenCompletion", () => {
       hasUnseenCompletion({
         hasActionableProposedPlan: false,
         hasPendingApprovals: false,
-        hasPendingBackgroundTasks: false,
         hasPendingUserInput: false,
         interactionMode: "default",
         latestTurn: makeLatestTurn(),

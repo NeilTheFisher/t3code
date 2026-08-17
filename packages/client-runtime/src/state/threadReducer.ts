@@ -679,6 +679,7 @@ export function applyThreadDetailEvent(
         retainedTurnIds,
         event.payload.turnCount,
       );
+      const messages = retainMessagesAfterRevert(thread.id, thread.messages, retainedTurnIds);
       const proposedPlans = pipe(
         thread.proposedPlans,
         Arr.filter((plan) => plan.turnId === null || retainedTurnIds.has(plan.turnId)),
@@ -869,6 +870,7 @@ function rebindCheckpointAssistantMessage(
 }
 
 function retainMessagesAfterRevert(
+  threadId: ThreadId,
   messages: ReadonlyArray<OrchestrationMessage>,
   retainedTurnIds: ReadonlySet<string>,
   turnCount: number,
@@ -911,4 +913,14 @@ function retainMessagesAfterRevert(
   }
 
   return Arr.filter(messages, (message) => retainedMessageIds.has(message.id));
+  const inheritedMessagePrefix = `${threadId}:fork:`;
+
+  return Arr.filter(
+    messages,
+    (message) =>
+      message.role === "system" ||
+      message.id.startsWith(inheritedMessagePrefix) ||
+      message.turnId === null ||
+      retainedTurnIds.has(message.turnId),
+  );
 }

@@ -108,6 +108,27 @@ const makeOrchestrationEngine = Effect.gen(function* () {
       return nextReadModel;
     });
 
+  const readModelForCommand = (command: OrchestrationCommand) =>
+    Effect.gen(function* () {
+      if (command.type !== "thread.fork") {
+        return commandReadModel;
+      }
+
+      const sourceThread = yield* projectionSnapshotQuery.getThreadDetailById(
+        command.sourceThreadId,
+      );
+      if (Option.isNone(sourceThread)) {
+        return commandReadModel;
+      }
+
+      return {
+        ...commandReadModel,
+        threads: commandReadModel.threads.map((thread) =>
+          thread.id === sourceThread.value.id ? sourceThread.value : thread,
+        ),
+      };
+    });
+
   const processEnvelope = (envelope: CommandEnvelope): Effect.Effect<void> => {
     const dispatchStartSequence = commandReadModel.snapshotSequence;
     let processingStartedAtMs = 0;
@@ -244,7 +265,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
             : Option.none();
         const eventBase = yield* decideOrchestrationCommand({
           command: envelope.command,
-          readModel: commandReadModel,
+          readModel: yield* readModelForCommand(envelope.command),
           ...(Option.isSome(userInputActivity)
             ? { userInputActivity: userInputActivity.value }
             : {}),
