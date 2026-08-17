@@ -572,7 +572,7 @@ export function applyThreadDetailEvent(
       );
 
       const retainedTurnIds = new Set(Arr.map(checkpoints, (entry) => entry.turnId));
-      const messages = retainMessagesAfterRevert(thread.messages, retainedTurnIds);
+      const messages = retainMessagesAfterRevert(thread.id, thread.messages, retainedTurnIds);
       const proposedPlans = pipe(
         thread.proposedPlans,
         Arr.filter((plan) => plan.turnId === null || retainedTurnIds.has(plan.turnId)),
@@ -702,18 +702,18 @@ function rebindCheckpointAssistantMessage(
 }
 
 function retainMessagesAfterRevert(
+  threadId: ThreadId,
   messages: ReadonlyArray<OrchestrationMessage>,
   retainedTurnIds: ReadonlySet<string>,
 ): OrchestrationMessage[] {
-  // Keep messages that belong to a retained turn, plus system messages and
-  // messages without a turn binding (pre-turn-0 user messages).
-  return Arr.filter(messages, (message) => {
-    if (message.role === "system") {
-      return true;
-    }
-    if (message.turnId === null) {
-      return true;
-    }
-    return retainedTurnIds.has(message.turnId);
-  });
+  const inheritedMessagePrefix = `${threadId}:fork:`;
+
+  return Arr.filter(
+    messages,
+    (message) =>
+      message.role === "system" ||
+      message.id.startsWith(inheritedMessagePrefix) ||
+      message.turnId === null ||
+      retainedTurnIds.has(message.turnId),
+  );
 }

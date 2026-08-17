@@ -124,11 +124,12 @@ import { buildThreadActionMenuItems } from "./threadActionMenu.logic";
 import {
   animatePinnedLayoutChanges,
   buildBulkTitleRegenerationContextMenuItem,
-  filterSidebarProjectScopeItems,
+  discardDraftSession,
   formatWorkingDurationLabel,
   firstValidTimestampMs,
   hasUnseenCompletion,
   isSidebarNestedLinkClick,
+  isMaterializedForkDraftThread,
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
   planPinnedReorder,
@@ -499,9 +500,10 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
     composer.previewAnnotations.length +
     composer.reviewComments.length;
   const preview =
-    promptPreview.length > 0
+    session.title ??
+    (promptPreview.length > 0
       ? promptPreview
-      : `${attachmentCount} attachment${attachmentCount === 1 ? "" : "s"}`;
+      : `${attachmentCount} attachment${attachmentCount === 1 ? "" : "s"}`);
   const handleActivate = useCallback(() => onNavigate(draftId), [draftId, onNavigate]);
   const handleKeyDown = useCallback(
     (event: ReactKeyboardEvent) => {
@@ -600,6 +602,8 @@ const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
   const draftThreadsByThreadKey = useComposerDraftStore((store) => store.draftThreadsByThreadKey);
   const draftsByThreadKey = useComposerDraftStore((store) => store.draftsByThreadKey);
   const clearDraftThread = useComposerDraftStore((store) => store.clearDraftThread);
+  const deleteForkThread = useAtomCommand(threadEnvironment.delete, { reportFailure: false });
+  const discardingDraftIdsRef = useRef(new Set<string>());
   // The open draft's row is FROZEN at the moment the draft became the route:
   // it stays visible (like a thread row) but never repaints while the user
   // types. A draft that was never navigated away from has no snapshot to
@@ -664,14 +668,37 @@ const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
     props.scopedProjectKeys,
   ]);
   const handleDiscard = useCallback(
-    (draftId: DraftId) => {
+    async (draftId: DraftId) => {
       // The /draft/$draftId route redirects home on its own when the draft
       // it renders disappears, so discarding the open draft needs no
       // special-casing here.
       releaseComposerDraftUploads(draftId);
-      clearDraftThread(draftId);
+      if (discardingDraftIdsRef.current.has(draftId)) return;
+      const session = useComposerDraftStore.getState().getDraftSession(draftId);
+      if (!session) return;
+
+      discardingDraftIdsRef.current.add(draftId);
+      try {
+        const result = await discardDraftSession({
+          session,
+          deleteForkThread: ({ environmentId, threadId }) =>
+            deleteForkThread({ environmentId, input: { threadId } }),
+          clearDraft: () => clearDraftThread(draftId),
+        });
+        if (result?._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Could not discard fork",
+              description: squashAtomCommandFailure(result),
+            }),
+          );
+        }
+      } finally {
+        discardingDraftIdsRef.current.delete(draftId);
+      }
     },
-    [clearDraftThread],
+    [clearDraftThread, deleteForkThread],
   );
   if (drafts.length === 0) {
     return null;
@@ -2018,6 +2045,11 @@ export default function Sidebar() {
   // (every non-promoted session with content); it can overcount by one for
   // an open never-left draft, which only softens the empty state.
   const routeDraftIdForRows = routeTarget?.kind === "draft" ? routeTarget.draftId : null;
+  const draftSessions = useComposerDraftStore((store) => store.draftThreadsByThreadKey);
+  const forkDraftSessions = useMemo(
+    () => Object.values(draftSessions).filter((session) => session.forkDraft),
+    [draftSessions],
+  );
   const visibleDraftSessionCount = useComposerDraftStore((store) => {
     let count = 0;
     for (const [draftKey, session] of Object.entries(store.draftThreadsByThreadKey)) {
@@ -2080,6 +2112,7 @@ export default function Sidebar() {
     const visible = threads.filter(
       (thread) =>
         thread.archivedAt === null &&
+        !isMaterializedForkDraftThread(thread, forkDraftSessions) &&
         (scopedProjectKeys === null ||
           scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
     );
@@ -2133,7 +2166,17 @@ export default function Sidebar() {
       settledThreads: sortSettledThreadsForSidebar(settled),
       snoozeNow: preciseNow,
     };
-  }, [nowMinute, scopedProjectKeys, serverConfigs, snoozeWakeTick, threads]);
+  }, [
+    autoSettleAfterDays,
+    autoSettleOnMerge,
+    changeRequestSnapshotByKey,
+    forkDraftSessions,
+    nowMinute,
+    scopedProjectKeys,
+    serverConfigs,
+    snoozeWakeTick,
+    threads,
+  ]);
 
   const threadSearchInputRef = useRef<HTMLInputElement>(null);
   const [threadSearchQuery, setThreadSearchQuery] = useState("");

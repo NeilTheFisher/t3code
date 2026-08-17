@@ -1033,6 +1033,32 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain('data-user-message-footer="true"');
   });
 
+  it("renders direct fork actions beside user and assistant messages", () => {
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          buildUserTimelineEntry("Try this with another model"),
+          buildAssistantTimelineEntry("Original response"),
+        ]}
+        forkMessage={{
+          isForking: false,
+          onFork: () => {},
+        }}
+      />,
+    );
+
+    expect(markup).toContain('aria-label="Fork from this message"');
+    expect(markup.match(/aria-label="Fork from this message"/g)).toHaveLength(2);
+    expect(markup.indexOf('aria-label="Copy link"')).toBeLessThan(
+      markup.indexOf('aria-label="Fork from this message"'),
+    );
+    for (const button of markup.match(/<button[^>]*aria-label="Fork from this message"[^>]*>/g) ??
+      []) {
+      expect(button).not.toContain("aria-haspopup");
+    }
+  });
+
   it("renders context compaction entries in the normal work log", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline

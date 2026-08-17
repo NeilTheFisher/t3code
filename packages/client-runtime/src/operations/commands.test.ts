@@ -1,8 +1,10 @@
 import {
   CommandId,
   EnvironmentId,
+  MessageId,
   ORCHESTRATION_WS_METHODS,
   ProjectId,
+  ProviderInstanceId,
   ThreadId,
   type ClientOrchestrationCommand,
 } from "@t3tools/contracts";
@@ -24,6 +26,7 @@ import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
 import {
   archiveThread,
   createProject,
+  forkThread,
   settleThread,
   stopThreadSession,
   unsettleThread,
@@ -74,6 +77,33 @@ const makeSupervisor = Effect.fn("TestEnvironmentCommands.makeSupervisor")(funct
 });
 
 describe("environment commands", () => {
+  it.effect("dispatches a thread fork at a user-message boundary", () =>
+    Effect.gen(function* () {
+      const dispatched: ClientOrchestrationCommand[] = [];
+      const supervisor = yield* makeSupervisor(dispatched);
+
+      yield* forkThread({
+        commandId: CommandId.make("fork-command"),
+        threadId: ThreadId.make("thread-fork"),
+        sourceThreadId: ThreadId.make("thread-source"),
+        sourceMessageId: MessageId.make("user-message-2"),
+        title: "Source (fork)",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("claudeAgent"),
+          model: "claude-opus-4-6",
+        },
+        createdAt: "2026-08-16T12:00:00.000Z",
+      }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
+
+      expect(dispatched[0]).toMatchObject({
+        type: "thread.fork",
+        threadId: "thread-fork",
+        sourceThreadId: "thread-source",
+        sourceMessageId: "user-message-2",
+      });
+    }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
+  );
+
   it.effect("adds generated command metadata", () =>
     Effect.gen(function* () {
       const dispatched: ClientOrchestrationCommand[] = [];

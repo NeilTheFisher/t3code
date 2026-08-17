@@ -869,6 +869,15 @@ describe("applyThreadDetailEvent", () => {
         ...baseThread,
         messages: [
           {
+            id: MessageId.make("thread-1:fork:0"),
+            role: "assistant",
+            text: "Inherited context",
+            turnId: TurnId.make("source-turn"),
+            streaming: false,
+            createdAt: "2026-04-01T00:00:00.000Z",
+            updatedAt: "2026-04-01T00:00:00.000Z",
+          },
+          {
             id: MessageId.make("msg-1"),
             role: "user",
             text: "First",
@@ -936,8 +945,12 @@ describe("applyThreadDetailEvent", () => {
         // turn-2 checkpoint is filtered out (turnCount 2 > revert target 1)
         expect(result.thread.checkpoints).toHaveLength(1);
         expect(result.thread.checkpoints[0]?.turnId).toBe("turn-1");
-        // msg-3 (turn-2) is filtered, msg-1 (no turn) and msg-2 (turn-1) remain
-        expect(result.thread.messages).toHaveLength(2);
+        // msg-3 (turn-2) is filtered; fork-owned history, msg-1, and msg-2 remain.
+        expect(result.thread.messages.map((message) => message.id)).toEqual([
+          "thread-1:fork:0",
+          "msg-1",
+          "msg-2",
+        ]);
         expect(result.thread.latestTurn?.turnId).toBe("turn-1");
       }
     });

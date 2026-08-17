@@ -33,6 +33,7 @@ import {
 import type { DraftThreadEnvMode } from "../composerDraftStore";
 import type { ComposerSubmissionIntent } from "../composer-logic";
 import type { TimelineEntry } from "../session-logic";
+import { randomUUID } from "../lib/utils";
 
 export const LAST_INVOKED_SCRIPT_BY_PROJECT_KEY = "t3code:last-invoked-script-by-project";
 export const MAX_HIDDEN_MOUNTED_TERMINAL_THREADS = 10;
@@ -180,7 +181,7 @@ export function buildLocalDraftThread(
     id: threadId,
     environmentId: draftThread.environmentId,
     projectId: draftThread.projectId,
-    title: "New thread",
+    title: draftThread.title ?? "New thread",
     modelSelection: fallbackModelSelection,
     runtimeMode: draftThread.runtimeMode,
     interactionMode: draftThread.interactionMode,
@@ -320,6 +321,44 @@ export function revokeUserMessagePreviewUrls(message: ChatMessage): void {
       continue;
     }
     revokeBlobPreviewUrl(attachment.previewUrl);
+  }
+}
+
+export function revokeComposerImagePreviewUrls(
+  images: ReadonlyArray<ComposerImageAttachment>,
+): void {
+  for (const image of images) {
+    URL.revokeObjectURL(image.previewUrl);
+  }
+}
+
+export async function cloneUserMessageImagesForFork(
+  message: ChatMessage,
+): Promise<ComposerImageAttachment[]> {
+  const images: ComposerImageAttachment[] = [];
+  try {
+    for (const attachment of message.attachments ?? []) {
+      if (!attachment.previewUrl) {
+        throw new Error(`The attachment '${attachment.name}' is not available to copy.`);
+      }
+      const response = await fetch(attachment.previewUrl);
+      if (!response.ok) {
+        throw new Error(`The attachment '${attachment.name}' could not be loaded.`);
+      }
+      const blob = await response.blob();
+      const file = new File([blob], attachment.name, { type: attachment.mimeType });
+      images.push({
+        ...attachment,
+        id: randomUUID(),
+        sizeBytes: blob.size,
+        previewUrl: URL.createObjectURL(file),
+        file,
+      });
+    }
+    return images;
+  } catch (error) {
+    revokeComposerImagePreviewUrls(images);
+    throw error;
   }
 }
 
@@ -510,6 +549,32 @@ export function threadHasStarted(thread: Thread | null | undefined): boolean {
   return Boolean(
     thread && (thread.latestTurn !== null || thread.messages.length > 0 || thread.session !== null),
   );
+}
+
+export function shouldCanonicalizeDraftThread(input: {
+  serverThreadStarted: boolean;
+  forkDraft: boolean;
+}): boolean {
+  return input.serverThreadStarted && !input.forkDraft;
+}
+
+export function nextForkThreadTitle(
+  sourceTitle: string,
+  existingTitles: readonly string[],
+): string {
+  const sourceMatch = /^\[fork(?: \d+)?\] (.+)$/.exec(sourceTitle);
+  const baseTitle = sourceMatch?.[1] ?? sourceTitle;
+  const usedOrdinals = new Set<number>();
+
+  for (const title of existingTitles) {
+    const match = /^\[fork(?: (\d+))?\] (.+)$/.exec(title);
+    if (!match || match[2] !== baseTitle) continue;
+    usedOrdinals.add(match[1] ? Number(match[1]) : 1);
+  }
+
+  let ordinal = 1;
+  while (usedOrdinals.has(ordinal)) ordinal += 1;
+  return ordinal === 1 ? `[fork] ${baseTitle}` : `[fork ${ordinal}] ${baseTitle}`;
 }
 
 // Blocks in-thread model changes for providers that cannot resume their own

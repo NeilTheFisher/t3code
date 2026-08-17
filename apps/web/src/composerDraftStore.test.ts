@@ -1466,6 +1466,29 @@ describe("composerDraftStore project draft thread mapping", () => {
     expect(draftByKey(draftId)?.prompt).toBe("promote me");
   });
 
+  it("keeps a materialized fork in the draft list until its first turn", () => {
+    const store = useComposerDraftStore.getState();
+    store.setProjectDraftThreadId(projectRef, draftId, {
+      threadId,
+      title: "[fork] Source thread",
+      forkDraft: true,
+    });
+    store.setPrompt(draftId, "Fork from here");
+
+    markPromotedDraftThreadByRef(scopeThreadRef(TEST_ENVIRONMENT_ID, threadId));
+
+    expect(store.getDraftThread(draftId)).toMatchObject({
+      title: "[fork] Source thread",
+      forkDraft: true,
+      promotedTo: null,
+    });
+    expect(draftByKey(draftId)?.prompt).toBe("Fork from here");
+
+    store.markDraftThreadPromoting(draftId, scopeThreadRef(TEST_ENVIRONMENT_ID, threadId));
+    store.finalizePromotedDraftThread(draftId);
+    expect(store.getDraftThread(draftId)).toBeNull();
+  });
+
   it("reads local draft composer state through a scoped thread ref", () => {
     const store = useComposerDraftStore.getState();
     const threadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, threadId);

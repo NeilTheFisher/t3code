@@ -2481,6 +2481,110 @@ describe("ProviderCommandReactor", () => {
     });
   });
 
+  it("replays inherited fork history into the child provider's first turn", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-fork-context-source-first"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("fork-context-user-1"),
+          role: "user",
+          text: "first question",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.message.assistant.delta",
+        commandId: CommandId.make("cmd-fork-context-assistant-delta"),
+        threadId: ThreadId.make("thread-1"),
+        messageId: asMessageId("fork-context-assistant-1"),
+        delta: "first answer",
+        turnId: asTurnId("turn-1"),
+        createdAt: now,
+      }),
+    );
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.message.assistant.complete",
+        commandId: CommandId.make("cmd-fork-context-assistant"),
+        threadId: ThreadId.make("thread-1"),
+        messageId: asMessageId("fork-context-assistant-1"),
+        turnId: asTurnId("turn-1"),
+        createdAt: now,
+      }),
+    );
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-fork-context-source-second"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("fork-context-user-2"),
+          role: "user",
+          text: "second question",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+    await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.fork",
+        commandId: CommandId.make("cmd-fork-context-create"),
+        threadId: ThreadId.make("thread-fork"),
+        sourceThreadId: ThreadId.make("thread-1"),
+        sourceMessageId: asMessageId("fork-context-user-2"),
+        title: "Thread (fork)",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("claudeAgent"),
+          model: "claude-opus-4-6",
+        },
+        createdAt: now,
+      }),
+    );
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-fork-context-child-turn"),
+        threadId: ThreadId.make("thread-fork"),
+        message: {
+          messageId: asMessageId("fork-context-child-user"),
+          role: "user",
+          text: "second question",
+          attachments: [],
+        },
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("claudeAgent"),
+          model: "claude-opus-4-6",
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 3);
+    const childTurn = harness.sendTurn.mock.calls[2]?.[0] as { input?: string };
+    expect(childTurn.input).toContain("[Conversation handoff]");
+    expect(childTurn.input).toContain("first question");
+    expect(childTurn.input).toContain("first answer");
+    expect(childTurn.input?.endsWith("second question")).toBe(true);
+  });
+
   it("hands off to a different driver after the existing thread session has stopped", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";

@@ -272,6 +272,8 @@ const PersistedDraftThreadState = Schema.Struct({
   worktreePath: Schema.NullOr(Schema.String),
   envMode: DraftThreadEnvModeSchema,
   startFromOrigin: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  title: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  forkDraft: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   promotedTo: Schema.optionalKey(
     Schema.NullOr(
       Schema.Struct({
@@ -384,6 +386,8 @@ export interface DraftSessionState {
   worktreePath: string | null;
   envMode: DraftThreadEnvMode;
   startFromOrigin: boolean;
+  title: string | null;
+  forkDraft: boolean;
   promotedTo?: ScopedThreadRef | null;
 }
 
@@ -405,6 +409,19 @@ interface ProjectDraftSession extends DraftSessionState {
  * identity for real threads.
  */
 export type ComposerThreadTarget = ScopedThreadRef | DraftId;
+
+interface DraftSessionOptions {
+  threadId?: ThreadId;
+  branch?: string | null;
+  worktreePath?: string | null;
+  createdAt?: string;
+  envMode?: DraftThreadEnvMode;
+  startFromOrigin?: boolean;
+  runtimeMode?: RuntimeMode;
+  interactionMode?: ProviderInteractionMode;
+  title?: string | null;
+  forkDraft?: boolean;
+}
 
 /**
  * Persisted store for composer content plus draft-session metadata.
@@ -440,31 +457,13 @@ interface ComposerDraftStoreState {
     logicalProjectKey: string,
     projectRef: ScopedProjectRef,
     draftId: DraftId,
-    options?: {
-      threadId?: ThreadId;
-      branch?: string | null;
-      worktreePath?: string | null;
-      createdAt?: string;
-      envMode?: DraftThreadEnvMode;
-      startFromOrigin?: boolean;
-      runtimeMode?: RuntimeMode;
-      interactionMode?: ProviderInteractionMode;
-    },
+    options?: DraftSessionOptions,
   ) => void;
   /** Creates or updates the draft session tracked for a concrete project ref. */
   setProjectDraftThreadId: (
     projectRef: ScopedProjectRef,
     draftId: DraftId,
-    options?: {
-      threadId?: ThreadId;
-      branch?: string | null;
-      worktreePath?: string | null;
-      createdAt?: string;
-      envMode?: DraftThreadEnvMode;
-      startFromOrigin?: boolean;
-      runtimeMode?: RuntimeMode;
-      interactionMode?: ProviderInteractionMode;
-    },
+    options?: DraftSessionOptions,
   ) => void;
   /** Updates mutable draft-session metadata without touching composer content. */
   setDraftThreadContext: (
@@ -1471,16 +1470,7 @@ function createDraftThreadState(
   threadId: ThreadId,
   logicalProjectKey: string,
   existingThread: DraftThreadState | undefined,
-  options?: {
-    threadId?: ThreadId;
-    branch?: string | null;
-    worktreePath?: string | null;
-    createdAt?: string;
-    envMode?: DraftThreadEnvMode;
-    startFromOrigin?: boolean;
-    runtimeMode?: RuntimeMode;
-    interactionMode?: ProviderInteractionMode;
-  },
+  options?: DraftSessionOptions,
 ): DraftThreadState {
   // A project change (including switching environments within a logical
   // project) invalidates machine-specific context: the branch may not exist
@@ -1520,6 +1510,8 @@ function createDraftThreadState(
     envMode:
       options?.envMode ?? (nextWorktreePath ? "worktree" : (existingThread?.envMode ?? "local")),
     startFromOrigin: nextStartFromOrigin,
+    title: options?.title === undefined ? (existingThread?.title ?? null) : options.title,
+    forkDraft: options?.forkDraft ?? existingThread?.forkDraft ?? false,
     promotedTo: null,
   };
 }
@@ -1552,6 +1544,8 @@ function draftThreadsEqual(left: DraftThreadState | undefined, right: DraftThrea
     left.worktreePath === right.worktreePath &&
     left.envMode === right.envMode &&
     left.startFromOrigin === right.startFromOrigin &&
+    left.title === right.title &&
+    left.forkDraft === right.forkDraft &&
     scopedThreadRefsEqual(left.promotedTo, right.promotedTo)
   );
 }
@@ -1695,6 +1689,8 @@ function normalizePersistedDraftThreads(
         worktreePath: normalizedWorktreePath,
         envMode: normalizeDraftThreadEnvMode(candidateDraftThread.envMode, normalizedWorktreePath),
         startFromOrigin,
+        title: typeof candidateDraftThread.title === "string" ? candidateDraftThread.title : null,
+        forkDraft: candidateDraftThread.forkDraft === true,
         promotedTo,
       };
     }
@@ -1747,6 +1743,8 @@ function normalizePersistedDraftThreads(
           worktreePath: null,
           envMode: "local",
           startFromOrigin: false,
+          title: null,
+          forkDraft: false,
           promotedTo: null,
         };
       } else if (
@@ -2393,6 +2391,8 @@ function toHydratedDraftThreadState(
     worktreePath: persistedDraftThread.worktreePath,
     envMode: persistedDraftThread.envMode,
     startFromOrigin: persistedDraftThread.startFromOrigin,
+    title: persistedDraftThread.title,
+    forkDraft: persistedDraftThread.forkDraft,
     promotedTo: persistedDraftThread.promotedTo
       ? scopeThreadRef(
           persistedDraftThread.promotedTo.environmentId as EnvironmentId,
@@ -2628,21 +2628,11 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               envMode:
                 options.envMode ?? (nextWorktreePath ? "worktree" : (existing.envMode ?? "local")),
               startFromOrigin: nextStartFromOrigin,
+              title: options.title === undefined ? existing.title : options.title,
+              forkDraft: options.forkDraft ?? existing.forkDraft,
               promotedTo: existing.promotedTo ?? null,
             };
-            const isUnchanged =
-              nextDraftThread.environmentId === existing.environmentId &&
-              nextDraftThread.projectId === existing.projectId &&
-              nextDraftThread.logicalProjectKey === existing.logicalProjectKey &&
-              nextDraftThread.createdAt === existing.createdAt &&
-              nextDraftThread.runtimeMode === existing.runtimeMode &&
-              nextDraftThread.interactionMode === existing.interactionMode &&
-              nextDraftThread.branch === existing.branch &&
-              nextDraftThread.worktreePath === existing.worktreePath &&
-              nextDraftThread.envMode === existing.envMode &&
-              nextDraftThread.startFromOrigin === existing.startFromOrigin &&
-              scopedThreadRefsEqual(nextDraftThread.promotedTo, existing.promotedTo);
-            if (isUnchanged) {
+            if (draftThreadsEqual(existing, nextDraftThread)) {
               return state;
             }
             return {
@@ -4121,7 +4111,7 @@ export function markPromotedDraftThread(threadId: ThreadId): void {
   const store = useComposerDraftStore.getState();
   const draftThreadTargets: ComposerThreadTarget[] = [];
   for (const [draftId, draftThread] of Object.entries(store.draftThreadsByThreadKey)) {
-    if (draftThread.threadId === threadId) {
+    if (draftThread.threadId === threadId && !draftThread.forkDraft) {
       draftThreadTargets.push(DraftId.make(draftId));
     }
   }
@@ -4138,7 +4128,8 @@ export function markPromotedDraftThreadByRef(threadRef: ScopedThreadRef): void {
   for (const [draftId, draftThread] of Object.entries(draftStore.draftThreadsByThreadKey)) {
     if (
       draftThread.environmentId === threadRef.environmentId &&
-      draftThread.threadId === threadRef.threadId
+      draftThread.threadId === threadRef.threadId &&
+      !draftThread.forkDraft
     ) {
       draftStore.markDraftThreadPromoting(DraftId.make(draftId), threadRef);
     }

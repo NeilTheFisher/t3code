@@ -98,6 +98,7 @@ import {
   keepTimelineEndVisibleAfterOverlayGrowth,
 } from "./timelineScrollAnchoring";
 import { MessageCopyButton } from "./MessageCopyButton";
+import { MessageForkButton, type ForkMessageConfig } from "./MessageForkButton";
 import { MessagePlayButton } from "./MessagePlayButton";
 import { stopPlayback as stopTtsPlayback } from "~/hooks/useTtsPlayer";
 import {
@@ -175,7 +176,7 @@ interface TimelineRowSharedState {
   activeThreadEnvironmentId: EnvironmentId;
   ttsEnabled: boolean;
   onRevertUserMessage: (messageId: MessageId) => void;
-  onUseArtifactTemplate: (template: CodexArtifactTemplate) => void;
+  forkMessage: ForkMessageConfig | null;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onFileOpen: (attachment: ChatFileAttachment) => void;
   openingVideoAttachmentId: string | null;
@@ -258,6 +259,7 @@ interface MessagesTimelineProps {
   onRevertUserMessage: (messageId: MessageId) => void;
   onUseArtifactTemplate?: (template: CodexArtifactTemplate) => void;
   isRevertingCheckpoint: boolean;
+  forkMessage?: ForkMessageConfig | null;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onFileOpen?: (attachment: ChatFileAttachment) => void;
   openingVideoAttachmentId: string | null;
@@ -307,6 +309,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onRevertUserMessage,
   onUseArtifactTemplate = NOOP_USE_ARTIFACT_TEMPLATE,
   isRevertingCheckpoint,
+  forkMessage = null,
   onImageExpand,
   onFileOpen = NOOP_OPEN_ATTACHMENT,
   openingVideoAttachmentId,
@@ -580,7 +583,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       activeThreadEnvironmentId,
       ttsEnabled,
       onRevertUserMessage,
-      onUseArtifactTemplate,
+      forkMessage,
       onImageExpand,
       onFileOpen,
       openingVideoAttachmentId,
@@ -600,7 +603,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       activeThreadEnvironmentId,
       ttsEnabled,
       onRevertUserMessage,
-      onUseArtifactTemplate,
+      forkMessage,
       onImageExpand,
       onFileOpen,
       openingVideoAttachmentId,
@@ -1227,6 +1230,9 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
             {displayedUserMessage.copyText && (
               <MessageCopyButton text={displayedUserMessage.copyText} variant="ghost" />
             )}
+            {ctx.forkMessage ? (
+              <MessageForkButton messageId={row.message.id} config={ctx.forkMessage} />
+            ) : null}
           </div>
         </div>
       </div>
@@ -1333,8 +1339,9 @@ function AssistantMessageActions({ row }: { row: Extract<TimelineRow, { kind: "m
   };
   const copyState = resolveAssistantMessageCopyState(source);
   const playState = resolveAssistantMessagePlayState({ ...source, ttsEnabled: ctx.ttsEnabled });
+  const showFork = ctx.forkMessage !== null && !row.message.streaming;
 
-  if (!copyState.visible && !playState.visible) {
+  if (!copyState.visible && !playState.visible && !showFork) {
     return null;
   }
 
@@ -1344,6 +1351,7 @@ function AssistantMessageActions({ row }: { row: Extract<TimelineRow, { kind: "m
         <MessagePlayButton messageId={row.message.id} text={playState.text ?? ""} variant="ghost" />
       ) : null}
       {copyState.visible ? <MessageCopyButton text={copyState.text ?? ""} variant="ghost" /> : null}
+      {showFork ? <MessageForkButton messageId={row.message.id} config={ctx.forkMessage!} /> : null}
     </div>
   );
 }

@@ -530,6 +530,7 @@ const make = Effect.gen(function* () {
     options?: {
       readonly modelSelection?: ModelSelection;
       readonly pendingTurnStart?: boolean;
+      readonly currentMessageId?: string;
     },
   ) {
     const thread = yield* resolveThread(threadId);
@@ -620,6 +621,15 @@ const make = Effect.gen(function* () {
       (currentInfo.driverKind !== desiredInfo.driverKind ||
         currentInfo.continuationIdentity.continuationKey !==
           desiredInfo.continuationIdentity.continuationKey);
+    const shouldReplayExistingContext =
+      thread.session === null &&
+      options?.currentMessageId !== undefined &&
+      thread.messages.some(
+        (message) =>
+          message.id !== options.currentMessageId &&
+          (message.role === "user" || message.role === "assistant") &&
+          message.text.trim().length > 0,
+      );
     if (options?.pendingTurnStart === true && thread.session?.status !== "running") {
       yield* setThreadSession({
         threadId,
@@ -657,7 +667,7 @@ const make = Effect.gen(function* () {
     // returns `undefined` when there is genuinely nothing to hand off, so we
     // must not gate on an assistant message specifically — a thread with only
     // user messages and/or tool activity still has context worth carrying.
-    const handedOff = isProviderHandoff;
+    const handedOff = isProviderHandoff || shouldReplayExistingContext;
     const persistHandoffModelSelection = Effect.gen(function* () {
       if (!isProviderHandoff) {
         return;
@@ -862,6 +872,7 @@ const make = Effect.gen(function* () {
     const ensuredSession = yield* ensureSessionForThread(input.threadId, input.createdAt, {
       ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
       pendingTurnStart: true,
+      ...(input.messageId !== undefined ? { currentMessageId: input.messageId } : {}),
     });
     if (input.modelSelection !== undefined) {
       threadModelSelections.set(input.threadId, input.modelSelection);

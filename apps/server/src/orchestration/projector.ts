@@ -17,6 +17,7 @@ import {
   ThreadActivityAppendedPayload,
   ThreadArchivedPayload,
   ThreadCreatedPayload,
+  ThreadForkedPayload,
   ThreadDeletedPayload,
   ThreadInteractionModeSetPayload,
   ThreadMetaUpdatedPayload,
@@ -34,6 +35,7 @@ import {
   ThreadSessionSetPayload,
   ThreadTurnDiffCompletedPayload,
 } from "./Schemas.ts";
+import { isInheritedForkMessage } from "./threadFork.ts";
 
 type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
 const MAX_THREAD_MESSAGES = 2_000;
@@ -88,13 +90,14 @@ function decodeForEvent<A>(
 }
 
 function retainThreadMessagesAfterRevert(
+  threadId: ThreadId,
   messages: ReadonlyArray<OrchestrationMessage>,
   retainedTurnIds: ReadonlySet<string>,
   turnCount: number,
 ): ReadonlyArray<OrchestrationMessage> {
   const retainedMessageIds = new Set<string>();
   for (const message of messages) {
-    if (message.role === "system") {
+    if (message.role === "system" || isInheritedForkMessage(threadId, message.id)) {
       retainedMessageIds.add(message.id);
       continue;
     }
@@ -104,7 +107,10 @@ function retainThreadMessagesAfterRevert(
   }
 
   const retainedUserCount = messages.filter(
-    (message) => message.role === "user" && retainedMessageIds.has(message.id),
+    (message) =>
+      message.role === "user" &&
+      !isInheritedForkMessage(threadId, message.id) &&
+      retainedMessageIds.has(message.id),
   ).length;
   const missingUserCount = Math.max(0, turnCount - retainedUserCount);
   if (missingUserCount > 0) {
@@ -126,7 +132,10 @@ function retainThreadMessagesAfterRevert(
   }
 
   const retainedAssistantCount = messages.filter(
-    (message) => message.role === "assistant" && retainedMessageIds.has(message.id),
+    (message) =>
+      message.role === "assistant" &&
+      !isInheritedForkMessage(threadId, message.id) &&
+      retainedMessageIds.has(message.id),
   ).length;
   const missingAssistantCount = Math.max(0, turnCount - retainedAssistantCount);
   if (missingAssistantCount > 0) {
@@ -309,6 +318,55 @@ export function projectEvent(
             deletedAt: null,
             messages: [],
             activities: [],
+            checkpoints: [],
+            session: null,
+          },
+          event.type,
+          "thread",
+        );
+        const existing = nextBase.threads.find((entry) => entry.id === thread.id);
+        return {
+          ...nextBase,
+          threads: existing
+            ? nextBase.threads.map((entry) => (entry.id === thread.id ? thread : entry))
+            : [...nextBase.threads, thread],
+        };
+      });
+
+    case "thread.forked":
+      return Effect.gen(function* () {
+        const payload = yield* decodeForEvent(
+          ThreadForkedPayload,
+          event.payload,
+          event.type,
+          "payload",
+        );
+        const thread: OrchestrationThread = yield* decodeForEvent(
+          OrchestrationThread,
+          {
+            id: payload.threadId,
+            projectId: payload.projectId,
+            title: payload.title,
+            modelSelection: payload.modelSelection,
+            runtimeMode: payload.runtimeMode,
+            interactionMode: payload.interactionMode,
+            branch: payload.branch,
+            worktreePath: payload.worktreePath,
+            latestTurn: null,
+            createdAt: payload.createdAt,
+            updatedAt: payload.updatedAt,
+            archivedAt: null,
+            settledOverride: null,
+            settledAt: null,
+            snoozedUntil: null,
+            snoozedAt: null,
+            pinnedAt: null,
+            pinOrderKey: null,
+            titleRegeneration: null,
+            deletedAt: null,
+            messages: payload.inheritedMessages,
+            activities: [],
+            hasMoreActivities: false,
             checkpoints: [],
             session: null,
           },
@@ -748,6 +806,7 @@ export function projectEvent(
             .slice(-MAX_THREAD_CHECKPOINTS);
           const retainedTurnIds = new Set(checkpoints.map((checkpoint) => checkpoint.turnId));
           const messages = retainThreadMessagesAfterRevert(
+            thread.id,
             thread.messages,
             retainedTurnIds,
             payload.turnCount,

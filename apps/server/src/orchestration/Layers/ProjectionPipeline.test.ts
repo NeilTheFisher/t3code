@@ -748,6 +748,141 @@ it.layer(
   );
 });
 
+it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-projection-fork-")))(
+  "OrchestrationProjectionPipeline",
+  (it) => {
+    it.effect("persists fork history and gives copied attachments independent files", () =>
+      Effect.gen(function* () {
+        const projectionPipeline = yield* OrchestrationProjectionPipeline;
+        const eventStore = yield* OrchestrationEventStore;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const sql = yield* SqlClient.SqlClient;
+        const { attachmentsDir } = yield* ServerConfig;
+        const now = "2026-08-16T12:00:00.000Z";
+        const projectId = ProjectId.make("project-fork");
+        const sourceThreadId = ThreadId.make("thread-source");
+        const forkThreadId = ThreadId.make("thread-fork");
+        const sourceAttachmentId = "thread-source-00000000-0000-4000-8000-000000000001";
+        const forkAttachmentId = "thread-fork-00000000-0000-4000-8000-000000000001";
+        const sourceAttachmentPath = path.join(attachmentsDir, `${sourceAttachmentId}.png`);
+        const forkAttachmentPath = path.join(attachmentsDir, `${forkAttachmentId}.png`);
+
+        const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
+          eventStore
+            .append(event)
+            .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)));
+
+        yield* appendAndProject({
+          type: "project.created",
+          eventId: EventId.make("event-fork-project"),
+          aggregateKind: "project",
+          aggregateId: projectId,
+          occurredAt: now,
+          commandId: CommandId.make("command-fork-project"),
+          causationEventId: null,
+          correlationId: CorrelationId.make("command-fork-project"),
+          metadata: {},
+          payload: {
+            projectId,
+            title: "Fork project",
+            workspaceRoot: "/tmp/project-fork",
+            defaultModelSelection: null,
+            scripts: [],
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+        yield* appendAndProject({
+          type: "thread.created",
+          eventId: EventId.make("event-fork-source"),
+          aggregateKind: "thread",
+          aggregateId: sourceThreadId,
+          occurredAt: now,
+          commandId: CommandId.make("command-fork-source"),
+          causationEventId: null,
+          correlationId: CorrelationId.make("command-fork-source"),
+          metadata: {},
+          payload: {
+            threadId: sourceThreadId,
+            projectId,
+            title: "Source",
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("codex"),
+              model: "gpt-5.4",
+            },
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+        yield* fileSystem.makeDirectory(attachmentsDir, { recursive: true });
+        yield* fileSystem.writeFileString(sourceAttachmentPath, "fork-context-image");
+
+        yield* appendAndProject({
+          type: "thread.forked",
+          eventId: EventId.make("event-fork-child"),
+          aggregateKind: "thread",
+          aggregateId: forkThreadId,
+          occurredAt: now,
+          commandId: CommandId.make("command-fork-child"),
+          causationEventId: null,
+          correlationId: CorrelationId.make("command-fork-child"),
+          metadata: {},
+          payload: {
+            threadId: forkThreadId,
+            projectId,
+            title: "Source (fork)",
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("claudeAgent"),
+              model: "claude-opus-4-6",
+            },
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+            sourceThreadId,
+            sourceMessageId: MessageId.make("user-2"),
+            inheritedMessages: [
+              {
+                id: MessageId.make("thread-fork:fork:0"),
+                role: "user",
+                text: "Earlier context",
+                attachments: [
+                  {
+                    type: "image",
+                    id: forkAttachmentId,
+                    name: "context.png",
+                    mimeType: "image/png",
+                    sizeBytes: 18,
+                  },
+                ],
+                turnId: TurnId.make("turn-1"),
+                streaming: false,
+                createdAt: now,
+                updatedAt: now,
+              },
+            ],
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+
+        const rows = yield* sql<{ readonly messageId: string; readonly text: string }>`
+          SELECT message_id AS "messageId", text
+          FROM projection_thread_messages
+          WHERE thread_id = ${forkThreadId}
+        `;
+        assert.deepEqual(rows, [{ messageId: "thread-fork:fork:0", text: "Earlier context" }]);
+        assert.equal(yield* fileSystem.readFileString(forkAttachmentPath), "fork-context-image");
+      }),
+    );
+  },
+);
+
 it.layer(
   Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-projection-attachments-rollback-")),
 )("OrchestrationProjectionPipeline", (it) => {

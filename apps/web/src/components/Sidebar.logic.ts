@@ -48,6 +48,47 @@ type ScopedSidebarThread = ThreadSortInput & {
   archivedAt: string | null;
 };
 
+type ForkDraftSession = {
+  environmentId: string;
+  threadId: string;
+  forkDraft: boolean;
+  promotedTo: unknown | null;
+};
+
+export function isMaterializedForkDraftThread(
+  thread: { environmentId: string; id: string },
+  draftSessions: readonly ForkDraftSession[],
+): boolean {
+  return draftSessions.some(
+    (draft) =>
+      draft.forkDraft &&
+      draft.promotedTo === null &&
+      draft.environmentId === thread.environmentId &&
+      draft.threadId === thread.id,
+  );
+}
+
+export async function discardDraftSession<
+  TResult extends { readonly _tag: "Success" | "Failure" },
+>(input: {
+  session: {
+    environmentId: string;
+    threadId: string;
+    forkDraft: boolean;
+  };
+  deleteForkThread: (thread: { environmentId: string; threadId: string }) => Promise<TResult>;
+  clearDraft: () => void;
+}): Promise<TResult | null> {
+  if (!input.session.forkDraft) {
+    input.clearDraft();
+    return null;
+  }
+
+  const result = await input.deleteForkThread(input.session);
+  if (result._tag === "Success") input.clearDraft();
+  return result;
+}
+
 type LogicalSidebarProject = SidebarProject & {
   projectKey: string;
   memberProjectRefs: readonly {

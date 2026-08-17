@@ -9,15 +9,17 @@ import {
 } from "@t3tools/contracts";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import type { Thread, ThreadShell } from "../types";
-import type { CodexArtifactTemplate } from "@t3tools/client-runtime/codex-artifact-templates";
+import type { ChatMessage, Thread, ThreadShell } from "../types";
+import type { DraftThreadState } from "../composerDraftStore";
 import {
   MAX_HIDDEN_MOUNTED_PREVIEW_THREADS,
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
   branchMismatchKey,
   buildExpiredTerminalContextToastCopy,
+  buildLocalDraftThread,
   buildLoadingThreadFromShell,
   buildThreadTurnInterruptInput,
+  cloneUserMessageImagesForFork,
   createLocalDispatchSnapshot,
   deriveComposerSendState,
   dismissBranchMismatchForSession,
@@ -32,12 +34,14 @@ import {
   reconcileRetainedMountedThreadIds,
   resolveBackgroundDraftWorkspaceOptions,
   resolveDraftPromotionNavigationTarget,
+  nextForkThreadTitle,
   resolveThreadMetadataUpdateForNextTurn,
   resolveSendEnvMode,
   resolveDraftHeroState,
+  revokeComposerImagePreviewUrls,
   scheduleEnvironmentReconnectWarning,
   startNewThreadForProject,
-  codexArtifactTemplatePromptToAppend,
+  shouldCanonicalizeDraftThread,
   shouldDockDraftHeroForSubmission,
   shouldReleaseTimelineAnchorForToolActivity,
   shouldShowBranchMismatchBanner,
@@ -228,6 +232,132 @@ describe("shouldReleaseTimelineAnchorForToolActivity", () => {
     expect(shouldReleaseTimelineAnchorForToolActivity({ ...input, runningTurnId: null })).toBe(
       false,
     );
+  });
+});
+
+describe("shouldCanonicalizeDraftThread", () => {
+  it("keeps a materialized fork on its draft route despite inherited messages", () => {
+    expect(shouldCanonicalizeDraftThread({ serverThreadStarted: true, forkDraft: true })).toBe(
+      false,
+    );
+  });
+
+  it("canonicalizes an ordinary draft once its server thread starts", () => {
+    expect(shouldCanonicalizeDraftThread({ serverThreadStarted: true, forkDraft: false })).toBe(
+      true,
+    );
+  });
+});
+
+describe("nextForkThreadTitle", () => {
+  it("numbers sibling forks without stacking prefixes", () => {
+    expect(nextForkThreadTitle("Source thread", [])).toBe("[fork] Source thread");
+    expect(nextForkThreadTitle("Source thread", ["[fork] Source thread"])).toBe(
+      "[fork 2] Source thread",
+    );
+    expect(
+      nextForkThreadTitle("[fork 2] Source thread", [
+        "[fork] Source thread",
+        "[fork 2] Source thread",
+      ]),
+    ).toBe("[fork 3] Source thread");
+  });
+
+  it("uses the first available ordinal", () => {
+    expect(nextForkThreadTitle("Source thread", ["[fork 2] Source thread"])).toBe(
+      "[fork] Source thread",
+    );
+  });
+});
+
+it("uses a fork draft's preserved title", () => {
+  const draftThread: DraftThreadState = {
+    threadId,
+    environmentId,
+    projectId,
+    logicalProjectKey: "project-1",
+    createdAt: now,
+    runtimeMode: "full-access",
+    interactionMode: "default",
+    branch: "main",
+    worktreePath: "/tmp/project",
+    envMode: "local",
+    startFromOrigin: false,
+    title: "[fork] Source thread",
+    forkDraft: true,
+    promotedTo: null,
+  };
+
+  expect(
+    buildLocalDraftThread(draftThread.threadId, draftThread, {
+      instanceId: ProviderInstanceId.make("codex"),
+      model: "gpt-5.4",
+    }).title,
+  ).toBe("[fork] Source thread");
+});
+
+describe("forked message images", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("creates independent composer attachments from message previews", async () => {
+    const blob = new Blob(["image bytes"], { type: "image/png" });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(blob)),
+    );
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:fork-copy");
+    const message: ChatMessage = {
+      id: MessageId.make("message-with-image"),
+      role: "user",
+      text: "Describe this",
+      turnId: null,
+      createdAt: now,
+      updatedAt: now,
+      streaming: false,
+      attachments: [
+        {
+          type: "image",
+          id: "source-image",
+          name: "diagram.png",
+          mimeType: "image/png",
+          sizeBytes: 123,
+          previewUrl: "/attachments/source-image",
+        },
+      ],
+    };
+
+    const [copy] = await cloneUserMessageImagesForFork(message);
+
+    expect(copy).toMatchObject({
+      type: "image",
+      name: "diagram.png",
+      mimeType: "image/png",
+      sizeBytes: blob.size,
+      previewUrl: "blob:fork-copy",
+    });
+    expect(copy?.id).not.toBe("source-image");
+    expect(copy?.file).toBeInstanceOf(File);
+  });
+
+  it("revokes copied previews that are not adopted by a draft", () => {
+    const revokeObjectURL = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+
+    revokeComposerImagePreviewUrls([
+      {
+        type: "image",
+        id: "fork-image",
+        name: "diagram.png",
+        mimeType: "image/png",
+        sizeBytes: 1,
+        previewUrl: "blob:fork-copy",
+        file: new File(["x"], "diagram.png", { type: "image/png" }),
+      },
+    ]);
+
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:fork-copy");
   });
 });
 
