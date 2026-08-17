@@ -1,4 +1,4 @@
-import { ProviderDriverKind } from "@t3tools/contracts";
+import { ProviderDriverKind, type ServerProviderModel } from "@t3tools/contracts";
 import { ClaudeAI, CursorIcon, GrokIcon, Icon, OpenAI, OpenCodeIcon } from "../Icons";
 import { PROVIDER_OPTIONS } from "../../session-logic";
 
@@ -28,6 +28,7 @@ export type ModelEsque = {
   subProvider?: string | undefined;
   isLegacy?: boolean | undefined;
   contextWindowTokens?: number | undefined;
+  capabilities?: ServerProviderModel["capabilities"];
 };
 
 function escapeRegExp(value: string): string {

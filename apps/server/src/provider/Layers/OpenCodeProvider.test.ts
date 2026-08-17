@@ -240,6 +240,13 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
                     high: {},
                     xhigh: {},
                   },
+                  capabilities: {
+                    reasoning: true,
+                    toolcall: true,
+                    attachment: true,
+                    input: { text: true, image: true, pdf: true },
+                    output: { text: true },
+                  },
                 },
               },
             },
@@ -257,6 +264,11 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
 
       NodeAssert.ok(model);
       NodeAssert.equal(model.contextWindowTokens, 1_050_000);
+      NodeAssert.deepEqual(model.capabilities?.inputModalities, ["text", "image", "pdf"]);
+      NodeAssert.deepEqual(model.capabilities?.outputModalities, ["text"]);
+      NodeAssert.equal(model.capabilities?.supportsReasoning, true);
+      NodeAssert.equal(model.capabilities?.supportsToolCalls, true);
+      NodeAssert.equal(model.capabilities?.supportsAttachments, true);
       const variantDescriptor = model.capabilities?.optionDescriptors?.find(
         (descriptor) => descriptor.id === "variant" && descriptor.type === "select",
       );

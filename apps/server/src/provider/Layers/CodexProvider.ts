@@ -216,10 +216,10 @@ export function enrichCodexModelsFromCache(
     if (!entry || typeof entry !== "object") continue;
     const slug = "slug" in entry && typeof entry.slug === "string" ? entry.slug : undefined;
     const tokens =
-      "max_context_window" in entry && typeof entry.max_context_window === "number"
-        ? entry.max_context_window
-        : "context_window" in entry && typeof entry.context_window === "number"
-          ? entry.context_window
+      "context_window" in entry && typeof entry.context_window === "number"
+        ? entry.context_window
+        : "max_context_window" in entry && typeof entry.max_context_window === "number"
+          ? entry.max_context_window
           : undefined;
     if (slug && tokens && Number.isFinite(tokens) && tokens > 0) {
       contextWindows.set(slug, Math.round(tokens));

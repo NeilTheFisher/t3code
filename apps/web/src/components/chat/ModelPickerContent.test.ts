@@ -1,67 +1,43 @@
-import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@t3tools/contracts";
+import { ProviderDriverKind, ProviderInstanceId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { deriveProviderInstanceEntries } from "../../providerInstances";
-import { shouldIncludeModelPickerOption } from "./ModelPickerContent";
+import { buildModelPickerItems } from "./ModelPickerContent";
 
-function entry(status: ServerProvider["status"]) {
-  return deriveProviderInstanceEntries([
-    {
-      instanceId: ProviderInstanceId.make("opencode_work"),
-      driver: ProviderDriverKind.make("opencode"),
-      enabled: true,
-      installed: true,
-      version: null,
-      status,
-      auth: { status: "authenticated" },
-      checkedAt: "2026-08-28T00:00:00.000Z",
-      models: [],
-      slashCommands: [],
-      skills: [],
-    },
-  ])[0]!;
-}
+describe("buildModelPickerItems", () => {
+  it("preserves provider model capabilities for the picker row tooltip", () => {
+    const instanceId = ProviderInstanceId.make("opencode");
+    const capabilities = {
+      optionDescriptors: [],
+      inputModalities: ["text", "image", "video"] as const,
+      supportsReasoning: true,
+      supportsToolCalls: true,
+    };
 
-describe("shouldIncludeModelPickerOption", () => {
-  it.each(["error", "warning"] as const)(
-    "keeps only the active synthetic OpenCode row when the provider status is %s",
-    (status) => {
-      const providerEntry = entry(status);
-      const activeInstanceId = ProviderInstanceId.make("opencode_work");
-      const activeModel = "openrouter/kimi-k3";
-
-      expect(
-        shouldIncludeModelPickerOption({
-          entry: providerEntry,
-          option: {
-            slug: activeModel,
-            name: activeModel,
-            isUnavailable: true,
+    const items = buildModelPickerItems(
+      new Map([
+        [
+          instanceId,
+          [
+            {
+              slug: "opencode-go/qwen3.7-plus",
+              name: "Qwen3.7 Plus",
+              capabilities,
+            },
+          ],
+        ],
+      ]),
+      new Map([
+        [
+          instanceId,
+          {
+            driverKind: ProviderDriverKind.make("opencode"),
+            displayName: "OpenCode",
           },
-          activeInstanceId,
-          activeModel,
-        }),
-      ).toBe(true);
-      expect(
-        shouldIncludeModelPickerOption({
-          entry: providerEntry,
-          option: { slug: "stale/model", name: "Stale model" },
-          activeInstanceId,
-          activeModel,
-        }),
-      ).toBe(false);
-      expect(
-        shouldIncludeModelPickerOption({
-          entry: providerEntry,
-          option: {
-            slug: "other/missing",
-            name: "Other missing",
-            isUnavailable: true,
-          },
-          activeInstanceId,
-          activeModel,
-        }),
-      ).toBe(false);
-    },
-  );
+        ],
+      ]),
+      new Set([instanceId]),
+    );
+
+    expect(items[0]?.capabilities).toEqual(capabilities);
+  });
 });

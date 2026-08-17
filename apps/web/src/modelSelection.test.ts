@@ -98,6 +98,31 @@ describe("instance-scoped model selection", () => {
     ).toBe(200_000);
   });
 
+  it("preserves server-provided model capabilities", () => {
+    const baseProvider = provider({
+      instanceId: "opencode",
+      provider: ProviderDriverKind.make("opencode"),
+      models: ["opencode-go/qwen3.7-plus"],
+    });
+    const capabilities = {
+      inputModalities: ["text", "image", "video"] as const,
+      supportsReasoning: true,
+      supportsToolCalls: true,
+      supportsAttachments: true,
+    };
+    const providers = [
+      {
+        ...baseProvider,
+        models: [{ ...baseProvider.models[0]!, capabilities }],
+      },
+    ];
+    const entry = deriveProviderInstanceEntries(providers)[0]!;
+
+    expect(getAppModelOptionsForInstance(DEFAULT_UNIFIED_SETTINGS, entry)[0]?.capabilities).toEqual(
+      capabilities,
+    );
+  });
+
   it("keeps custom models on the provider instance that declared them", () => {
     const providers = [
       provider({

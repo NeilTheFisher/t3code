@@ -219,7 +219,7 @@ import {
 import { useNowMinute } from "../hooks/useNowMinute";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useThreadActions } from "../hooks/useThreadActions";
-import { resolveAppModelSelectionForInstance } from "../modelSelection";
+import { resolveAppModelSelectionForInstance, resolveModelDisplayName } from "../modelSelection";
 import { confirmTerminalClose, isTerminalCloseConfirmPending } from "../lib/terminalCloseConfirm";
 import { getTerminalFocusOwner } from "../lib/terminalFocus";
 import {

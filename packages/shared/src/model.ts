@@ -3,6 +3,7 @@ import {
   DEFAULT_MODEL_BY_PROVIDER,
   MODEL_SLUG_ALIASES_BY_PROVIDER,
   type ModelCapabilities,
+  type ModelModality,
   type ModelSelection,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -19,9 +20,25 @@ export interface SelectableModelOption {
 
 export function createModelCapabilities(input: {
   optionDescriptors: ReadonlyArray<ProviderOptionDescriptor>;
+  inputModalities?: ReadonlyArray<ModelModality>;
+  outputModalities?: ReadonlyArray<ModelModality>;
+  supportsReasoning?: boolean;
+  supportsToolCalls?: boolean;
+  supportsAttachments?: boolean;
 }): ModelCapabilities {
   return {
     optionDescriptors: input.optionDescriptors.map(cloneDescriptor),
+    ...(input.inputModalities ? { inputModalities: [...input.inputModalities] } : {}),
+    ...(input.outputModalities ? { outputModalities: [...input.outputModalities] } : {}),
+    ...(input.supportsReasoning !== undefined
+      ? { supportsReasoning: input.supportsReasoning }
+      : {}),
+    ...(input.supportsToolCalls !== undefined
+      ? { supportsToolCalls: input.supportsToolCalls }
+      : {}),
+    ...(input.supportsAttachments !== undefined
+      ? { supportsAttachments: input.supportsAttachments }
+      : {}),
   };
 }
 

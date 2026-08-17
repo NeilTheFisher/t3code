@@ -70,15 +70,9 @@ function readInstanceCustomModels(
   return legacyProviders[driverKind]?.customModels ?? [];
 }
 
-export interface AppModelOption {
-  slug: string;
-  name: string;
-  shortName?: string;
-  subProvider?: string;
+export interface AppModelOption extends ModelEsque {
   isCustom: boolean;
   isDefault?: boolean;
-  isLegacy?: boolean;
-  contextWindowTokens?: number;
 }
 
 function toAppModelOption(model: ServerProvider["models"][number]): AppModelOption {
@@ -94,6 +88,7 @@ function toAppModelOption(model: ServerProvider["models"][number]): AppModelOpti
   if (model.contextWindowTokens !== undefined) {
     option.contextWindowTokens = model.contextWindowTokens;
   }
+  option.capabilities = model.capabilities;
   return option;
 }
 
