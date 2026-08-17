@@ -253,7 +253,7 @@ import { usePanelAnimationSettings, usePanelPresence } from "../panelAnimations"
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useOpenPanelPullRequestUrl } from "../hooks/useOpenPanelPullRequestUrl";
 import { useThreadActions } from "../hooks/useThreadActions";
-import { resolveAppModelSelectionForInstance } from "../modelSelection";
+import { resolveAppModelSelectionForInstance, resolveModelDisplayName } from "../modelSelection";
 import { confirmTerminalClose, isTerminalCloseConfirmPending } from "../lib/terminalCloseConfirm";
 import { isPreviewFocused } from "../lib/previewFocus";
 import { getTerminalFocusOwner } from "../lib/terminalFocus";

@@ -242,6 +242,13 @@ function openCodeCapabilitiesForModel(input: {
   // picks the provider-appropriate default (e.g. medium for openai/opencode).
   const variantValues =
     rawVariantValues.length > 0 ? rawVariantValues : ["low", "medium", "high", "xhigh"];
+  const inputModalities = Object.entries(input.model.capabilities?.input ?? {})
+    .filter(([, supported]) => supported)
+    .map(([modality]) => modality as "text" | "audio" | "image" | "video" | "pdf");
+  const outputModalities = Object.entries(input.model.capabilities?.output ?? {})
+    .filter(([, supported]) => supported)
+    .map(([modality]) => modality as "text" | "audio" | "image" | "video" | "pdf");
+  const variantValues = Object.keys(input.model.variants ?? {});
   const defaultVariant = inferDefaultVariant(input.providerID, variantValues);
   const variantOptions = variantValues.map((value) =>
     defaultVariant === value
@@ -262,6 +269,11 @@ function openCodeCapabilitiesForModel(input: {
       : { id: agent.name, label: titleCaseSlug(agent.name) },
   );
   return createModelCapabilities({
+    inputModalities,
+    outputModalities,
+    supportsReasoning: input.model.capabilities?.reasoning === true,
+    supportsToolCalls: input.model.capabilities?.toolcall === true,
+    supportsAttachments: input.model.capabilities?.attachment === true,
     optionDescriptors: [
       ...(variantOptions.length > 0
         ? [

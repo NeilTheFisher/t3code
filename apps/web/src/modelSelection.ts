@@ -111,6 +111,9 @@ function appendUnavailableDynamicModelSelection(
 
   return [...options, { slug, name: slug, isCustom: false, isUnavailable: true }];
   contextWindowTokens?: number;
+export interface AppModelOption extends ModelEsque {
+  isCustom: boolean;
+  isDefault?: boolean;
 }
 
 function toAppModelOption(model: ServerProvider["models"][number]): AppModelOption {
@@ -128,6 +131,7 @@ function toAppModelOption(model: ServerProvider["models"][number]): AppModelOpti
   if (model.contextWindowTokens !== undefined) {
     option.contextWindowTokens = model.contextWindowTokens;
   }
+  option.capabilities = model.capabilities;
   return option;
 }
 

@@ -14,7 +14,7 @@ import { Kbd } from "../ui/kbd";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
 import { modelPickerModelKey } from "./modelPickerKeys";
-import { formatModelContextWindowTokens } from "../modelMetadata";
+import { formatModelContextWindowTokens, getModelCapabilityLabels } from "../modelMetadata";
 
 export const ModelListRow = memo(function ModelListRow(props: {
   index: number;
@@ -78,6 +78,8 @@ export const ModelListRow = memo(function ModelListRow(props: {
   );
 
   const contextWindowTokens = props.model.contextWindowTokens;
+  const capabilityLabels = getModelCapabilityLabels(props.model.capabilities ?? null);
+  const hasMetadata = contextWindowTokens !== undefined || capabilityLabels.length > 0;
   const row = (
     <ComboboxItem
       hideIndicator
@@ -92,7 +94,7 @@ export const ModelListRow = memo(function ModelListRow(props: {
           "data-disabled:pointer-events-auto data-disabled:cursor-not-allowed data-disabled:hover:bg-transparent",
       )}
     >
-      {contextWindowTokens === undefined ? (
+      {!hasMetadata ? (
         <div className="min-w-0 flex-1 text-left">{modelLabel}</div>
       ) : (
         <Tooltip>
@@ -102,11 +104,33 @@ export const ModelListRow = memo(function ModelListRow(props: {
             {modelLabel}
           </TooltipTrigger>
           <TooltipPopup side="left" align="center" className="max-w-64 leading-snug">
-            <div className="flex items-center gap-4">
-              <span className="text-muted-foreground">Context window</span>
-              <span className="ml-auto font-medium">
-                {formatModelContextWindowTokens(contextWindowTokens)} tokens
-              </span>
+            <div className="space-y-1.5">
+              {contextWindowTokens !== undefined ? (
+                <div className="flex items-center gap-4">
+                  <span className="text-muted-foreground">Context window</span>
+                  <span className="ml-auto font-medium">
+                    {formatModelContextWindowTokens(contextWindowTokens)} tokens
+                  </span>
+                </div>
+              ) : null}
+              {capabilityLabels.length > 0 ? (
+                <div className="border-t border-border/60 pt-1.5">
+                  <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
+                    Capabilities
+                  </div>
+                  <div className="flex flex-wrap gap-x-3 gap-y-1">
+                    {capabilityLabels.map((label) => (
+                      <span
+                        key={label}
+                        className="inline-flex items-center gap-1.5 whitespace-nowrap text-muted-foreground"
+                      >
+                        <span className="size-1 rounded-full bg-muted-foreground/70" />
+                        {label}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </div>
           </TooltipPopup>
         </Tooltip>

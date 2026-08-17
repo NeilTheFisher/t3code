@@ -6,7 +6,9 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import * as TestClock from "effect/testing/TestClock";import { HttpClient, HttpClientResponse } from "effect/unstable/http";import { beforeEach } from "vite-plus/test";
+import * as TestClock from "effect/testing/TestClock";
+import { HttpClient, HttpClientResponse } from "effect/unstable/http";
+import { beforeEach } from "vite-plus/test";
 
 import { OpenCodeSettings } from "@t3tools/contracts";
 import { ServerConfig } from "../../config.ts";
@@ -196,8 +198,25 @@ const makeOpenCodeSettings = (overrides?: Partial<OpenCodeSettings>): OpenCodeSe
     ...overrides,
   });
 
-const checkStatus = (settings: OpenCodeSettings, cwd = process.cwd()) =>
-  checkOpenCodeProviderStatus(settings, cwd, testEnvironment);
+const checkStatus = Effect.fn("checkStatus")(function* (
+  settings: OpenCodeSettings,
+  cwd = process.cwd(),
+  environment: NodeJS.ProcessEnv = testEnvironment,
+) {
+  return yield* Effect.scoped(
+    Effect.gen(function* () {
+      const serverOwner = yield* OpenCodeServerOwner.make({
+        binaryPath: settings.binaryPath,
+        directory: cwd,
+        ...(settings.serverPassword ? { serverPassword: settings.serverPassword } : {}),
+        environment,
+      });
+      return yield* checkOpenCodeProviderStatus(settings, cwd, environment).pipe(
+        Effect.provideService(OpenCodeServerOwner.OpenCodeServerOwner, serverOwner),
+      );
+    }),
+  );
+});
 
 it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
   it.effect("shows a codex-style missing binary message", () =>
@@ -228,7 +247,7 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
   it.effect("times out a hanging local CLI version probe", () =>
     Effect.gen(function* () {
       runtimeMock.state.runVersionPending = true;
-      const probeFiber = yield* checkProvider(makeOpenCodeSettings()).pipe(Effect.forkChild);
+      const probeFiber = yield* checkStatus(makeOpenCodeSettings()).pipe(Effect.forkChild);
 
       yield* Effect.yieldNow;
       yield* TestClock.adjust("4 seconds");
@@ -264,6 +283,13 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
                     high: {},
                     xhigh: {},
                   },
+                  capabilities: {
+                    reasoning: true,
+                    toolcall: true,
+                    attachment: true,
+                    input: { text: true, image: true, pdf: true },
+                    output: { text: true },
+                  },
                 },
               },
             },
@@ -281,6 +307,11 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
 
       NodeAssert.ok(model);
       NodeAssert.equal(model.contextWindowTokens, 1_050_000);
+      NodeAssert.deepEqual(model.capabilities?.inputModalities, ["text", "image", "pdf"]);
+      NodeAssert.deepEqual(model.capabilities?.outputModalities, ["text"]);
+      NodeAssert.equal(model.capabilities?.supportsReasoning, true);
+      NodeAssert.equal(model.capabilities?.supportsToolCalls, true);
+      NodeAssert.equal(model.capabilities?.supportsAttachments, true);
       const variantDescriptor = model.capabilities?.optionDescriptors?.find(
         (descriptor) => descriptor.id === "variant" && descriptor.type === "select",
       );
@@ -369,7 +400,7 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
 
   it.effect("loads local inventory from a scoped OpenCode server", () =>
     Effect.gen(function* () {
-      yield* checkStatus(makeOpenCodeSettings());
+      yield* checkStatus(makeOpenCodeSettings({ serverPassword: "secret-password" }));
 
       NodeAssert.deepEqual(runtimeMock.state.sdkClientInputs, [
         {
@@ -385,7 +416,7 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
 
   it.effect("uses an environment-only password for local inventory", () =>
     Effect.gen(function* () {
-      yield* checkProvider(makeOpenCodeSettings(), process.cwd(), {
+      yield* checkStatus(makeOpenCodeSettings(), process.cwd(), {
         OPENCODE_SERVER_PASSWORD: "environment-password",
       });
 
@@ -401,7 +432,7 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
 
   it.effect("uses the settings password when local environment auth differs", () =>
     Effect.gen(function* () {
-      yield* checkProvider(
+      yield* checkStatus(
         makeOpenCodeSettings({ serverPassword: "settings-password" }),
         process.cwd(),
         { OPENCODE_SERVER_PASSWORD: "environment-password" },
@@ -456,7 +487,7 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
 it.layer(testLayer)("checkOpenCodeProviderStatus with configured server URL", (it) => {
   it.effect("does not send a local environment password to a configured server", () =>
     Effect.gen(function* () {
-      const snapshot = yield* checkProvider(
+      const snapshot = yield* checkStatus(
         makeOpenCodeSettings({ serverUrl: "http://127.0.0.1:9999" }),
         process.cwd(),
         { OPENCODE_SERVER_PASSWORD: "local-secret" },
@@ -477,7 +508,7 @@ it.layer(testLayer)("checkOpenCodeProviderStatus with configured server URL", (i
       runtimeMock.state.connectionError = new Error(
         "OpenCode v1.14.18 is too old. Upgrade to v1.14.19 or newer.",
       );
-      const snapshot = yield* checkProvider(
+      const snapshot = yield* checkStatus(
         makeOpenCodeSettings({ serverUrl: "http://127.0.0.1:9999" }),
       );
 
