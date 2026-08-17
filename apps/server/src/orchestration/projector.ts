@@ -13,6 +13,7 @@ import {
   OrchestrationMessage,
   OrchestrationSession,
   OrchestrationThread,
+  ThreadForkedPayload,
 } from "@t3tools/contracts";
 import {
   legacyLinkedPullRequestOf,
@@ -20,6 +21,7 @@ import {
   threadPullRequestKeysEqual,
 } from "@t3tools/shared/threadPullRequests";
 import { compareDateTimeStrings } from "@t3tools/shared/dateTime";
+import { isInheritedForkMessage } from "./threadFork.ts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as Predicate from "effect/Predicate";
@@ -200,13 +202,18 @@ function decodeForEvent<A>(
 }
 
 function retainThreadMessagesAfterRevert(
+  threadId: ThreadId,
   messages: ReadonlyArray<OrchestrationMessage>,
   retainedTurnIds: ReadonlySet<string>,
   turnCount: number,
 ): ReadonlyArray<OrchestrationMessage> {
   const retainedMessageIds = new Set<string>();
   for (const message of messages) {
-    if (message.role === "system" || isImportedAgentSessionMessageId(message.id)) {
+    if (
+      message.role === "system" ||
+      isImportedAgentSessionMessageId(message.id) ||
+      isInheritedForkMessage(threadId, message.id)
+    ) {
       retainedMessageIds.add(message.id);
       continue;
     }
@@ -219,6 +226,7 @@ function retainThreadMessagesAfterRevert(
     (message) =>
       message.role === "user" &&
       !isImportedAgentSessionMessageId(message.id) &&
+      !isInheritedForkMessage(threadId, message.id) &&
       retainedMessageIds.has(message.id),
   ).length;
   const missingUserCount = Math.max(0, turnCount - retainedUserCount);
@@ -245,6 +253,7 @@ function retainThreadMessagesAfterRevert(
     (message) =>
       message.role === "assistant" &&
       !isImportedAgentSessionMessageId(message.id) &&
+      !isInheritedForkMessage(threadId, message.id) &&
       retainedMessageIds.has(message.id),
   ).length;
   const missingAssistantCount = Math.max(0, turnCount - retainedAssistantCount);
@@ -438,6 +447,55 @@ export function projectEvent(
             deletedAt: null,
             messages: [],
             activities: [],
+            checkpoints: [],
+            session: null,
+          },
+          event.type,
+          "thread",
+        );
+        const existing = nextBase.threads.find((entry) => entry.id === thread.id);
+        return {
+          ...nextBase,
+          threads: existing
+            ? nextBase.threads.map((entry) => (entry.id === thread.id ? thread : entry))
+            : [...nextBase.threads, thread],
+        };
+      });
+
+    case "thread.forked":
+      return Effect.gen(function* () {
+        const payload = yield* decodeForEvent(
+          ThreadForkedPayload,
+          event.payload,
+          event.type,
+          "payload",
+        );
+        const thread: OrchestrationThread = yield* decodeForEvent(
+          OrchestrationThread,
+          {
+            id: payload.threadId,
+            projectId: payload.projectId,
+            title: payload.title,
+            modelSelection: payload.modelSelection,
+            runtimeMode: payload.runtimeMode,
+            interactionMode: payload.interactionMode,
+            branch: payload.branch,
+            worktreePath: payload.worktreePath,
+            latestTurn: null,
+            createdAt: payload.createdAt,
+            updatedAt: payload.updatedAt,
+            archivedAt: null,
+            settledOverride: null,
+            settledAt: null,
+            snoozedUntil: null,
+            snoozedAt: null,
+            pinnedAt: null,
+            pinOrderKey: null,
+            titleRegeneration: null,
+            deletedAt: null,
+            messages: payload.inheritedMessages,
+            activities: [],
+            hasMoreActivities: false,
             checkpoints: [],
             session: null,
           },
@@ -987,6 +1045,7 @@ export function projectEvent(
             .slice(-MAX_THREAD_CHECKPOINTS);
           const retainedTurnIds = new Set(checkpoints.map((checkpoint) => checkpoint.turnId));
           const messages = retainThreadMessagesAfterRevert(
+            thread.id,
             thread.messages,
             retainedTurnIds,
             payload.turnCount,

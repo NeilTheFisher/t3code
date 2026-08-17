@@ -1,7 +1,11 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 import ChatView from "../components/ChatView";
-import { resolveDraftPromotionNavigationTarget } from "../components/ChatView.logic";
+import {
+  resolveDraftPromotionNavigationTarget,
+  shouldCanonicalizeDraftThread,
+  threadHasStarted,
+} from "../components/ChatView.logic";
 import {
   DraftId,
   markPromotedDraftThreadByRef,
@@ -29,11 +33,17 @@ function DraftChatThreadRouteView() {
   const serverThreadRef = draftSession?.promotedTo ?? inferredThreadRef;
   const serverThread = useThread(serverThreadRef);
   const backgroundSubmissionPending = useBackgroundDraftSubmissionPending(serverThreadRef);
-  const canonicalThreadRef = resolveDraftPromotionNavigationTarget({
+  const promotedThreadRef = resolveDraftPromotionNavigationTarget({
     serverThreadRef,
     serverThread,
     backgroundSubmissionPending,
   });
+  const canonicalThreadRef = shouldCanonicalizeDraftThread({
+    serverThreadStarted,
+    forkDraft: draftSession?.forkDraft === true,
+  })
+    ? promotedThreadRef
+    : null;
 
   useEffect(() => {
     if (draftSession?.promotedTo) return;

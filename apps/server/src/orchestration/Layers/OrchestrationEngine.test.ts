@@ -15,6 +15,7 @@ import {
   TurnId,
   type OrchestrationCommand,
   type OrchestrationEvent,
+  type OrchestrationThread,
   ProviderInstanceId,
 } from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -334,6 +335,7 @@ describe("OrchestrationEngine", () => {
 
   it("bootstraps command handling from persisted projections without reading the full snapshot", async () => {
     let nextSequence = 8;
+    const savedEvents: OrchestrationEvent[] = [];
     const eventStore: OrchestrationEventStoreShape = {
       append: (event) =>
         Effect.sync(() => {
@@ -342,6 +344,7 @@ describe("OrchestrationEngine", () => {
             sequence: nextSequence,
           } as OrchestrationEvent;
           nextSequence += 1;
+          savedEvents.push(savedEvent);
           return savedEvent;
         }),
       readFromSequence: () => Stream.empty,
@@ -414,7 +417,46 @@ describe("OrchestrationEngine", () => {
         checkpoints: [],
       })),
     };
+    const persistedThreadDetail: OrchestrationThread = {
+      ...projectionSnapshot.threads[0]!,
+      snoozedUntil: null,
+      snoozedAt: null,
+      pinnedAt: null,
+      pinOrderKey: null,
+      titleRegeneration: null,
+      messages: [
+        {
+          id: asMessageId("persisted-user-1"),
+          role: "user",
+          text: "Earlier question",
+          turnId: asTurnId("persisted-turn-1"),
+          streaming: false,
+          createdAt: "2026-03-03T00:00:02.100Z",
+          updatedAt: "2026-03-03T00:00:02.100Z",
+        },
+        {
+          id: asMessageId("persisted-assistant-1"),
+          role: "assistant",
+          text: "Earlier answer",
+          turnId: asTurnId("persisted-turn-1"),
+          streaming: false,
+          createdAt: "2026-03-03T00:00:02.200Z",
+          updatedAt: "2026-03-03T00:00:02.200Z",
+        },
+        {
+          id: asMessageId("persisted-user-2"),
+          role: "user",
+          text: "Fork from here",
+          turnId: null,
+          streaming: false,
+          createdAt: "2026-03-03T00:00:02.300Z",
+          updatedAt: "2026-03-03T00:00:02.300Z",
+        },
+      ],
+      hasMoreActivities: false,
+    };
     let fullSnapshotReadCount = 0;
+    const threadDetailReadIds: ThreadId[] = [];
 
     const layer = OrchestrationEngineLive.pipe(
       Layer.provide(
@@ -453,7 +495,13 @@ describe("OrchestrationEngine", () => {
           getThreadRuntimeContext: () => Effect.die("unused"),
           getTurnStartMessage: () => Effect.die("unused"),
           getThreadShellById: () => Effect.succeed(Option.none()),
-          getThreadDetailById: () => Effect.succeed(Option.none()),
+          getThreadDetailById: (threadId) =>
+            Effect.sync(() => {
+              threadDetailReadIds.push(threadId);
+              return threadId === persistedThreadDetail.id
+                ? Option.some(persistedThreadDetail)
+                : Option.none();
+            }),
           getThreadDetailSnapshot: () => Effect.succeed(Option.none()),
           searchThreads: () => Effect.succeed({ matches: [] }),
           getThreadActivitiesPage: () => Effect.die("unused"),
@@ -489,6 +537,30 @@ describe("OrchestrationEngine", () => {
     expect(result.sequence).toBe(8);
     expect(await runtime.runPromise(engine.latestSequence)).toBe(8);
     expect(fullSnapshotReadCount).toBe(0);
+
+    const forkResult = await runtime.runPromise(
+      engine.dispatch({
+        type: "thread.fork",
+        commandId: CommandId.make("cmd-bootstrap-thread-fork"),
+        threadId: ThreadId.make("thread-bootstrap-fork"),
+        sourceThreadId: persistedThreadDetail.id,
+        sourceMessageId: asMessageId("persisted-user-2"),
+        title: "[fork] Bootstrap Thread",
+        modelSelection: persistedThreadDetail.modelSelection,
+        createdAt: "2026-03-03T00:00:05.000Z",
+      }),
+    );
+
+    expect(forkResult.sequence).toBe(9);
+    expect(savedEvents.at(-1)).toMatchObject({
+      type: "thread.forked",
+      payload: {
+        sourceMessageId: "persisted-user-2",
+        inheritedMessages: [{ text: "Earlier question" }, { text: "Earlier answer" }],
+      },
+    });
+    expect(fullSnapshotReadCount).toBe(0);
+    expect(threadDetailReadIds).toEqual([persistedThreadDetail.id]);
 
     await runtime.dispose();
   });

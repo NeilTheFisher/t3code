@@ -12,6 +12,7 @@ import {
   createThreadJumpHintVisibilityController,
   deleteSelectedThreadEntries,
   filterSidebarProjectScopeItems,
+  discardDraftSession,
   getSidebarThreadIdsToPrewarm,
   resolveAdjacentThreadId,
   reduceSidebarProjectScopeMenuState,
@@ -19,6 +20,7 @@ import {
   getProjectSortTimestamp,
   hasUnseenCompletion,
   isContextMenuPointerDown,
+  isMaterializedForkDraftThread,
   isSidebarNestedLinkClick,
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
@@ -100,6 +102,80 @@ describe("deleteSelectedThreadEntries", () => {
   const success = AsyncResult.success(undefined);
   const failure = AsyncResult.failure(Cause.fail(new Error("Delete failed")));
   const interrupted = AsyncResult.failure(Cause.interrupt());
+describe("isMaterializedForkDraftThread", () => {
+  const thread = { environmentId: "environment-local", id: "thread-fork" };
+  const forkDraft = {
+    environmentId: "environment-local",
+    threadId: "thread-fork",
+    forkDraft: true,
+    promotedTo: null,
+  };
+
+  it("hides a server thread while its fork is represented by a draft row", () => {
+    expect(isMaterializedForkDraftThread(thread, [forkDraft])).toBe(true);
+  });
+
+  it("keeps ordinary and promoted drafts out of the filter", () => {
+    expect(
+      isMaterializedForkDraftThread(thread, [
+        { ...forkDraft, forkDraft: false },
+        { ...forkDraft, promotedTo: { threadId: "thread-fork" } },
+      ]),
+    ).toBe(false);
+  });
+});
+
+describe("discardDraftSession", () => {
+  const session = {
+    environmentId: "environment-local",
+    threadId: "thread-fork",
+    forkDraft: true,
+  };
+
+  it("deletes a provisional fork before clearing its draft", async () => {
+    const calls: string[] = [];
+    const result = await discardDraftSession({
+      session,
+      deleteForkThread: async () => {
+        calls.push("delete");
+        return { _tag: "Success" as const };
+      },
+      clearDraft: () => calls.push("clear"),
+    });
+
+    expect(result?._tag).toBe("Success");
+    expect(calls).toEqual(["delete", "clear"]);
+  });
+
+  it("keeps the draft when deleting its fork fails", async () => {
+    const clearDraft = vi.fn();
+    const result = await discardDraftSession({
+      session,
+      deleteForkThread: async () => ({ _tag: "Failure" as const }),
+      clearDraft,
+    });
+
+    expect(result?._tag).toBe("Failure");
+    expect(clearDraft).not.toHaveBeenCalled();
+  });
+
+  it("clears an ordinary local draft without deleting a thread", async () => {
+    const deleteForkThread = vi.fn();
+    const clearDraft = vi.fn();
+    const result = await discardDraftSession({
+      session: { ...session, forkDraft: false },
+      deleteForkThread,
+      clearDraft,
+    });
+
+    expect(result).toBeNull();
+    expect(deleteForkThread).not.toHaveBeenCalled();
+    expect(clearDraft).toHaveBeenCalledOnce();
+  });
+});
+
+describe("shouldNavigateAfterProjectRemoval", () => {
+  const projectThreads = [{ environmentId: "environment-local", id: "thread-1" }];
 
   it("waits for each delete and excludes only earlier successes from worktree checks", async () => {
     let resolveDelete!: (result: typeof success) => void;

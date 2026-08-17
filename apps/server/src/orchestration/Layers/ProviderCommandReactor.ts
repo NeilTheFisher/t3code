@@ -916,6 +916,8 @@ const make = Effect.gen(function* () {
     readonly modelSelection?: ModelSelection;
     readonly interactionMode?: "default" | "plan";
     readonly createdAt: string;
+    /** Session-less threads with prior user turns (forks) replay their history. */
+    readonly replayExistingContext?: boolean;
   }) {
     const thread = yield* resolveThreadShell(input.threadId);
     if (!thread) {
@@ -931,17 +933,35 @@ const make = Effect.gen(function* () {
       threadModelSelections.set(input.threadId, input.modelSelection);
     }
     const normalizedInput = toNonEmptyProviderInput(input.messageText);
-    const handoffPrelude = ensuredSession.handedOff
-      ? renderProviderHandoffPrelude({
-          messages: thread.messages,
-          activities: thread.activities,
-          ...(input.messageId !== undefined ? { excludeMessageId: input.messageId } : {}),
-          maxChars: Math.min(
-            HANDOFF_TRANSCRIPT_MAX_CHARS,
-            PROVIDER_SEND_TURN_MAX_INPUT_CHARS - (normalizedInput?.length ?? 0) - 1_000,
-          ),
-        })
-      : undefined;
+    // Handoff preludes replay prior messages plus the tool trail, which the
+    // shell omits. Load the detail row only on an actual handoff, bounded to
+    // the activity kinds the transcript renderer consumes.
+    const handoffPrelude =
+      ensuredSession.handedOff || input.replayExistingContext === true
+        ? Option.getOrUndefined(
+            yield* projectionSnapshotQuery
+              .getThreadDetailById(input.threadId, {
+                activityKinds: ["tool.updated", "tool.completed", "task.completed"],
+              })
+              .pipe(
+                Effect.map((detail) =>
+                  Option.map(detail, (detailThread) =>
+                    renderProviderHandoffPrelude({
+                      messages: detailThread.messages,
+                      activities: detailThread.activities,
+                      ...(input.messageId !== undefined
+                        ? { excludeMessageId: input.messageId }
+                        : {}),
+                      maxChars: Math.min(
+                        HANDOFF_TRANSCRIPT_MAX_CHARS,
+                        PROVIDER_SEND_TURN_MAX_INPUT_CHARS - (normalizedInput?.length ?? 0) - 1_000,
+                      ),
+                    }),
+                  ),
+                ),
+              ),
+          )
+        : undefined;
     const inputWithHandoffPrelude = handoffPrelude
       ? [handoffPrelude, normalizedInput].filter(Boolean).join("\n\n")
       : normalizedInput;
@@ -1294,7 +1314,7 @@ const make = Effect.gen(function* () {
       });
       return;
     }
-    const { message, hasOtherUserMessages } = turnStart.value;
+    const { message, hasOtherUserMessages, hasInheritedForkMessages } = turnStart.value;
     const appendTurnStartFailure = (summary: string, detail: string) =>
       appendProviderFailureActivity({
         threadId: event.payload.threadId,
@@ -1518,6 +1538,10 @@ const make = Effect.gen(function* () {
         : {}),
       interactionMode: event.payload.interactionMode,
       createdAt: event.payload.createdAt,
+      // Only forks replay inherited history: their provider session starts
+      // fresh while the transcript lives in the fork. Imported sessions adopt
+      // the provider's own resume state, so they must not re-send it.
+      replayExistingContext: thread.session === null && hasInheritedForkMessages,
     }).pipe(
       Effect.map(Option.some),
       Effect.catchCause((cause) => handleTurnStartFailure(cause).pipe(Effect.as(Option.none()))),
@@ -1630,7 +1654,7 @@ const make = Effect.gen(function* () {
   const processCompactRequested = Effect.fn("processCompactRequested")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.compact-requested" }>,
   ) {
-    const thread = yield* resolveThread(event.payload.threadId);
+    const thread = yield* resolveThreadShell(event.payload.threadId);
     if (!thread?.session || thread.session.status === "stopped") return;
     yield* providerService.compactConversation({ threadId: event.payload.threadId });
   });

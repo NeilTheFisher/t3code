@@ -140,6 +140,7 @@ import {
   type AssistantCitationTarget,
 } from "./AssistantCitationSource";
 import { useAssistantCitationTarget, type CitationHistoryPage } from "./useAssistantCitationTarget";
+import { MessageForkButton, type ForkMessageConfig } from "./MessageForkButton";
 import { MessagePlayButton } from "./MessagePlayButton";
 import { stopPlayback as stopTtsPlayback } from "~/hooks/useTtsPlayer";
 import {
@@ -227,7 +228,7 @@ interface TimelineRowSharedState {
   onRevertToTurnCount: (targetTurnCount: number) => void;
   ttsEnabled: boolean;
   onRevertUserMessage: (messageId: MessageId) => void;
-  onUseArtifactTemplate: (template: CodexArtifactTemplate) => void;
+  forkMessage: ForkMessageConfig | null;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onFileOpen: (attachment: ChatFileAttachment) => void;
   onFileDownload: (attachment: ChatFileAttachment) => void;
@@ -341,6 +342,7 @@ interface MessagesTimelineProps {
   onRevertToTurnCount: (targetTurnCount: number) => void;
   onUseArtifactTemplate?: (template: CodexArtifactTemplate) => void;
   isRevertingCheckpoint: boolean;
+  forkMessage?: ForkMessageConfig | null;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onFileOpen?: (attachment: ChatFileAttachment) => void;
   onFileDownload?: (attachment: ChatFileAttachment) => void;
@@ -400,6 +402,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onRevertToTurnCount,
   onUseArtifactTemplate = NOOP_USE_ARTIFACT_TEMPLATE,
   isRevertingCheckpoint,
+  forkMessage = null,
   onImageExpand,
   onFileOpen = NOOP_OPEN_ATTACHMENT,
   onFileDownload = NOOP_OPEN_ATTACHMENT,
@@ -778,7 +781,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onRevertToTurnCount,
       ttsEnabled,
       onRevertUserMessage,
-      onUseArtifactTemplate,
+      forkMessage,
       onImageExpand,
       onFileOpen,
       onFileDownload,
@@ -804,7 +807,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onRevertToTurnCount,
       ttsEnabled,
       onRevertUserMessage,
-      onUseArtifactTemplate,
+      forkMessage,
       onImageExpand,
       onFileOpen,
       onFileDownload,
@@ -1631,6 +1634,9 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
             {displayedUserMessage.copyText && (
               <MessageCopyButton text={displayedUserMessage.copyText} variant="ghost" />
             )}
+            {ctx.forkMessage ? (
+              <MessageForkButton messageId={row.message.id} config={ctx.forkMessage} />
+            ) : null}
           </div>
         </div>
       </div>
@@ -1827,8 +1833,9 @@ function AssistantMessageActions({ row }: { row: Extract<TimelineRow, { kind: "m
   };
   const copyState = resolveAssistantMessageCopyState(source);
   const playState = resolveAssistantMessagePlayState({ ...source, ttsEnabled: ctx.ttsEnabled });
+  const showFork = ctx.forkMessage !== null && !row.message.streaming;
 
-  if (!copyState.visible && !playState.visible) {
+  if (!copyState.visible && !playState.visible && !showFork) {
     return null;
   }
 
@@ -1838,6 +1845,7 @@ function AssistantMessageActions({ row }: { row: Extract<TimelineRow, { kind: "m
         <MessagePlayButton messageId={row.message.id} text={playState.text ?? ""} variant="ghost" />
       ) : null}
       {copyState.visible ? <MessageCopyButton text={copyState.text ?? ""} variant="ghost" /> : null}
+      {showFork ? <MessageForkButton messageId={row.message.id} config={ctx.forkMessage!} /> : null}
     </div>
   );
 }

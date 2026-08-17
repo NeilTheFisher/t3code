@@ -320,6 +320,7 @@ import {
   useThread,
   useThreadRefs,
   useThreadShell,
+  useThreadShells,
 } from "../state/entities";
 import { environmentShell } from "../state/shell";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
@@ -380,6 +381,7 @@ import {
   buildLoadingThreadFromShell,
   buildRunningThreadTurnInterruptInput,
   buildThreadTurnInterruptInput,
+  cloneUserMessageImagesForFork,
   collectUserMessageBlobPreviewUrls,
   createLocalDispatchSnapshot,
   deriveComposerSendState,
@@ -391,6 +393,7 @@ import {
   isBranchMismatchDismissedForSession,
   shouldDockDraftHeroForSubmission,
   shouldReleaseTimelineAnchorForToolActivity,
+  nextForkThreadTitle,
   shouldShowBranchMismatchBanner,
   shouldShowPlanFollowUpPrompt,
   shouldOpenProactivePullRequest,
@@ -418,6 +421,7 @@ import {
   resolveThreadMetadataUpdateForNextTurn,
   resolveSendEnvMode,
   revokeBlobPreviewUrl,
+  revokeComposerImagePreviewUrls,
   revokeUserMessagePreviewUrls,
   shouldWriteThreadErrorToCurrentServerThread,
   startNewThreadForProject,
@@ -482,6 +486,14 @@ const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_USAGE_LIMIT_SOURCES: UsageLimitSourceSnapshots = [];
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
+
+function showThreadForkError(error: unknown, fallback: string): void {
+  toastManager.add({
+    type: "error",
+    title: "Could not fork thread",
+    description: error instanceof Error ? error.message : fallback,
+  });
+}
 function useDraftHeroLayoutTransition(isDraftHeroState: boolean) {
   const transitionGroupRef = useRef<HTMLDivElement | null>(null);
   const composerAnchorRef = useRef<HTMLDivElement | null>(null);
@@ -1418,6 +1430,7 @@ export default function ChatView(props: ChatViewProps) {
   const writeTerminal = useAtomCommand(terminalEnvironment.write, "terminal write");
   const closeTerminalMutation = useAtomCommand(terminalEnvironment.close, "terminal close");
   const createThread = useAtomCommand(threadEnvironment.create, { reportFailure: false });
+  const forkThread = useAtomCommand(threadEnvironment.fork, { reportFailure: false });
   const deleteThread = useAtomCommand(threadEnvironment.delete, { reportFailure: false });
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
@@ -1571,6 +1584,7 @@ export default function ChatView(props: ChatViewProps) {
   const setLogicalProjectDraftThreadId = useComposerDraftStore(
     (store) => store.setLogicalProjectDraftThreadId,
   );
+  const clearDraftThread = useComposerDraftStore((store) => store.clearDraftThread);
   const promptRef = useRef("");
   const composerImagesRef = useRef<ComposerImageAttachment[]>([]);
   const composerFilesRef = useRef<ComposerFileAttachment[]>([]);
@@ -1626,6 +1640,8 @@ export default function ChatView(props: ChatViewProps) {
   >({});
   const [isConnecting, _setIsConnecting] = useState(false);
   const [isRevertingCheckpoint, setIsRevertingCheckpoint] = useState(false);
+  const [isForkingThread, setIsForkingThread] = useState(false);
+  const forkInFlightRef = useRef(false);
   const [maximizedRightPanelThreadKey, setMaximizedRightPanelThreadKey] = useState<string | null>(
     null,
   );
@@ -1721,6 +1737,7 @@ export default function ChatView(props: ChatViewProps) {
   const storeSetActiveTerminal = useTerminalUiStateStore((s) => s.setActiveTerminal);
   const storeCloseTerminal = useTerminalUiStateStore((s) => s.closeTerminal);
   const serverThreadRefs = useThreadRefs();
+  const serverThreadShells = useThreadShells();
   const serverThreadKeys = useMemo(() => serverThreadRefs.map(scopedThreadKey), [serverThreadRefs]);
   const draftThreadsByThreadKey = useComposerDraftStore((store) => store.draftThreadsByThreadKey);
   const draftThreadKeys = useMemo(
@@ -7188,6 +7205,19 @@ export default function ChatView(props: ChatViewProps) {
         );
       }
     }
+    if (turnStartSucceeded && draftId && draftThread?.forkDraft) {
+      const forkThreadRef = scopeThreadRef(activeThread.environmentId, threadIdForSend);
+      await navigate({
+        to: "/$environmentId/$threadId",
+        params: {
+          environmentId: forkThreadRef.environmentId,
+          threadId: forkThreadRef.threadId,
+        },
+      });
+      const draftStore = useComposerDraftStore.getState();
+      draftStore.markDraftThreadPromoting(draftId, forkThreadRef);
+      draftStore.finalizePromotedDraftThread(draftId);
+    }
     sendInFlightRef.current = false;
     if (!turnStartSucceeded) {
       setDockedDraftHeroThreadKey((currentThreadKey) =>
@@ -7855,6 +7885,148 @@ export default function ChatView(props: ChatViewProps) {
       settings,
     ],
   );
+  const onForkMessage = useCallback(
+    async (messageId: MessageId) => {
+      if (!activeProject || !activeThread || !isServerThread || forkInFlightRef.current) return;
+      const sourceMessage = displayServerMessages.find(
+        (message) =>
+          message.id === messageId &&
+          (message.role === "user" || message.role === "assistant") &&
+          !message.streaming,
+      );
+      if (!sourceMessage) {
+        showThreadForkError(null, "That message is no longer available.");
+        return;
+      }
+
+      const isUserFork = sourceMessage.role === "user";
+      forkInFlightRef.current = true;
+      setIsForkingThread(true);
+      let copiedImages: ComposerImageAttachment[] = [];
+      let draftOwnsCopiedImages = false;
+      try {
+        if (isUserFork) {
+          copiedImages = await cloneUserMessageImagesForFork(sourceMessage);
+        }
+        const createdAt = new Date().toISOString();
+        const nextDraftId = newDraftId();
+        const nextThreadId = newThreadId();
+        const existingProjectThreadTitles = serverThreadShells
+          .filter(
+            (thread) =>
+              thread.environmentId === activeThread.environmentId &&
+              thread.projectId === activeThread.projectId,
+          )
+          .map((thread) => thread.title);
+        const existingProjectDraftTitles = Object.values(draftThreadsByThreadKey).flatMap((draft) =>
+          draft.environmentId === activeThread.environmentId &&
+          draft.projectId === activeThread.projectId &&
+          draft.title !== null
+            ? [draft.title]
+            : [],
+        );
+        const nextTitle = nextForkThreadTitle(activeThread.title, [
+          ...existingProjectThreadTitles,
+          ...existingProjectDraftTitles,
+        ]);
+        const nextModelSelection = activeThread.modelSelection;
+        const activeProjectRef = scopeProjectRef(activeProject.environmentId, activeProject.id);
+        const logicalProjectKey = deriveLogicalProjectKeyFromSettings(
+          activeProject,
+          projectGroupingSettings,
+        );
+
+        setLogicalProjectDraftThreadId(logicalProjectKey, activeProjectRef, nextDraftId, {
+          threadId: nextThreadId,
+          createdAt,
+          runtimeMode: activeThread.runtimeMode,
+          interactionMode: activeThread.interactionMode,
+          branch: activeThread.branch,
+          worktreePath: activeThread.worktreePath,
+          envMode: activeThread.worktreePath ? "worktree" : "local",
+          title: nextTitle,
+          forkDraft: true,
+        });
+        if (isUserFork) {
+          setComposerDraftPrompt(nextDraftId, sourceMessage.text);
+          if (copiedImages.length > 0) {
+            addComposerDraftImages(nextDraftId, copiedImages);
+          }
+        } else {
+          setComposerDraftPrompt(nextDraftId, "");
+        }
+        setComposerDraftModelSelection(nextDraftId, nextModelSelection, { replaceOptions: true });
+        setComposerDraftRuntimeMode(nextDraftId, activeThread.runtimeMode);
+        setComposerDraftInteractionMode(nextDraftId, activeThread.interactionMode);
+        draftOwnsCopiedImages = true;
+
+        const result = await forkThread({
+          environmentId: activeThread.environmentId,
+          input: {
+            threadId: nextThreadId,
+            sourceThreadId: activeThread.id,
+            sourceMessageId: messageId,
+            title: nextTitle,
+            modelSelection: nextModelSelection,
+            createdAt,
+          },
+        });
+        if (result._tag === "Failure") {
+          clearDraftThread(nextDraftId);
+          if (!isAtomCommandInterrupted(result)) {
+            showThreadForkError(
+              squashAtomCommandFailure(result),
+              "The thread could not be forked.",
+            );
+          }
+          return;
+        }
+
+        await navigate({
+          to: "/draft/$draftId",
+          params: buildDraftThreadRouteParams(nextDraftId),
+        });
+        scheduleComposerFocus();
+      } catch (error) {
+        showThreadForkError(error, "The thread could not be forked.");
+      } finally {
+        if (!draftOwnsCopiedImages && copiedImages.length > 0) {
+          revokeComposerImagePreviewUrls(copiedImages);
+        }
+        forkInFlightRef.current = false;
+        setIsForkingThread(false);
+      }
+    },
+    [
+      activeProject,
+      activeThread,
+      addComposerDraftImages,
+      clearDraftThread,
+      displayServerMessages,
+      forkThread,
+      isServerThread,
+      navigate,
+      projectGroupingSettings,
+      scheduleComposerFocus,
+      serverThreadShells,
+      draftThreadsByThreadKey,
+      setComposerDraftInteractionMode,
+      setComposerDraftModelSelection,
+      setComposerDraftPrompt,
+      setComposerDraftRuntimeMode,
+      setLogicalProjectDraftThreadId,
+    ],
+  );
+  const forkMessage = useMemo(
+    () =>
+      !isServerThread || !activeThread
+        ? null
+        : {
+            isForking: isForkingThread,
+            onFork: onForkMessage,
+          },
+    [activeThread, isForkingThread, isServerThread, onForkMessage],
+  );
   const onEnvModeChange = useCallback(
     (mode: DraftThreadEnvMode) => {
       if (canOverrideServerThreadEnvMode) {
@@ -8306,6 +8478,7 @@ export default function ChatView(props: ChatViewProps) {
                 onRevertToTurnCount={onRevertTimelineTurn}
                 onUseArtifactTemplate={useArtifactTemplate}
                 isRevertingCheckpoint={isRevertingCheckpoint}
+                forkMessage={forkMessage}
                 onImageExpand={onExpandTimelineImage}
                 onFileOpen={openFileAttachment}
                 onFileDownload={downloadFileAttachment}

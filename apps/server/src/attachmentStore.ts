@@ -88,6 +88,23 @@ export function createAttachmentId(threadId: string, extension?: string): string
   return `${threadSegment}-${NodeCrypto.randomUUID()}${attachmentIdExtensionSuffix(extension)}`;
 }
 
+export function createForkedAttachmentId(
+  threadId: string,
+  sourceAttachmentId: string,
+): string | null {
+  const threadSegment = toSafeThreadAttachmentSegment(threadId);
+  if (!threadSegment) {
+    return null;
+  }
+
+  const normalizedSourceId = normalizeAttachmentRelativePath(sourceAttachmentId);
+  const sourceUuid = normalizedSourceId?.match(ATTACHMENT_ID_PATTERN)?.[2]?.toLowerCase();
+  if (!sourceUuid) {
+    return null;
+  }
+  return `${threadSegment}-${sourceUuid}`;
+}
+
 export function parseThreadSegmentFromAttachmentId(attachmentId: string): string | null {
   const normalizedId = normalizeAttachmentRelativePath(attachmentId);
   if (!normalizedId || normalizedId.includes("/") || normalizedId.includes(".")) {
