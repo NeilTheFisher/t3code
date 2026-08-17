@@ -7,12 +7,12 @@ import {
   mapCodexModelCapabilities,
 } from "./CodexProvider.ts";
 
-it("adds per-model context windows from the Codex cache", () => {
+it("uses the active per-model context window from the Codex cache", () => {
   const models = enrichCodexModelsFromCache(
     [{ slug: "gpt-test", name: "GPT Test", isCustom: false, capabilities: null }],
     { models: [{ slug: "gpt-test", context_window: 272_000, max_context_window: 1_000_000 }] },
   );
-  assert.strictEqual(models[0]?.contextWindowTokens, 1_000_000);
+  assert.strictEqual(models[0]?.contextWindowTokens, 272_000);
 });
 
 it("keeps only the GPT-5.6 Codex family out of legacy models", () => {

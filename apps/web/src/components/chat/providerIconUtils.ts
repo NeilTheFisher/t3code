@@ -1,4 +1,3 @@
-import { ProviderDriverKind } from "@t3tools/contracts";
 import {
   AntigravityIcon,
   ClaudeAI,
@@ -8,6 +7,8 @@ import {
   OpenAI,
   OpenCodeIcon,
 } from "../Icons";
+import { ProviderDriverKind, type ServerProviderModel } from "@t3tools/contracts";
+import { PROVIDER_OPTIONS } from "../../session-logic";
 
 export const PROVIDER_ICON_BY_PROVIDER: Partial<Record<ProviderDriverKind, Icon>> = {
   [ProviderDriverKind.make("codex")]: OpenAI,
@@ -27,7 +28,9 @@ export type ModelEsque = {
   isDefault?: boolean | undefined;
   badge?: "new" | undefined;
   isLegacy?: boolean | undefined;
+  isUnavailable?: boolean | undefined;
   contextWindowTokens?: number | undefined;
+  capabilities?: ServerProviderModel["capabilities"];
 };
 
 function escapeRegExp(value: string): string {

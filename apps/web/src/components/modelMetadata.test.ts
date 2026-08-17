@@ -19,4 +19,17 @@ describe("getModelCapabilityLabels", () => {
       }),
     ).toEqual(["Fast mode", "Thinking", "Reasoning"]);
   });
+
+  it("presents advertised OpenCode model capabilities", () => {
+    expect(
+      getModelCapabilityLabels({
+        optionDescriptors: [],
+        inputModalities: ["text", "image", "pdf"],
+        outputModalities: ["text"],
+        supportsReasoning: true,
+        supportsToolCalls: true,
+        supportsAttachments: true,
+      }),
+    ).toEqual(["Image input", "PDF input", "Attachments", "Tool calling", "Reasoning"]);
+  });
 });

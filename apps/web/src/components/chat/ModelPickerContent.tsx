@@ -53,13 +53,12 @@ type ModelPickerItem = {
   shortName?: string;
   subProvider?: string;
   badge?: "new";
+type ModelPickerItem = ModelEsque & {
   instanceId: ProviderInstanceId;
   driverKind: ProviderDriverKind;
   instanceDisplayName: string;
   instanceAccentColor?: string | undefined;
   continuationGroupKey?: string | undefined;
-  isLegacy?: boolean | undefined;
-  contextWindowTokens?: number | undefined;
 };
 
 export function resolveModelPickerSelectedModel(input: {
@@ -96,6 +95,34 @@ export function shouldIncludeModelPickerOption(input: {
     input.option.slug === input.activeModel &&
     input.option.isUnavailable === true
   );
+export function buildModelPickerItems(
+  modelOptionsByInstance: ReadonlyMap<ProviderInstanceId, ReadonlyArray<ModelEsque>>,
+  entryByInstanceId: ReadonlyMap<
+    ProviderInstanceId,
+    Pick<
+      ProviderInstanceEntry,
+      "driverKind" | "displayName" | "accentColor" | "continuationGroupKey"
+    >
+  >,
+  readyInstanceSet: ReadonlySet<ProviderInstanceId>,
+): ModelPickerItem[] {
+  const out: ModelPickerItem[] = [];
+  for (const [instanceId, models] of modelOptionsByInstance) {
+    const entry = entryByInstanceId.get(instanceId);
+    if (!entry || !readyInstanceSet.has(instanceId)) continue;
+
+    for (const model of models) {
+      out.push({
+        ...model,
+        instanceId,
+        driverKind: entry.driverKind,
+        instanceDisplayName: entry.displayName,
+        ...(entry.accentColor ? { instanceAccentColor: entry.accentColor } : {}),
+        ...(entry.continuationGroupKey ? { continuationGroupKey: entry.continuationGroupKey } : {}),
+      });
+    }
+  }
+  return out;
 }
 
 export function shouldOfferModelPickerSetup(
@@ -397,6 +424,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     }
     return out;
   }, [modelOptionsByInstance, entryByInstanceId, props.activeInstanceId, activeModelSlug]);
+    return buildModelPickerItems(modelOptionsByInstance, entryByInstanceId, readyInstanceSet);
+  }, [modelOptionsByInstance, entryByInstanceId, readyInstanceSet]);
 
   const isLocked = props.lockedProvider !== null;
   const isSearching = searchQuery.trim().length > 0;
