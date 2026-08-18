@@ -2607,7 +2607,9 @@ function InlineFileDiff(props: {
       try {
         const normalizedRoot = workspaceRoot.replaceAll("\\", "/").replace(/\/+$/, "");
         const normalizedPath = change.filePath.replaceAll("\\", "/");
-        const relativePath = normalizedPath.toLowerCase().startsWith(`${normalizedRoot.toLowerCase()}/`)
+        const relativePath = normalizedPath
+          .toLowerCase()
+          .startsWith(`${normalizedRoot.toLowerCase()}/`)
           ? normalizedPath.slice(normalizedRoot.length + 1)
           : normalizedPath.replace(/^\.?\//, "");
         const file = await readProjectFileFresh(environmentId, workspaceRoot, relativePath);
