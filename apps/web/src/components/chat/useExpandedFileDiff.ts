@@ -5,7 +5,7 @@ import type { FileChange } from "../../session-logic";
 import { expandPartialPatchWithCurrentFile, getRenderablePatch } from "../../lib/diffRendering";
 import { readProjectFileFresh } from "../files/projectFilesQueryState";
 
-type ExpansionError = "changed" | "patch" | "read-error" | "missing-hash" | null;
+type ExpansionError = "changed" | "patch" | "read-error" | "missing-hash" | "truncated" | null;
 
 export function useExpandedFileDiff(
   change: FileChange,
@@ -41,6 +41,7 @@ export function useExpandedFileDiff(
           : normalizedPath.replace(/^\.?\//, "");
         const file = await readProjectFileFresh(environmentId, workspaceRoot, relativePath);
         if (!file) throw new Error("read");
+        if (file.truncated) throw new Error("truncated");
         const digest = await crypto.subtle.digest(
           "SHA-256",
           new TextEncoder().encode(file.contents),
@@ -64,7 +65,13 @@ export function useExpandedFileDiff(
         const reason = error instanceof Error ? error.message : "";
         if (!cancelled) {
           setExpansionError(
-            reason === "changed" ? "changed" : reason === "patch" ? "patch" : "read-error",
+            reason === "changed"
+              ? "changed"
+              : reason === "patch"
+                ? "patch"
+                : reason === "truncated"
+                  ? "truncated"
+                  : "read-error",
           );
         }
       }

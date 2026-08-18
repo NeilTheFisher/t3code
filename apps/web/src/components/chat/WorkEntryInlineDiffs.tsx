@@ -40,6 +40,10 @@ const EXPANSION_ERROR_MESSAGES: Record<string, { title: string; description: str
     title: "Cannot expand unchanged lines",
     description: "This edit predates unchanged-line tracking.",
   },
+  truncated: {
+    title: "Cannot expand unchanged lines",
+    description: "The file is too large to verify the edit.",
+  },
 };
 
 export function InlineFileDiff(props: {
