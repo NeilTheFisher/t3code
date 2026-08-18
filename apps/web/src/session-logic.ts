@@ -54,9 +54,6 @@ export {
 export interface FileChange {
   filePath: string;
   postFileHash?: string;
-  oldString?: string;
-  newString?: string;
-  content?: string;
   patch?: string;
 }
 
