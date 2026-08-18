@@ -1,6 +1,8 @@
 export function synthesizeUnifiedDiff(oldText: string, newText: string): string {
-  const oldLines = oldText.split("\n");
-  const newLines = newText.split("\n");
+  const oldLines = oldText === "" ? [] : oldText.split("\n");
+  const newLines = newText === "" ? [] : newText.split("\n");
+  if (oldLines[oldLines.length - 1] === "") oldLines.pop();
+  if (newLines[newLines.length - 1] === "") newLines.pop();
   const oldCount = oldLines.length;
   const newCount = newLines.length;
   const lines: string[] = [];
