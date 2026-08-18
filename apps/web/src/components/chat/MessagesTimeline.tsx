@@ -49,6 +49,7 @@ import {
 } from "react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { FileDiff, type FileDiffMetadata } from "@pierre/diffs/react";
+import { DiffStatLabel } from "./DiffStatLabel";
 import {
   LegendList,
   type LegendListRef,
@@ -191,6 +192,7 @@ import { formatChatTimestampTooltip, formatDayAwareTimestamp } from "../../times
 import { useClientSettings, useUpdateClientSettings } from "../../hooks/useSettings";
 import { readProjectFileFresh } from "../files/projectFilesQueryState";
 import { toastManager } from "../ui/toast";
+import { Toggle } from "../ui/toggle";
 
 import {
   buildInlineTerminalContextText,
@@ -3519,14 +3521,14 @@ function InlineFileDiff(props: {
             <Tooltip>
               <TooltipTrigger
                 render={
-                  <Button
+                  <Toggle
                     aria-label={
                       props.wordWrap ? "Disable diff line wrapping" : "Enable diff line wrapping"
                     }
                     variant="ghost"
-                    size="icon-xs"
-                    data-pressed={props.wordWrap || undefined}
-                    onClick={props.onToggleWordWrap}
+                    size="xs"
+                    pressed={props.wordWrap}
+                    onPressedChange={props.onToggleWordWrap}
                   />
                 }
               >
@@ -3536,8 +3538,7 @@ function InlineFileDiff(props: {
                 {props.wordWrap ? "Disable line wrapping" : "Enable line wrapping"}
               </TooltipPopup>
             </Tooltip>
-            <span className="font-mono text-destructive">-{stat.deletions}</span>
-            <span className="font-mono text-success">+{stat.additions}</span>
+            <DiffStatLabel additions={stat.additions} deletions={stat.deletions} layout="inline" />
           </div>
         )}
         options={{
@@ -3601,6 +3602,17 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
     }
     setExpanded(next);
   };
+  const [wordWrap, setWordWrap] = useState(() => {
+    // Initialize from client settings but don't write back to it
+    return false; // default, will be overridden by settings read below
+  });
+  const clientWordWrap = useClientSettings((settings) => settings.wordWrap);
+  const [wordWrapInitialized, setWordWrapInitialized] = useState(false);
+  if (!wordWrapInitialized) {
+    setWordWrap(clientWordWrap);
+    setWordWrapInitialized(true);
+  }
+  const [expanded, setExpanded] = useState(false);
   const iconConfig = workToneIcon(workEntry.tone);
   const showWarningIndicator = workEntry.sourceActivityKind === "runtime.warning";
   const showFailedIndicator = workEntryDisplayIndicatesToolFailure(workEntry);
@@ -3863,7 +3875,7 @@ environmentId={timelineRow.activeThreadEnvironmentId}
               workspaceRoot={workspaceRoot}
               theme={timelineRow.resolvedTheme}
               wordWrap={wordWrap}
-              onToggleWordWrap={() => updateClientSettings({ wordWrap: !wordWrap })}
+              onToggleWordWrap={() => setWordWrap((w) => !w)}
             />
           ))}
           {expandedBody ? (
