@@ -141,7 +141,7 @@ import { cn } from "~/lib/utils";
 import { useUiStateStore } from "~/uiStateStore";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { formatChatTimestampTooltip, formatDayAwareTimestamp } from "../../timestampFormat";
-import { useClientSettings, useUpdateClientSettings } from "../../hooks/useSettings";
+import { useClientSettings } from "../../hooks/useSettings";
 import { readProjectFileFresh } from "../files/projectFilesQueryState";
 import { toastManager } from "../ui/toast";
 import { Toggle } from "../ui/toggle";
