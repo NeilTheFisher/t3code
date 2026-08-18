@@ -64,9 +64,6 @@ export type WorkLogToolLifecycleStatus =
 export interface FileChange {
   filePath: string;
   postFileHash?: string;
-  oldString?: string;
-  newString?: string;
-  content?: string;
   patch?: string;
 }
 
