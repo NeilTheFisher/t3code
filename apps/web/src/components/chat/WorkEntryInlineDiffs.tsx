@@ -36,6 +36,10 @@ const EXPANSION_ERROR_MESSAGES: Record<string, { title: string; description: str
     title: "Cannot expand unchanged lines",
     description: "The file could not be read.",
   },
+  "missing-hash": {
+    title: "Cannot expand unchanged lines",
+    description: "This edit predates unchanged-line tracking.",
+  },
 };
 
 export function InlineFileDiff(props: {

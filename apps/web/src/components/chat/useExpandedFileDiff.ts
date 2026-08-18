@@ -5,7 +5,7 @@ import type { FileChange } from "../../session-logic";
 import { expandPartialPatchWithCurrentFile, getRenderablePatch } from "../../lib/diffRendering";
 import { readProjectFileFresh } from "../files/projectFilesQueryState";
 
-type ExpansionError = "changed" | "patch" | "read-error" | null;
+type ExpansionError = "changed" | "patch" | "read-error" | "missing-hash" | null;
 
 export function useExpandedFileDiff(
   change: FileChange,
@@ -20,8 +20,12 @@ export function useExpandedFileDiff(
     setExpandedFileDiff(fileDiff);
     setExpansionError(null);
     if (!fileDiff.isPartial) return;
-    if (!workspaceRoot || !change.postFileHash) {
-      setExpansionError(workspaceRoot ? "read-error" : "read-error");
+    if (!workspaceRoot) {
+      setExpansionError("read-error");
+      return;
+    }
+    if (!change.postFileHash) {
+      setExpansionError("missing-hash");
       return;
     }
 
