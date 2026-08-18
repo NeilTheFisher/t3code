@@ -21,6 +21,7 @@ import {
   type ModelUsage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { parseCliArgs } from "@t3tools/shared/cliArgs";
+import { isWorkspaceImagePreviewPath } from "@t3tools/shared/filePreview";
 import { type ClaudeScopedLimitNames, claudeRateLimitEventToUpdate } from "./claudeUsageLimits.ts";
 import {
   ApprovalRequestId,
@@ -108,7 +109,7 @@ import {
 } from "../Errors.ts";
 import { type ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
-import { synthesizeUnifiedDiff } from "./DiffUtils.ts";
+import { extractToolFileChanges } from "./DiffUtils.ts";
 const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.fromJsonString(Schema.Unknown));
 const decodeUnknownJsonStringExit = Schema.decodeUnknownExit(Schema.fromJsonString(Schema.Unknown));
 
@@ -896,8 +897,27 @@ function readClaudeResumeState(resumeCursor: unknown): ClaudeResumeState | undef
 }
 
 /** Exported for tests; the substring matching below is easy to regress. */
-export function classifyToolItemType(toolName: string): CanonicalItemType {
+function readToolImagePath(toolName: string, input: Record<string, unknown>): string | undefined {
+  const normalized = toolName.trim().toLowerCase();
+  if (normalized !== "read" && normalized !== "read file") {
+    return undefined;
+  }
+  const pathValue = input.file_path ?? input.path;
+  if (typeof pathValue !== "string") {
+    return undefined;
+  }
+  const path = pathValue.trim();
+  return path.length > 0 && isWorkspaceImagePreviewPath(path) ? path : undefined;
+}
+
+export function classifyToolItemType(
+  toolName: string,
+  input: Record<string, unknown> = {},
+): CanonicalItemType {
   const normalized = toolName.toLowerCase();
+  if (readToolImagePath(toolName, input)) {
+    return "image_view";
+  }
   if (normalized.includes("agent")) {
     return "collab_agent_tool_call";
   }
@@ -1349,6 +1369,11 @@ function workflowAgentStatus(entry: ClaudeWorkflowAgentEntry): RuntimeTaskStatus
 }
 
 function summarizeToolRequest(toolName: string, input: Record<string, unknown>): string {
+  const imagePath = readToolImagePath(toolName, input);
+  if (imagePath) {
+    return imagePath;
+  }
+
   const commandValue = input.command ?? input.cmd;
   const command = typeof commandValue === "string" ? commandValue : undefined;
   if (command && command.trim().length > 0) {
@@ -1706,34 +1731,18 @@ export function buildClaudeFileChanges(
 ): Array<{ path: string; diff: string }> | undefined {
   const normalizedName = toolName.toLowerCase();
 
-  // Edit tool: file_path, old_string, new_string
-  if (normalizedName.includes("edit")) {
-    const filePath = typeof input.file_path === "string" ? input.file_path : undefined;
-    const oldString = typeof input.old_string === "string" ? input.old_string : undefined;
-    const newString = typeof input.new_string === "string" ? input.new_string : undefined;
-    if (filePath && oldString !== undefined && newString !== undefined) {
-      return [{ path: filePath, diff: synthesizeUnifiedDiff(oldString, newString) }];
-    }
-  }
-
-  // Write tool: file_path, content
-  if (normalizedName.includes("write") && !normalizedName.includes("todo")) {
-    const filePath = typeof input.file_path === "string" ? input.file_path : undefined;
-    const content = typeof input.content === "string" ? input.content : undefined;
-    if (filePath && content !== undefined) {
-      return [{ path: filePath, diff: synthesizeUnifiedDiff("", content) }];
-    }
-  }
-
-  // apply_patch: the entire input is the patch string
+  // apply_patch: Claude uses splitMultiFilePatch to handle multi-file patches
   if (normalizedName.includes("apply_patch")) {
     const patch = typeof input.patch === "string" ? input.patch : undefined;
     if (patch && patch.length > 0) {
       return splitMultiFilePatch(patch);
     }
+    return undefined;
   }
 
-  return undefined;
+  // Delegate all other file-change tools to the shared extractor
+  const changes = extractToolFileChanges(toolName, input);
+  return changes && changes.length > 0 ? changes : undefined;
 }
 
 function splitMultiFilePatch(patch: string): Array<{ path: string; diff: string }> | undefined {
@@ -2966,7 +2975,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         const partialInputJson = tool.partialInputJson + event.delta.partial_json;
         const parsedInput = tryParseJsonRecord(partialInputJson);
         const itemType = parsedInput
-          ? classifyToolItemType(tool.toolName)
+          ? classifyToolItemType(tool.toolName, parsedInput)
           : tool.itemType;
         const detail = parsedInput ? summarizeToolRequest(tool.toolName, parsedInput) : tool.detail;
         let nextTool: ToolInFlight = {
@@ -3081,7 +3090,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         typeof block.input === "object" && block.input !== null
           ? (block.input as Record<string, unknown>)
           : {};
-      const itemType = classifyToolItemType(toolName);
+      const itemType = classifyToolItemType(toolName, toolInput);
       const itemId = block.id;
       const detail = summarizeToolRequest(toolName, toolInput);
       const inputFingerprint =
