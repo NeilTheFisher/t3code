@@ -28,7 +28,7 @@ import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
-import { synthesizeUnifiedDiff } from "./DiffUtils.ts";
+import { extractToolFileChanges } from "./DiffUtils.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import {
@@ -510,61 +510,8 @@ export function extractOpenCodeToolFileChanges(
   toolName: string,
   input: Record<string, unknown>,
 ): Array<{ path: string; diff: string }> | undefined {
-  const normalized = toolName.toLowerCase();
-  if (
-    !(
-      normalized.includes("edit") ||
-      normalized.includes("write") ||
-      normalized.includes("patch") ||
-      normalized.includes("multiedit")
-    )
-  ) {
-    return undefined;
-  }
-
-  const filePath =
-    typeof input.file_path === "string"
-      ? input.file_path
-      : typeof input.filePath === "string"
-        ? input.filePath
-        : typeof input.path === "string"
-          ? input.path
-          : undefined;
-  if (!filePath) return undefined;
-
-  const oldString =
-    typeof input.old_string === "string"
-      ? input.old_string
-      : typeof input.oldString === "string"
-        ? input.oldString
-        : undefined;
-  const newString =
-    typeof input.new_string === "string"
-      ? input.new_string
-      : typeof input.newString === "string"
-        ? input.newString
-        : undefined;
-  if (oldString !== undefined && newString !== undefined) {
-    return [{ path: filePath, diff: synthesizeUnifiedDiff(oldString, newString) }];
-  }
-
-  const content =
-    typeof input.content === "string"
-      ? input.content
-      : typeof input.new_content === "string"
-        ? input.new_content
-        : undefined;
-  if (content !== undefined) {
-    return [{ path: filePath, diff: synthesizeUnifiedDiff("", content) }];
-  }
-
-  // Patch tools: read input.patch directly
-  const patch = typeof input.patch === "string" ? input.patch : undefined;
-  if (patch && patch.length > 0) {
-    return [{ path: filePath, diff: patch }];
-  }
-
-  return undefined;
+  const result = extractToolFileChanges(toolName, input);
+  return result && result.length > 0 ? result : undefined;
 }
 
 function toolStateCreatedAt(part: Extract<Part, { type: "tool" }>): string | undefined {
