@@ -709,6 +709,12 @@ export function extractOpenCodeToolFileChanges(
     return [{ path: filePath, diff: synthesizeUnifiedDiff("", content) }];
   }
 
+  // Patch tools: read input.patch directly
+  const patch = typeof input.patch === "string" ? input.patch : undefined;
+  if (patch && patch.length > 0) {
+    return [{ path: filePath, diff: patch }];
+  }
+
   return undefined;
 }
 
