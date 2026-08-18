@@ -33,16 +33,8 @@ export const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
   const { workEntry, workspaceRoot } = props;
   const activity = use(TimelineRowActivityCtx);
   const timelineRow = use(TimelineRowCtx);
-  const [wordWrap, setWordWrap] = useState(() => {
-    // Initialize from client settings but don't write back to it
-    return false; // default, will be overridden by settings read below
-  });
   const clientWordWrap = useClientSettings((settings) => settings.wordWrap);
-  const [wordWrapInitialized, setWordWrapInitialized] = useState(false);
-  if (!wordWrapInitialized) {
-    setWordWrap(clientWordWrap);
-    setWordWrapInitialized(true);
-  }
+  const [wordWrap, setWordWrap] = useState(clientWordWrap);
   const [expanded, setExpanded] = useState(false);
   const iconConfig = workToneIcon(workEntry.tone);
   const showWarningIndicator = workEntry.sourceActivityKind === "runtime.warning";
@@ -200,6 +192,7 @@ export const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
           className="mt-1 ms-7 cursor-default border-s border-border/45 ps-3 pt-0.5"
           onClick={stopRowToggle}
           onPointerDown={stopRowToggle}
+          onKeyDown={stopRowToggle}
         >
           {inlineFilePatches.map(({ change, fileDiff }) => (
             <InlineFileDiff
