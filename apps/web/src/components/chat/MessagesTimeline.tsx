@@ -2076,7 +2076,7 @@ const toolCallExpandedBodyClassName =
 function buildInlineFileChangePatch(change: FileChange): string | null {
   const patch = change.patch?.trim();
   if (!patch) return null;
-  if (patch.includes("diff --git") || (patch.includes("--- ") && patch.includes("+++ "))) {
+  if (patch.startsWith("diff --git ") || /^--- .*\r?\n\+\+\+ /.test(patch)) {
     return patch;
   }
   const path = change.filePath;
