@@ -3434,6 +3434,8 @@ function InlineFileDiff(props: {
   const [expansionError, setExpansionError] = useState<string | null>(null);
 
   useEffect(() => {
+    setExpandedFileDiff(props.fileDiff);
+    setExpansionError(null);
     if (!props.fileDiff.isPartial) return;
     if (!workspaceRoot || !change.postFileHash) {
       setExpansionError(
@@ -3449,7 +3451,7 @@ function InlineFileDiff(props: {
       try {
         const normalizedRoot = workspaceRoot.replaceAll("\\", "/").replace(/\/+$/, "");
         const normalizedPath = change.filePath.replaceAll("\\", "/");
-        const relativePath = normalizedPath.startsWith(`${normalizedRoot}/`)
+        const relativePath = normalizedPath.toLowerCase().startsWith(`${normalizedRoot.toLowerCase()}/`)
           ? normalizedPath.slice(normalizedRoot.length + 1)
           : normalizedPath.replace(/^\.?\//, "");
         const file = await readProjectFileFresh(environmentId, workspaceRoot, relativePath);
