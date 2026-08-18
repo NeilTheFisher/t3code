@@ -60,47 +60,6 @@ index e9f62f5..af82a46 100644
  	};
  	return merged;
  }
-diff --git a/dist/components/FileDiff.d.ts b/dist/components/FileDiff.d.ts
-index ab4298b..b550b12 100644
---- a/dist/components/FileDiff.d.ts
-+++ b/dist/components/FileDiff.d.ts
-@@ -29,6 +29,7 @@ interface FileDiffOptions<LAnnotation> extends Omit<BaseDiffOptions, 'hunkSepara
-+  onHunkExpand?(hunkIndex: number, direction: ExpansionDirections, expansionLineCountOverride?: number): unknown;
-   hunkSeparators?: Exclude<HunkSeparators, 'custom'> /**
-                                                      * @deprecated Custom hunk separator functions are deprecated and will be
-                                                      * removed in a future version.
-                                                      */ | ((hunk: HunkData, instance: FileDiff<LAnnotation>) => HTMLElement | DocumentFragment | null | undefined);
-   disableFileHeader?: boolean;
-   renderHeaderPrefix?: RenderHeaderPrefixCallback;
-diff --git a/dist/components/FileDiff.js b/dist/components/FileDiff.js
-index 9cc449c..9ae06e2 100644
---- a/dist/components/FileDiff.js
-+++ b/dist/components/FileDiff.js
-@@ -83,1 +83,1 @@ var FileDiff = class extends EventEmitter {
--		this.interactionManager = new InteractionManager("diff", pluckInteractionOptions(options, typeof options.hunkSeparators === "function" || (options.hunkSeparators ?? "line-info") === "line-info" || options.hunkSeparators === "line-info-basic" ? this.handleExpandHunk : void 0, this.getLineIndex));
-+		this.interactionManager = new InteractionManager("diff", pluckInteractionOptions(options, options.onHunkExpand ?? (typeof options.hunkSeparators === "function" || (options.hunkSeparators ?? "line-info") === "line-info" || options.hunkSeparators === "line-info-basic" ? this.handleExpandHunk : void 0), this.getLineIndex));
-@@ -158,1 +158,1 @@ var FileDiff = class extends EventEmitter {
--		this.interactionManager.setOptions(pluckInteractionOptions(this.options, typeof this.options.hunkSeparators === "function" || (this.options.hunkSeparators ?? "line-info") === "line-info" || this.options.hunkSeparators === "line-info-basic" ? this.handleExpandHunk : void 0, this.getLineIndex));
-+		this.interactionManager.setOptions(pluckInteractionOptions(this.options, this.options.onHunkExpand ?? (typeof this.options.hunkSeparators === "function" || (this.options.hunkSeparators ?? "line-info") === "line-info" || this.options.hunkSeparators === "line-info-basic" ? this.handleExpandHunk : void 0), this.getLineIndex));
-diff --git a/dist/renderers/DiffHunksRenderer.js b/dist/renderers/DiffHunksRenderer.js
-index f56ee7e..1a3801b 100644
---- a/dist/renderers/DiffHunksRenderer.js
-+++ b/dist/renderers/DiffHunksRenderer.js
-@@ -492,1 +492,1 @@ class DiffHunksRenderer {
--					isExpandable: !fileDiff.isPartial
-+					isExpandable: !fileDiff.isPartial || this.options.expandPartial === true
-@@ -644,1 +644,1 @@ class DiffHunksRenderer {
--					isExpandable: !fileDiff.isPartial
-+					isExpandable: !fileDiff.isPartial || this.options.expandPartial === true
-@@ -919,1 +919,1 @@ function pushSeparator(type, { hunkIndex, collapsedLines, rangeSize, hunkSpecs,
--	const chunked = rangeSize > context.expansionLineCount;
-+	const chunked = collapsedLines > context.expansionLineCount;
-diff --git a/dist/utils/getDiffHunksRendererOptions.js b/dist/utils/getDiffHunksRendererOptions.js
-index b268e0d..ef410ad 100644
---- a/dist/utils/getDiffHunksRendererOptions.js
-+++ b/dist/utils/getDiffHunksRendererOptions.js
-@@ -22,0 +23,1 @@ function getDiffHunksRendererOptions(options) {
-+		expandPartial: options?.onHunkExpand != null,
 diff --git a/package.json b/package.json
 index ff61c90..1e170e5 100644
 --- a/package.json

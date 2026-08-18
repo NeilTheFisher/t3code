@@ -1483,18 +1483,19 @@ export function buildClaudeFileChanges(
   return undefined;
 }
 
-function splitMultiFilePatch(patch: string): Array<{ path: string; diff: string }> {
+function splitMultiFilePatch(patch: string): Array<{ path: string; diff: string }> | undefined {
   // Split on "diff --git" boundaries for multi-file patches
   const parts = patch.split(/(?=^diff --git )/m).filter((p) => p.trim().length > 0);
   if (parts.length <= 1) {
     // Single-file patch: extract path from headers
-    return extractPatchFilePath(patch);
+    const result = extractPatchFilePath(patch);
+    return result.length > 0 ? result : undefined;
   }
   const results: Array<{ path: string; diff: string }> = [];
   for (const part of parts) {
     results.push(...extractPatchFilePath(part));
   }
-  return results;
+  return results.length > 0 ? results : undefined;
 }
 
 function extractPatchFilePath(patch: string): Array<{ path: string; diff: string }> {
