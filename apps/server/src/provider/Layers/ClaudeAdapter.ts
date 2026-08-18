@@ -97,7 +97,7 @@ import {
 } from "../Errors.ts";
 import { type ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
-import { synthesizeUnifiedDiff } from "./DiffUtils.ts";
+import { extractToolFileChanges } from "./DiffUtils.ts";
 const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.fromJsonString(Schema.Unknown));
 const decodeUnknownJsonStringExit = Schema.decodeUnknownExit(Schema.fromJsonString(Schema.Unknown));
 
@@ -1493,34 +1493,18 @@ export function buildClaudeFileChanges(
 ): Array<{ path: string; diff: string }> | undefined {
   const normalizedName = toolName.toLowerCase();
 
-  // Edit tool: file_path, old_string, new_string
-  if (normalizedName.includes("edit")) {
-    const filePath = typeof input.file_path === "string" ? input.file_path : undefined;
-    const oldString = typeof input.old_string === "string" ? input.old_string : undefined;
-    const newString = typeof input.new_string === "string" ? input.new_string : undefined;
-    if (filePath && oldString !== undefined && newString !== undefined) {
-      return [{ path: filePath, diff: synthesizeUnifiedDiff(oldString, newString) }];
-    }
-  }
-
-  // Write tool: file_path, content
-  if (normalizedName.includes("write") && !normalizedName.includes("todo")) {
-    const filePath = typeof input.file_path === "string" ? input.file_path : undefined;
-    const content = typeof input.content === "string" ? input.content : undefined;
-    if (filePath && content !== undefined) {
-      return [{ path: filePath, diff: synthesizeUnifiedDiff("", content) }];
-    }
-  }
-
-  // apply_patch: the entire input is the patch string
+  // apply_patch: Claude uses splitMultiFilePatch to handle multi-file patches
   if (normalizedName.includes("apply_patch")) {
     const patch = typeof input.patch === "string" ? input.patch : undefined;
     if (patch && patch.length > 0) {
       return splitMultiFilePatch(patch);
     }
+    return undefined;
   }
 
-  return undefined;
+  // Delegate all other file-change tools to the shared extractor
+  const changes = extractToolFileChanges(toolName, input);
+  return changes && changes.length > 0 ? changes : undefined;
 }
 
 function splitMultiFilePatch(patch: string): Array<{ path: string; diff: string }> | undefined {
