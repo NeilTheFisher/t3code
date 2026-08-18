@@ -8675,7 +8675,7 @@ describe("buildClaudeFileChanges", () => {
       patch,
     });
     assert.ok(result);
-    assert.equal(result![0]!.path, "/main.ts");
+    assert.equal(result![0]!.path, "main.ts");
     assert.ok(result![0]!.diff.includes(patch));
   });
 
