@@ -1454,7 +1454,7 @@ export function buildClaudeFileChanges(
   const normalizedName = toolName.toLowerCase();
 
   // Edit tool: file_path, old_string, new_string
-  if (normalizedName === "edit" || normalizedName.includes("edit")) {
+  if (normalizedName.includes("edit")) {
     const filePath = typeof input.file_path === "string" ? input.file_path : undefined;
     const oldString = typeof input.old_string === "string" ? input.old_string : undefined;
     const newString = typeof input.new_string === "string" ? input.new_string : undefined;
@@ -1464,10 +1464,7 @@ export function buildClaudeFileChanges(
   }
 
   // Write tool: file_path, content
-  if (
-    normalizedName === "write" ||
-    (normalizedName.includes("write") && !normalizedName.includes("todo"))
-  ) {
+  if (normalizedName.includes("write") && !normalizedName.includes("todo")) {
     const filePath = typeof input.file_path === "string" ? input.file_path : undefined;
     const content = typeof input.content === "string" ? input.content : undefined;
     if (filePath && content !== undefined) {
@@ -1476,19 +1473,48 @@ export function buildClaudeFileChanges(
   }
 
   // apply_patch: the entire input is the patch string
-  if (normalizedName === "apply_patch" || normalizedName.includes("apply_patch")) {
+  if (normalizedName.includes("apply_patch")) {
     const patch = typeof input.patch === "string" ? input.patch : undefined;
     if (patch && patch.length > 0) {
-      // Try to extract the file path from the patch header (--- a/path or --- /path)
-      const pathMatch = patch.match(/^(?:---|\+\+\+) [ab]?(\/?[^\s]+)/m);
-      const filePath = pathMatch?.[1];
-      if (filePath) {
-        return [{ path: filePath, diff: patch }];
-      }
+      return splitMultiFilePatch(patch);
     }
   }
 
   return undefined;
+}
+
+function splitMultiFilePatch(patch: string): Array<{ path: string; diff: string }> {
+  // Split on "diff --git" boundaries for multi-file patches
+  const parts = patch.split(/(?=^diff --git )/m).filter((p) => p.trim().length > 0);
+  if (parts.length <= 1) {
+    // Single-file patch: extract path from headers
+    return extractPatchFilePath(patch);
+  }
+  const results: Array<{ path: string; diff: string }> = [];
+  for (const part of parts) {
+    results.push(...extractPatchFilePath(part));
+  }
+  return results;
+}
+
+function extractPatchFilePath(patch: string): Array<{ path: string; diff: string }> {
+  // Try +++ header first (handles creation where --- is /dev/null)
+  const plusMatch = patch.match(/^\+\+\+ [ab]\/(.+)$/m);
+  if (plusMatch?.[1]) {
+    return [{ path: plusMatch[1], diff: patch }];
+  }
+  // Fall back to --- header for deletions
+  const minusMatch = patch.match(/^--- [ab]\/(.+)$/m);
+  if (minusMatch?.[1]) {
+    return [{ path: minusMatch[1], diff: patch }];
+  }
+  // Last resort: try the non-git header format
+  const pathMatch = patch.match(/^(?:---|\+\+\+) ([^\s]+)/m);
+  const filePath = pathMatch?.[1];
+  if (filePath && filePath !== "/dev/null") {
+    return [{ path: filePath, diff: patch }];
+  }
+  return [];
 }
 
 function toolResultStreamKind(itemType: CanonicalItemType): ClaudeToolResultStreamKind | undefined {
