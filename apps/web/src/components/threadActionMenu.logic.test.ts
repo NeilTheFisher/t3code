@@ -33,7 +33,7 @@ describe("buildThreadActionMenuItems", () => {
         ...baseState,
         supports: { settlement: false, snooze: false, pinning: false, titleRegeneration: false },
       }),
-    ).toEqual(["rename", "mark-unread", "copy", "archive", "delete"]);
+    ).toEqual(["rename", "mark-unread", "copy", "export-markdown", "archive", "delete"]);
   });
 
   it("includes branch items only for threads with a branch", () => {
@@ -87,6 +87,10 @@ describe("buildThreadActionMenuItems", () => {
         supports: { settlement: false, snooze: false, pinning: false, titleRegeneration: false },
       }),
     ).toContain("archive");
+  });
+
+  it("always offers the markdown export", () => {
+    expect(ids(baseState)).toContain("export-markdown");
   });
 
   it("disables archive while the thread is running", () => {

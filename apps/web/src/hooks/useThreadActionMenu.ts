@@ -15,6 +15,7 @@ import {
   type ThreadActionMenuId,
 } from "../components/threadActionMenu.logic";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
+import { exportThreadAsMarkdown } from "../threadExport";
 import { threadEnvironment } from "../state/threads";
 import { useAtomCommand } from "../state/use-atom-command";
 import {
@@ -237,6 +238,11 @@ export function useThreadActionMenu(input: {
             return;
           case "copy-thread-id":
             copyThreadIdToClipboard(thread.id, { threadId: thread.id });
+            return;
+          case "export-markdown":
+            void exportThreadAsMarkdown(threadRef).catch((error) => {
+              failureToast("Failed to export thread", error);
+            });
             return;
           case "archive": {
             if (confirmThreadArchive) {
