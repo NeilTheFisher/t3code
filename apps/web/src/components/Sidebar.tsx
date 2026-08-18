@@ -146,6 +146,7 @@ import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { cn } from "~/lib/utils";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { buildThreadActionMenuItems } from "./threadActionMenu.logic";
+import { exportThreadAsMarkdown } from "../threadExport";
 import {
   animateSidebarLayoutChanges,
   applySidebarThreadDrop,
@@ -4168,6 +4169,17 @@ export default function Sidebar() {
             return;
           case "copy-thread-id":
             copyThreadIdToClipboard(thread.id, { threadId: thread.id });
+            return;
+          case "export-markdown":
+            void exportThreadAsMarkdown(threadRef).catch((error) => {
+              toastManager.add(
+                stackedThreadToast({
+                  type: "error",
+                  title: "Failed to export thread",
+                  description: error instanceof Error ? error.message : "An error occurred.",
+                }),
+              );
+            });
             return;
           case "archive": {
             if (confirmThreadArchive) {
