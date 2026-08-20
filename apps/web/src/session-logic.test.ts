@@ -110,7 +110,7 @@ describe("deriveModelChangeNotices", () => {
         payload: { toInstanceId: "claudeAgent", toModel: "claude-sonnet-4-6", isHandoff: false },
       }),
     ]);
-    const entries = deriveTimelineEntries([], [], [], notices);
+    const entries = deriveTimelineEntries([], [], [], [], notices);
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({ kind: "notice", id: "model-changed-2" });
   });
@@ -136,7 +136,7 @@ describe("deriveModelChangeNotices", () => {
         payload: { toInstanceId: "codex", toModel: "gpt-5.4", isHandoff: true },
       }),
     ]);
-    const entries = deriveTimelineEntries([userMessage], [], [], notices);
+    const entries = deriveTimelineEntries([userMessage], [], [], [], notices);
     expect(entries.map((entry) => entry.kind)).toEqual(["notice", "message"]);
   });
 });
