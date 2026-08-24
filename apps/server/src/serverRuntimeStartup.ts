@@ -432,6 +432,11 @@ export const make = (options?: StartupOptions) =>
         ),
       );
 
+      // Reconcile provider sessions first. Settling turns changes a session
+      // from starting/running to interrupted, which would otherwise hide it
+      // from provider-session reconciliation and leave its binding live.
+      yield* runStartupPhase("provider-sessions.reconcile", reconcileProviderSessions);
+
       yield* Effect.logDebug("startup phase: settling orphaned running turns");
       yield* runStartupPhase(
         "orphaned-turns.settle",
@@ -451,8 +456,6 @@ export const make = (options?: StartupOptions) =>
           yield* providerSessionReaper.start().pipe(Scope.provide(reactorScope));
         }),
       );
-
-      yield* runStartupPhase("provider-sessions.reconcile", reconcileProviderSessions);
 
       const welcomeBase = yield* resolveWelcomeBase;
       const environment = yield* serverEnvironment.getDescriptor;

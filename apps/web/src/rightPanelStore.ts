@@ -131,10 +131,7 @@ const EMPTY_THREAD_STATE: ThreadRightPanelState = {
 };
 
 const singletonSurface = (
-  kind: Exclude<
-    RightPanelKind,
-    "file" | "preview" | "terminal" | "pull-request" | "webpage"
-  >,
+  kind: Exclude<RightPanelKind, "file" | "preview" | "terminal" | "pull-request" | "webpage">,
 ): RightPanelSurface => {
   switch (kind) {
     case "diff":

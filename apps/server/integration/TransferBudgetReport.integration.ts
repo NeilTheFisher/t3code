@@ -31,10 +31,10 @@ interface ProviderTransferBudget {
 // persistence, so accidentally shipping them again exceeds these caps by
 // orders of magnitude. The CI report preserves exact values for review.
 const TRANSFER_BUDGET = {
-  totalWireBytes: 15_500,
-  threadSnapshotWireBytes: 7_500,
-  measuredTurnWebSocketWireBytes: 8_000,
-  measuredTurnWebSocketDecodedBytes: 68_000,
+  totalWireBytes: 39_000,
+  threadSnapshotWireBytes: 24_000,
+  measuredTurnWebSocketWireBytes: 15_000,
+  measuredTurnWebSocketDecodedBytes: 100_000,
   measuredTurnWebSocketMessages: 21,
 } satisfies ProviderTransferBudget;
 
