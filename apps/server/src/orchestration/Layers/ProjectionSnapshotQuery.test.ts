@@ -850,6 +850,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             context: messageContext,
           },
           hasOtherUserMessages: false,
+          hasInheritedForkMessages: false,
         }),
       );
       assert.equal(

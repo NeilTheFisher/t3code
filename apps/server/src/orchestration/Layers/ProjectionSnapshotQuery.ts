@@ -125,7 +125,10 @@ const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
   }),
 );
 const ProjectionTurnStartMessageDbRowSchema = ProjectionThreadMessageDbRowSchema.mapFields(
-  Struct.assign({ hasOtherUserMessages: Schema.Number }),
+  Struct.assign({
+    hasOtherUserMessages: Schema.Number,
+    hasInheritedForkMessages: Schema.Number,
+  }),
 );
 const ProjectionThreadProposedPlanDbRowSchema = ProjectionThreadProposedPlan;
 const ProjectionThreadPullRequestDbRowSchema = ProjectionThreadPullRequest.mapFields(
@@ -1418,7 +1421,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               LOWER(TRIM(other.text, ${MESSAGE_TRIM_WHITESPACE})) != '/compact'
               OR COALESCE(json_array_length(other.attachments_json), 0) > 0
             )
-        ) AS "hasOtherUserMessages"
+        ) AS "hasOtherUserMessages",
+        EXISTS (
+          SELECT 1
+          FROM projection_thread_messages AS inherited
+          WHERE inherited.thread_id = ${threadId}
+            AND inherited.message_id != ${messageId}
+            AND inherited.message_id LIKE ${threadId} || ':fork:%'
+        ) AS "hasInheritedForkMessages"
       FROM projection_thread_messages
       WHERE thread_id = ${threadId} AND message_id = ${messageId}
       LIMIT 1
@@ -2499,6 +2509,7 @@ pending_approval_requests AS (
                 messages: messagesByThread.get(row.threadId) ?? [],
                 proposedPlans: proposedPlansByThread.get(row.threadId) ?? [],
                 activities: activitiesByThread.get(row.threadId) ?? [],
+                hasMoreActivities: false,
                 checkpoints: checkpointsByThread.get(row.threadId) ?? [],
                 session: sessionsByThread.get(row.threadId) ?? null,
               }));
@@ -3492,6 +3503,7 @@ pending_approval_requests AS (
         ...(row.context !== null ? { context: row.context } : {}),
       },
       hasOtherUserMessages: row.hasOtherUserMessages === 1,
+      hasInheritedForkMessages: row.hasInheritedForkMessages === 1,
     }));
   });
 
@@ -3538,8 +3550,16 @@ pending_approval_requests AS (
         ),
       ),
     ]);
+    // The ids query caps non-pinned rows at WINDOW+1 (newest first); the extra
+    // row reports hasMoreActivities. Pinned rows are exempt from the window.
+    const hasMoreActivities = activityIdRows.length > THREAD_DETAIL_ACTIVITY_WINDOW;
+    const boundedActivityIdRows = hasMoreActivities
+      ? activityIdRows.slice(0, THREAD_DETAIL_ACTIVITY_WINDOW)
+      : activityIdRows;
     const activityIds = [
-      ...new Set([...activityIdRows, ...pinnedActivityIdRows].map(({ activityId }) => activityId)),
+      ...new Set(
+        [...boundedActivityIdRows, ...pinnedActivityIdRows].map(({ activityId }) => activityId),
+      ),
     ];
     const activities: OrchestrationThreadActivity[] = [];
 
@@ -3565,12 +3585,15 @@ pending_approval_requests AS (
       }
     }
 
-    return activities.toSorted(
-      (left, right) =>
-        (left.sequence ?? -1) - (right.sequence ?? -1) ||
-        left.createdAt.localeCompare(right.createdAt) ||
-        left.id.localeCompare(right.id),
-    );
+    return {
+      activities: activities.toSorted(
+        (left, right) =>
+          (left.sequence ?? -1) - (right.sequence ?? -1) ||
+          left.createdAt.localeCompare(right.createdAt) ||
+          left.id.localeCompare(right.id),
+      ),
+      hasMoreActivities,
+    };
   });
 
   const getThreadDetailByIdBounded = (
@@ -3579,6 +3602,10 @@ pending_approval_requests AS (
     activityRead: ThreadDetailActivityRead = { mode: "raw" },
   ) =>
     Effect.gen(function* () {
+      // Client mode reads the projected activity read model (bounded ids query
+      // + batched payload decode). Raw mode decodes activity rows directly and
+      // honors the caller's activityKinds filter; an empty filter skips the
+      // activity query entirely.
       const activitiesEffect =
         activityRead.mode === "client"
           ? listProjectedThreadActivities(threadId, bounds)
@@ -3612,10 +3639,17 @@ pending_approval_requests AS (
                   )
                 : Effect.succeed([]),
             ]).pipe(
-              Effect.map(([activityRows, pinnedActivityRows]) =>
-                [
+              Effect.map(([activityRows, pinnedActivityRows]) => {
+                // The retention window bounds the raw stream; pinned rows
+                // (retained approvals/requests) are exempt from it.
+                const hasMoreActivities =
+                  bounds === undefined && activityRows.length > THREAD_DETAIL_ACTIVITY_WINDOW;
+                const boundedActivityRows = hasMoreActivities
+                  ? activityRows.slice(activityRows.length - THREAD_DETAIL_ACTIVITY_WINDOW)
+                  : activityRows;
+                const activities = [
                   ...new Map(
-                    [...activityRows, ...pinnedActivityRows].map(
+                    [...boundedActivityRows, ...pinnedActivityRows].map(
                       (row) => [row.activityId, row] as const,
                     ),
                   ).values(),
@@ -3626,8 +3660,9 @@ pending_approval_requests AS (
                       left.createdAt.localeCompare(right.createdAt) ||
                       left.activityId.localeCompare(right.activityId),
                   )
-                  .map(mapThreadActivityRow),
-              ),
+                  .map((row) => projectActivityPayload(mapThreadActivityRow(row)));
+                return { activities, hasMoreActivities };
+              }),
             );
 
       const [
@@ -3706,20 +3741,7 @@ pending_approval_requests AS (
         return Option.none<OrchestrationThread>();
       }
 
-      // hasMoreActivities for lazy-load: when the non-windowed detail exceeds the window, trim to window.
-      // Upstream's turn-window pagination handles message/turn windowing; this handles activity windowing.
-      const hasMoreActivities =
-        bounds === undefined && (activities as unknown as { length: number }).length > THREAD_DETAIL_ACTIVITY_WINDOW;
-      // If activities came from raw path as OrchestrationThreadActivity[], slice; if from client path (projected), also slice.
-      // The +1 row is sliced away; pinned activities are already merged so we must not slice pinned separately.
-      // For now, handle the common raw case where activities is array of OrchestrationThreadActivity.
-      // When hasMore, drop the oldest beyond window (activities are ASC, so drop from start? Actually window keeps most recent => slice tail)
-      // Fork's original kept most recent WINDOW: activityRows.slice(length-WINDOW). Mapped activities are ASC, so oldest are first; to keep most recent, slice from end.
-      const boundedActivities = hasMoreActivities
-        ? (activities as unknown as OrchestrationThreadActivity[]).slice(
-            (activities as unknown as OrchestrationThreadActivity[]).length - THREAD_DETAIL_ACTIVITY_WINDOW,
-          )
-        : (activities as OrchestrationThreadActivity[]);
+      const { activities, hasMoreActivities } = activityEntries;
 
       const thread = {
         id: threadRow.value.threadId,
@@ -3774,7 +3796,7 @@ pending_approval_requests AS (
           return message;
         }),
         proposedPlans: proposedPlanRows.map(mapProposedPlanRow),
-        activities: boundedActivities,
+        activities,
         hasMoreActivities,
         checkpoints: checkpointRows.map((row) => ({
           turnId: row.turnId,

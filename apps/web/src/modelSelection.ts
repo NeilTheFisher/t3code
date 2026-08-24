@@ -1,4 +1,5 @@
 import {
+  type ServerProviderModel,
   ANTIGRAVITY_DEFAULT_MODEL,
   DEFAULT_TEXT_GENERATION_MODEL,
   DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER,
@@ -89,6 +90,8 @@ export interface AppModelOption {
   isDefault?: boolean;
   isLegacy?: boolean;
   isUnavailable?: boolean;
+  contextWindowTokens?: number;
+  capabilities?: ServerProviderModel["capabilities"];
 }
 
 function appendUnavailableDynamicModelSelection(
@@ -110,10 +113,6 @@ function appendUnavailableDynamicModelSelection(
   if (options.some((option) => option.slug === slug)) return options;
 
   return [...options, { slug, name: slug, isCustom: false, isUnavailable: true }];
-  contextWindowTokens?: number;
-export interface AppModelOption extends ModelEsque {
-  isCustom: boolean;
-  isDefault?: boolean;
 }
 
 function toAppModelOption(model: ServerProvider["models"][number]): AppModelOption {

@@ -13,11 +13,14 @@ describe("ChangedFilesCard", () => {
         allDirectoriesExpanded
         resolvedTheme="light"
         onToggleAllDirectories={() => {}}
+        expanded
+        showCompactPreview
+        onExpandedChange={() => {}}
         onOpenTurnDiff={() => {}}
       />,
     );
 
-    expect(markup).toContain('data-changed-files-state="tree"');
+    expect(markup).toContain('data-changed-files-state="expanded"');
     expect(markup).toContain('aria-label="Open diff"');
     expect(markup).toContain('role="group" aria-label="2 additions, 1 deletions"');
     expect(markup).toContain("1 changed file");
@@ -39,15 +42,18 @@ describe("ChangedFilesCard", () => {
           },
           { path: "README.md", kind: "modified", additions: 3, deletions: 0 },
         ]}
+        expanded
+        showCompactPreview={false}
         allDirectoriesExpanded={false}
         resolvedTheme="light"
         onToggleAllDirectories={() => {}}
+        onExpandedChange={() => {}}
         onOpenTurnDiff={() => {}}
       />,
     );
 
-    expect(markup).toContain('data-changed-files-state="tree"');
-    expect(markup).toContain('aria-expanded="false"');
+    expect(markup).toContain('data-changed-files-state="expanded"');
+    expect(markup).toContain('aria-expanded="true"');
     expect(markup).toContain("apps/web/src");
     expect(markup).not.toContain("App.tsx");
     expect(markup).toContain("packages/shared/src");
@@ -62,14 +68,17 @@ describe("ChangedFilesCard", () => {
       <ChangedFilesCard
         turnId={TurnId.make("turn-1")}
         files={[{ path: "apps/web/src/App.tsx", kind: "modified", additions: 120, deletions: 20 }]}
+        expanded
+        showCompactPreview={false}
         allDirectoriesExpanded={false}
         resolvedTheme="light"
         onToggleAllDirectories={() => {}}
+        onExpandedChange={() => {}}
         onOpenTurnDiff={() => {}}
       />,
     );
 
-    expect(markup).toContain('data-changed-files-state="tree"');
+    expect(markup).toContain('data-changed-files-state="expanded"');
     expect(markup).toContain("1 changed file");
     expect(markup).toContain("apps/web/src");
     expect(markup).not.toContain("Show all");

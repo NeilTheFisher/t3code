@@ -1657,6 +1657,7 @@ it.effect(
         Layer.provide(Layer.succeed(ProviderAdapterRegistry.ProviderAdapterRegistry, registry)),
         Layer.provide(directoryLayer),
         Layer.provide(defaultServerSettingsLayer),
+        Layer.provide(serverConfigTestLayer),
         Layer.provide(AnalyticsService.layerTest),
         Layer.provide(
           Layer.succeed(
@@ -1750,6 +1751,7 @@ it.effect(
         Layer.provide(directoryLayer),
         Layer.provide(projectionMessagesLayer),
         Layer.provide(defaultServerSettingsLayer),
+        Layer.provide(serverConfigTestLayer),
         Layer.provide(AnalyticsService.layerTest),
         Layer.provide(
           Layer.succeed(
@@ -1841,6 +1843,7 @@ it.effect(
         Layer.provide(directoryLayer),
         Layer.provide(projectionMessagesLayer),
         Layer.provide(defaultServerSettingsLayer),
+        Layer.provide(serverConfigTestLayer),
         Layer.provide(AnalyticsService.layerTest),
         Layer.provide(
           Layer.succeed(
@@ -1919,6 +1922,7 @@ it.effect(
         Layer.provide(directoryLayer),
         Layer.provide(projectionMessagesLayer),
         Layer.provide(defaultServerSettingsLayer),
+        Layer.provide(serverConfigTestLayer),
         Layer.provide(AnalyticsService.layerTest),
         Layer.provide(
           Layer.succeed(
@@ -3159,7 +3163,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
           provider: ProviderDriverKind.make("codex"),
           providerInstanceId: codexInstanceId,
           threadId,
-          cwd: "/tmp/project-binding-mismatch",
+          cwd: fixtureCwd("project-binding-mismatch"),
           runtimeMode: "full-access",
         });
         yield* directory.upsert({

@@ -31,7 +31,7 @@ import {
   selectThreadPreviewMiniPlayer,
   usePreviewMiniPlayerStore,
 } from "../previewMiniPlayerStore";
-import type { ChatMessage, Thread, ThreadShell } from "../types";
+import type { ChatMessage } from "../types";
 import type { DraftThreadState } from "../composerDraftStore";
 import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
@@ -94,6 +94,7 @@ import {
   shouldWriteThreadErrorToCurrentServerThread,
   waitForRevertedMessage,
   prepareRevertedMessageAttachments,
+  codexArtifactTemplatePromptToAppend,
 } from "./ChatView.logic";
 
 describe("agent browser close confirmation", () => {

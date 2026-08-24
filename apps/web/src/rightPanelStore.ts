@@ -184,10 +184,7 @@ const EMPTY_THREAD_STATE: ThreadRightPanelState = {
 };
 
 const singletonSurface = (
-  kind: Exclude<
-    RightPanelKind,
-    "file" | "preview" | "terminal" | "pull-request" | "webpage"
-  >,
+  kind: Exclude<RightPanelKind, "file" | "preview" | "terminal" | "pull-request" | "webpage">,
 ): RightPanelSurface => {
   switch (kind) {
     case "diff":
@@ -244,6 +241,21 @@ const terminalSurface = (terminalId: string): RightPanelSurface => ({
 });
 
 export type PullRequestSurface = Extract<RightPanelSurface, { kind: "pull-request" }>;
+
+/**
+ * Update a pull-request tab status map, returning the same reference when
+ * nothing changed so callers can skip a re-render.
+ */
+export function updatePullRequestTabStatus<Status extends { state: unknown; isDraft: boolean }>(
+  statuses: Readonly<Record<string, Status>>,
+  surfaceId: string,
+  status: Status,
+): Readonly<Record<string, Status>> {
+  return statuses[surfaceId]?.state === status.state &&
+    statuses[surfaceId]?.isDraft === status.isDraft
+    ? statuses
+    : { ...statuses, [surfaceId]: status };
+}
 
 export function pullRequestSurfaceId(target: {
   environmentId?: string;
