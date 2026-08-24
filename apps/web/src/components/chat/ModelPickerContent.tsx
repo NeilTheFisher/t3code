@@ -11,6 +11,7 @@ import { memo, useMemo, useState, useCallback, useEffect, useLayoutEffect, useRe
 import { ChevronRightIcon, SearchIcon } from "lucide-react";
 import { ModelListRow } from "./ModelListRow";
 import { ModelPickerSidebar } from "./ModelPickerSidebar";
+import { isModelPickerNewModel } from "./modelPickerModelHighlights";
 import { getProviderStatusMessage, hasProviderSetup } from "./ProviderStatusBanner";
 import {
   modelPickerLegacySectionKey,
@@ -47,12 +48,6 @@ import {
 } from "../../providerInstances";
 import { providerModelKey, sortProviderModelItems } from "../../modelOrdering";
 
-type ModelPickerItem = {
-  slug: string;
-  name: string;
-  shortName?: string;
-  subProvider?: string;
-  badge?: "new";
 type ModelPickerItem = ModelEsque & {
   instanceId: ProviderInstanceId;
   driverKind: ProviderDriverKind;
@@ -95,6 +90,8 @@ export function shouldIncludeModelPickerOption(input: {
     input.option.slug === input.activeModel &&
     input.option.isUnavailable === true
   );
+}
+
 export function buildModelPickerItems(
   modelOptionsByInstance: ReadonlyMap<ProviderInstanceId, ReadonlyArray<ModelEsque>>,
   entryByInstanceId: ReadonlyMap<
@@ -329,6 +326,15 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     props.activeInstanceId,
     props.onOpenProviderSetup,
   ]);
+  const readyInstanceSet = useMemo(() => {
+    const ready = new Set<ProviderInstanceId>();
+    for (const entry of instanceEntries) {
+      if (isProviderInstancePickerReady(entry)) {
+        ready.add(entry.instanceId);
+      }
+    }
+    return ready;
+  }, [instanceEntries]);
 
   // Flatten models into a searchable array. One pass over the
   // instance-keyed map; each model carries its instance id + driver kind
@@ -364,6 +370,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           ...(model.contextWindowTokens !== undefined
             ? { contextWindowTokens: model.contextWindowTokens }
             : {}),
+          ...(model.isUnavailable ? { isUnavailable: true } : {}),
           instanceId,
           driverKind: entry.driverKind,
           instanceDisplayName: entry.displayName,
@@ -376,8 +383,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     }
     return out;
   }, [modelOptionsByInstance, entryByInstanceId, props.activeInstanceId, activeModelSlug]);
-    return buildModelPickerItems(modelOptionsByInstance, entryByInstanceId, readyInstanceSet);
-  }, [modelOptionsByInstance, entryByInstanceId, readyInstanceSet]);
 
   const isLocked = props.lockedProvider !== null;
   const isSearching = searchQuery.trim().length > 0;
@@ -770,7 +775,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             onSelectInstance={handleSelectInstance}
             instanceEntries={sidebarInstanceEntries}
             showFavorites
-            {...(selectableUnavailableInstanceIds ? { selectableUnavailableInstanceIds } : {})}
             {...(lockedDisabledInstanceIds
               ? {
                   disabledInstanceIds: lockedDisabledInstanceIds,
@@ -927,7 +931,10 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                         showProvider
                         preferShortName={!isLocked}
                         useTriggerLabel={false}
-                        showNewBadge={model.badge === "new"}
+                        showNewBadge={
+                          model.badge === "new" ||
+                          isModelPickerNewModel(model.driverKind, model.slug)
+                        }
                         unavailable={model.isUnavailable === true}
                         jumpLabel={modelJumpLabelByKey.get(modelKey) ?? null}
                         disabledReason={disabledReason}

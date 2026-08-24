@@ -433,7 +433,7 @@ export function workEntryIndicatesToolSuccess(entry: WorkLogPresentationEntry): 
   );
 }
 
-function workLogEntryIsLocalCodeSearch(entry: WorkLogPresentationEntry): boolean {
+export function workLogEntryIsLocalCodeSearch(entry: WorkLogPresentationEntry): boolean {
   return (
     entry.itemType === "web_search" &&
     /\bgrep\b/i.test(normalizeCompactToolLabel(entry.toolTitle ?? entry.label))

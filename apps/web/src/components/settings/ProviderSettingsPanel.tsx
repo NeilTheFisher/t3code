@@ -895,6 +895,7 @@ export function EnvironmentProviderSettings({
         instance={row.instance}
         driverOption={driverOption}
         liveProvider={liveProvider}
+        timestampFormat={settings.timestampFormat}
         mode={mode}
         selected={mode === "list" && selectedRow?.instanceId === row.instanceId}
         onSelect={mode === "list" ? () => setSelectedInstanceId(row.instanceId) : undefined}
