@@ -81,7 +81,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           ${row.archivedAt},
           ${row.settledOverride},
           ${row.settledAt},
-          ${row.unsettledAt},
+          ${row.unsettledAt ?? null},
           ${row.snoozedUntil},
           ${row.snoozedAt},
           ${row.pinnedAt},
@@ -93,7 +93,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           ${row.pendingApprovalCount},
           ${row.pendingUserInputCount},
           ${row.hasActionableProposedPlan},
-          ${row.pendingBackgroundTaskCount},
+          ${row.pendingBackgroundTaskCount ?? 0},
           ${row.deletedAt}
         )
         ON CONFLICT (thread_id)
