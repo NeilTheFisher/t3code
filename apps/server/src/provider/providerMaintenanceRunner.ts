@@ -398,6 +398,35 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
       },
     );
 
+    // An interrupted update (client disconnect kills the RPC fiber) aborts
+    // `recordFailedUpdate` mid-write, which would pin the provider on
+    // "queued"/"running" forever and keep the sidebar pill spinning. This
+    // runs in the exit finalizer's uninterruptible region, so it always gets
+    // the last word.
+    const recordInterruptedUpdate = Effect.fn("ProviderMaintenanceRunner.recordInterruptedUpdate")(
+      function* () {
+        const providers = yield* providerRegistry.getProviders;
+        const current = providers.find(
+          (candidate) => candidate.instanceId === instanceId,
+        )?.updateState;
+        if (!current || (current.status !== "queued" && current.status !== "running")) {
+          return;
+        }
+        yield* setUpdateState(
+          makeUpdateState({
+            status: "failed",
+            startedAt: current.startedAt,
+            finishedAt: yield* nowIso,
+            message:
+              current.status === "queued"
+                ? "Update was cancelled while waiting to start."
+                : "Update interrupted before completion.",
+            output: null,
+          }),
+        );
+      },
+    );
+
     return yield* commandCoordinator
       .withCommandLock({
         targetKey,
@@ -406,6 +435,11 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
         run: runProviderUpdate(),
       })
       .pipe(
+        Effect.onExit((exit) =>
+          exit._tag === "Failure" && Cause.hasInterruptsOnly(exit.cause)
+            ? recordInterruptedUpdate()
+            : Effect.void,
+        ),
         Effect.mapError((error) =>
           isServerProviderUpdateError(error)
             ? new ServerProviderUpdateError({

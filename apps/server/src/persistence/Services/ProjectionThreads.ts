@@ -41,7 +41,7 @@ export const ProjectionThread = Schema.Struct({
   archivedAt: Schema.NullOr(IsoDateTime),
   settledOverride: Schema.NullOr(Schema.Literals(["settled", "active"])),
   settledAt: Schema.NullOr(IsoDateTime),
-  unsettledAt: Schema.NullOr(IsoDateTime),
+  unsettledAt: Schema.optional(Schema.NullOr(IsoDateTime), { default: () => null }),
   snoozedUntil: Schema.NullOr(IsoDateTime),
   snoozedAt: Schema.NullOr(IsoDateTime),
   pinnedAt: Schema.NullOr(IsoDateTime),
@@ -52,7 +52,7 @@ export const ProjectionThread = Schema.Struct({
   pendingApprovalCount: NonNegativeInt,
   pendingUserInputCount: NonNegativeInt,
   hasActionableProposedPlan: NonNegativeInt,
-  pendingBackgroundTaskCount: NonNegativeInt,
+  pendingBackgroundTaskCount: Schema.optional(NonNegativeInt, { default: () => 0 }),
   deletedAt: Schema.NullOr(IsoDateTime),
 });
 export type ProjectionThread = typeof ProjectionThread.Type;
