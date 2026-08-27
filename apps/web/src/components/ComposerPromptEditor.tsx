@@ -1,4 +1,5 @@
 import { LexicalComposer, type InitialConfigType } from "@lexical/react/LexicalComposer";
+import { $createComposerCitationNode } from "./ComposerCitationNode";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { ContentEditable } from "@lexical/react/LexicalContentEditable";
 import { LexicalErrorBoundary } from "@lexical/react/LexicalErrorBoundary";
@@ -33,10 +34,7 @@ import {
   BLUR_COMMAND,
   FOCUS_COMMAND,
   $getRoot,
-  $getNodeByKey,
   HISTORY_MERGE_TAG,
-  HISTORY_PUSH_TAG,
-  SKIP_DOM_SELECTION_TAG,
   DecoratorNode,
   type ElementNode,
   type LexicalNode,
@@ -55,7 +53,6 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
-  useState,
 } from "react";
 
 import {
@@ -83,19 +80,9 @@ import {
 } from "./composerInlineChip";
 import { FILE_TAG_CHIP_CLASS_NAME, FileTagChipContent } from "./chat/FileTagChip";
 import { ComposerPendingTerminalContextChip } from "./chat/ComposerPendingTerminalContexts";
-import { getTimelinePageScrollKey } from "./chat/pageScrollController";
 import { formatProviderSkillDisplayName } from "@t3tools/client-runtime/providerSkills";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { registerComposerInlineTokenPaste } from "./composerInlineTokenPaste";
-import { didComposerSelectionChangeVisibly } from "./composerSelection";
-import {
-  $consumeComposerCitationCommentRequest,
-  $createComposerCitationNode,
-  ComposerCitationCommentContext,
-  ComposerCitationNode,
-  type ComposerCitationCommentRequest,
-  type ComposerCitationCommentTarget,
-} from "./ComposerCitationNode";
 
 const COMPOSER_EDITOR_HMR_KEY = `composer-editor-${Math.random().toString(36).slice(2)}`;
 const SURROUND_SYMBOLS: [string, string][] = [
@@ -448,14 +435,12 @@ function $createComposerTerminalContextNode(
 type ComposerInlineTokenNode =
   | ComposerMentionNode
   | ComposerSkillNode
-  | ComposerCitationNode
   | ComposerTerminalContextNode;
 
 function isComposerInlineTokenNode(candidate: unknown): candidate is ComposerInlineTokenNode {
   return (
     candidate instanceof ComposerMentionNode ||
     candidate instanceof ComposerSkillNode ||
-    candidate instanceof ComposerCitationNode ||
     candidate instanceof ComposerTerminalContextNode
   );
 }
@@ -844,11 +829,17 @@ function $setComposerEditorPrompt(
   prompt: string,
   terminalContexts: ReadonlyArray<TerminalContextDraft>,
   skillMetadata: ReadonlyMap<string, ComposerSkillMetadata>,
+  plainText: boolean,
 ): void {
   const root = $getRoot();
   root.clear();
   const paragraph = $createParagraphNode();
   root.append(paragraph);
+
+  if (plainText) {
+    $appendTextWithLineBreaks(paragraph, prompt);
+    return;
+  }
 
   const segments = splitPromptIntoComposerSegments(prompt, terminalContexts);
   for (const segment of segments) {
@@ -895,20 +886,12 @@ export interface ComposerPromptEditorHandle {
   focus: () => void;
   focusAt: (cursor: number) => void;
   focusAtEnd: () => void;
-  requestCitationComment: (request: ComposerCitationCommentRequest) => void;
   readSnapshot: () => {
     value: string;
     cursor: number;
     expandedCursor: number;
     terminalContextIds: string[];
   };
-  /**
-   * True when a collapsed caret sits on the first ("start") or last ("end")
-   * visual line, counting soft wraps. Prompt history only claims ArrowUp and
-   * ArrowDown at these edges so arrows still move the caret inside multiline
-   * text.
-   */
-  isCaretOnVisualEdge: (edge: "start" | "end") => boolean;
 }
 
 interface ComposerPromptEditorProps {
@@ -916,11 +899,16 @@ interface ComposerPromptEditorProps {
   cursor: number;
   terminalContexts: ReadonlyArray<TerminalContextDraft>;
   skills: ReadonlyArray<ServerProviderSkill>;
+  /**
+   * Renders the value as raw text: no mention/skill/terminal-context tokens
+   * and no token plugins. Used for pending-question answers, which only ever
+   * submit plain strings. With no token nodes, collapsed and expanded cursor
+   * offsets coincide, so all cursor mapping reduces to a raw clamp.
+   */
+  plainText?: boolean;
   disabled: boolean;
   placeholder: string;
-  containerClassName?: string;
   className?: string;
-  placeholderClassName?: string;
   onRemoveTerminalContext: (contextId: string) => void;
   onChange: (
     nextValue: string,
@@ -929,77 +917,12 @@ interface ComposerPromptEditorProps {
     cursorAdjacentToMention: boolean,
     terminalContextIds: string[],
   ) => void;
-  onVisibleSelectionChange?: () => void;
   onCommandKeyDown?: (
     key: "ArrowDown" | "ArrowUp" | "Enter" | "Tab",
     event: KeyboardEvent,
   ) => boolean;
-  onPageScrollKeyDown?: (key: "PageUp" | "PageDown") => void;
-  onPageScrollKeyUp?: (key: string) => void;
-  onPageScrollRelease?: () => void;
-  onCitationSubmitAndSend?: () => void;
   onPaste: React.ClipboardEventHandler<HTMLElement>;
   editorRef: React.RefObject<ComposerPromptEditorHandle | null>;
-}
-
-/**
- * Client rect of the line the collapsed caret is on, as seen from `edge`.
- * A caret at a soft-wrap boundary belongs to two visual lines and the
- * range reports a rect for each, so take the one farthest from the edge
- * under test: an ambiguous caret then never claims the key and the arrow
- * moves the caret as usual. A collapsed range reports zero-height rects at
- * some positions, so probe the adjacent character on the same side. When
- * the range container is the paragraph itself (an empty line, or a caret
- * beside an inline chip) measure the child next to the caret before
- * falling back to the paragraph.
- */
-function caretLineRect(range: Range, edge: "start" | "end"): DOMRect | null {
-  const collapsedRects = Array.from(range.getClientRects()).filter((rect) => rect.height > 0);
-  const collapsedRect = edge === "start" ? collapsedRects.at(-1) : collapsedRects[0];
-  if (collapsedRect) return collapsedRect;
-
-  const container = range.startContainer;
-  if (container.nodeType === Node.TEXT_NODE) {
-    const textNode = container as Text;
-    if (textNode.data.length === 0) return null;
-    const probeStart = Math.max(
-      0,
-      Math.min(
-        edge === "start" ? range.startOffset : range.startOffset - 1,
-        textNode.data.length - 1,
-      ),
-    );
-    const probeRange = document.createRange();
-    probeRange.setStart(textNode, probeStart);
-    probeRange.setEnd(textNode, probeStart + 1);
-    const probeRect = Array.from(probeRange.getClientRects()).find((rect) => rect.height > 0);
-    if (probeRect) return probeRect;
-    const boundingRect = probeRange.getBoundingClientRect();
-    return boundingRect.height > 0 ? boundingRect : null;
-  }
-
-  if (!(container instanceof HTMLElement)) return null;
-  // The caret sits between the paragraph's children, which is where Lexical
-  // puts it next to an inline chip. Measure the neighbouring child.
-  const neighbour =
-    container.childNodes[Math.max(0, range.startOffset - 1)] ??
-    container.childNodes[range.startOffset];
-  if (neighbour instanceof HTMLElement) {
-    const neighbourRect = neighbour.getBoundingClientRect();
-    if (neighbourRect.height > 0) return neighbourRect;
-  } else if (neighbour instanceof Text && neighbour.data.length > 0) {
-    // Probe the character on the caret's side. A soft-wrapped text node's
-    // first rect is its first visual line, which may not be the caret's.
-    const isBeforeCaret = neighbour === container.childNodes[range.startOffset - 1];
-    const probeStart = isBeforeCaret ? neighbour.data.length - 1 : 0;
-    const probeRange = document.createRange();
-    probeRange.setStart(neighbour, probeStart);
-    probeRange.setEnd(neighbour, probeStart + 1);
-    const probeRect = Array.from(probeRange.getClientRects()).find((rect) => rect.height > 0);
-    if (probeRect) return probeRect;
-  }
-  const containerRect = container.getBoundingClientRect();
-  return containerRect.height > 0 ? containerRect : null;
 }
 
 function ComposerCommandKeyPlugin(props: {
@@ -1353,7 +1276,7 @@ function ComposerInlineTokenPastePlugin() {
     () =>
       registerComposerInlineTokenPaste(editor, {
         createMentionNode: $createComposerMentionNode,
-        createCitationNode: $createComposerCitationNode,
+        createCitationNode: (citation, source) => $createComposerCitationNode(citation, source),
         getExpandedAbsoluteOffsetForPoint,
       }),
     [editor],
@@ -1365,8 +1288,15 @@ function ComposerInlineTokenPastePlugin() {
 function ComposerSurroundSelectionPlugin(props: {
   terminalContexts: ReadonlyArray<TerminalContextDraft>;
   skills: ReadonlyArray<ServerProviderSkill>;
+  plainText: boolean;
 }) {
   const [editor] = useLexicalComposerContext();
+  // Surround-typing is not token behavior, so this plugin renders in both
+  // modes. In plain mode there are no token nodes: cursor mapping is a raw
+  // clamp and the mention-boundary guard would false-positive on answer text
+  // that merely looks like a mention, so it is skipped.
+  const collapseCursor = props.plainText ? clampExpandedCursor : collapseExpandedComposerCursor;
+  const touchesMentionBoundary = props.plainText ? () => false : selectionTouchesMentionBoundary;
   const terminalContextsRef = useRef(props.terminalContexts);
   const skillMetadataRef = useRef(skillMetadataByName(props.skills));
   const pendingSurroundSelectionRef = useRef<{
@@ -1413,7 +1343,7 @@ function ComposerSurroundSelectionPlugin(props: {
             return null;
           }
           const value = $getRoot().getTextContent();
-          if (selectionTouchesMentionBoundary(value, range.start, range.end)) {
+          if (touchesMentionBoundary(value, range.start, range.end)) {
             return null;
           }
           return {
@@ -1432,11 +1362,13 @@ function ComposerSurroundSelectionPlugin(props: {
         selectionSnapshot.expandedEnd,
       );
       const nextValue = `${selectionSnapshot.value.slice(0, selectionSnapshot.expandedStart)}${inputData}${selectedText}${surroundCloseSymbol}${selectionSnapshot.value.slice(selectionSnapshot.expandedEnd)}`;
-      $setComposerEditorPrompt(nextValue, terminalContextsRef.current, skillMetadataRef.current);
-      const selectionStart = collapseExpandedComposerCursor(
+      $setComposerEditorPrompt(
         nextValue,
-        selectionSnapshot.expandedStart,
+        terminalContextsRef.current,
+        skillMetadataRef.current,
+        props.plainText,
       );
+      const selectionStart = collapseCursor(nextValue, selectionSnapshot.expandedStart);
       $setSelectionRangeAtComposerOffsets(
         selectionStart + inputData.length,
         selectionStart + inputData.length + selectedText.length,
@@ -1482,7 +1414,7 @@ function ComposerSurroundSelectionPlugin(props: {
           return;
         }
         const value = $getRoot().getTextContent();
-        if (selectionTouchesMentionBoundary(value, range.start, range.end)) {
+        if (touchesMentionBoundary(value, range.start, range.end)) {
           pendingSurroundSelectionRef.current = null;
           pendingDeadKeySelectionRef.current = null;
           return;
@@ -1563,7 +1495,7 @@ function ComposerSurroundSelectionPlugin(props: {
               pendingDeadKeySelection.expandedStart,
               pendingDeadKeySelection.expandedEnd,
             );
-            const replacementStart = collapseExpandedComposerCursor(
+            const replacementStart = collapseCursor(
               currentValue,
               pendingDeadKeySelection.expandedStart,
             );
@@ -1633,27 +1565,28 @@ function ComposerPromptEditorInner({
   cursor,
   terminalContexts,
   skills,
+  plainText = false,
   disabled,
   placeholder,
-  containerClassName,
   className,
-  placeholderClassName,
   onRemoveTerminalContext,
   onChange,
-  onVisibleSelectionChange,
   onCommandKeyDown,
-  onPageScrollKeyDown,
-  onPageScrollKeyUp,
-  onPageScrollRelease,
-  onCitationSubmitAndSend,
   onPaste,
   editorRef,
-}: ComposerPromptEditorProps) {
+  restoreFocusOnRemountRef,
+}: ComposerPromptEditorProps & {
+  restoreFocusOnRemountRef: React.RefObject<boolean>;
+}) {
   const [editor] = useLexicalComposerContext();
+  // Plain mode has no token nodes, so every collapsed<->expanded cursor
+  // mapping is a raw clamp. The editor remounts when the mode flips (the
+  // LexicalComposer key includes it), so these stay stable per mount.
+  const clampComposerCursor = plainText ? clampExpandedCursor : clampCollapsedComposerCursor;
+  const expandComposerCursor = plainText ? clampExpandedCursor : expandCollapsedComposerCursor;
+  const collapseComposerCursor = plainText ? clampExpandedCursor : collapseExpandedComposerCursor;
   const onChangeRef = useRef(onChange);
-  const onVisibleSelectionChangeRef = useRef(onVisibleSelectionChange);
-  const initialCursor = clampCollapsedComposerCursor(value, cursor);
-  const initialExpandedCursor = expandCollapsedComposerCursor(value, initialCursor);
+  const initialCursor = clampComposerCursor(value, cursor);
   const terminalContextsSignature = terminalContextSignature(terminalContexts);
   const terminalContextsSignatureRef = useRef(terminalContextsSignature);
   const skillsSignature = skillSignature(skills);
@@ -1662,26 +1595,10 @@ function ComposerPromptEditorInner({
   const snapshotRef = useRef({
     value,
     cursor: initialCursor,
-    expandedCursor: initialExpandedCursor,
+    expandedCursor: expandComposerCursor(value, initialCursor),
     terminalContextIds: terminalContexts.map((context) => context.id),
   });
-  const selectionRangeRef = useRef({ start: initialExpandedCursor, end: initialExpandedCursor });
   const isApplyingControlledUpdateRef = useRef(false);
-  const citationCommentRequestRef = useRef<ComposerCitationCommentRequest | null>(null);
-  const [openCitationComment, setOpenCitationComment] =
-    useState<ComposerCitationCommentTarget | null>(null);
-  const citationCommentActions = useMemo(
-    () => ({
-      openComment: openCitationComment,
-      onOpenChange: (nodeKey: NodeKey, open: boolean) => {
-        setOpenCitationComment((current) =>
-          open ? { nodeKey } : current?.nodeKey === nodeKey ? null : current,
-        );
-      },
-      onSubmitAndSend: onCitationSubmitAndSend ?? (() => {}),
-    }),
-    [onCitationSubmitAndSend, openCitationComment],
-  );
   const terminalContextActions = useMemo(
     () => ({ onRemoveTerminalContext }),
     [onRemoveTerminalContext],
@@ -1691,10 +1608,6 @@ function ComposerPromptEditorInner({
     onChangeRef.current = onChange;
   }, [onChange]);
 
-  useEffect(() => {
-    onVisibleSelectionChangeRef.current = onVisibleSelectionChange;
-  }, [onVisibleSelectionChange]);
-
   useLayoutEffect(() => {
     skillMetadataRef.current = skillMetadataByName(skills);
   }, [skills]);
@@ -1703,24 +1616,8 @@ function ComposerPromptEditorInner({
     editor.setEditable(!disabled);
   }, [disabled, editor]);
 
-  useEffect(() => {
-    const openCitationNodeKey = openCitationComment?.nodeKey;
-    if (!openCitationNodeKey) return;
-    return editor.registerUpdateListener(({ editorState }) => {
-      const isAttached = editorState.read(() => {
-        const node = $getNodeByKey(openCitationNodeKey);
-        return node instanceof ComposerCitationNode && node.isAttached();
-      });
-      if (!isAttached) {
-        setOpenCitationComment((current) =>
-          current?.nodeKey === openCitationNodeKey ? null : current,
-        );
-      }
-    });
-  }, [editor, openCitationComment?.nodeKey]);
-
   useLayoutEffect(() => {
-    const normalizedCursor = clampCollapsedComposerCursor(value, cursor);
+    const normalizedCursor = clampComposerCursor(value, cursor);
     const previousSnapshot = snapshotRef.current;
     const contextsChanged = terminalContextsSignatureRef.current !== terminalContextsSignature;
     const skillsChanged = skillsSignatureRef.current !== skillsSignature;
@@ -1733,16 +1630,11 @@ function ComposerPromptEditorInner({
       return;
     }
 
-    const normalizedExpandedCursor = expandCollapsedComposerCursor(value, normalizedCursor);
     snapshotRef.current = {
       value,
       cursor: normalizedCursor,
-      expandedCursor: normalizedExpandedCursor,
+      expandedCursor: expandComposerCursor(value, normalizedCursor),
       terminalContextIds: terminalContexts.map((context) => context.id),
-    };
-    selectionRangeRef.current = {
-      start: normalizedExpandedCursor,
-      end: normalizedExpandedCursor,
     };
     terminalContextsSignatureRef.current = terminalContextsSignature;
     skillsSignatureRef.current = skillsSignature;
@@ -1754,37 +1646,36 @@ function ComposerPromptEditorInner({
     }
 
     isApplyingControlledUpdateRef.current = true;
-    const isCiteInsertion = citationCommentRequestRef.current?.value === value;
-    let citationToOpen: ComposerCitationCommentTarget | null = null;
-    editor.update(
-      () => {
-        const shouldRewriteEditorState =
-          previousSnapshot.value !== value || contextsChanged || skillsChanged;
-        if (shouldRewriteEditorState) {
-          $setComposerEditorPrompt(value, terminalContexts, skillMetadataRef.current);
-        }
-        if (shouldRewriteEditorState || isFocused) {
-          $setSelectionAtComposerOffset(normalizedCursor);
-        }
-        citationToOpen = $consumeComposerCitationCommentRequest(citationCommentRequestRef);
-      },
-      {
-        ...(isCiteInsertion ? { tag: [HISTORY_PUSH_TAG, SKIP_DOM_SELECTION_TAG] } : {}),
-        onUpdate: () => {
-          if (citationToOpen) setOpenCitationComment(citationToOpen);
-        },
-      },
-    );
+    editor.update(() => {
+      const shouldRewriteEditorState =
+        previousSnapshot.value !== value || contextsChanged || skillsChanged;
+      if (shouldRewriteEditorState) {
+        $setComposerEditorPrompt(value, terminalContexts, skillMetadataRef.current, plainText);
+      }
+      if (shouldRewriteEditorState || isFocused) {
+        $setSelectionAtComposerOffset(normalizedCursor);
+      }
+    });
     queueMicrotask(() => {
       isApplyingControlledUpdateRef.current = false;
     });
-  }, [cursor, editor, skillsSignature, terminalContexts, terminalContextsSignature, value]);
+  }, [
+    clampComposerCursor,
+    cursor,
+    editor,
+    expandComposerCursor,
+    plainText,
+    skillsSignature,
+    terminalContexts,
+    terminalContextsSignature,
+    value,
+  ]);
 
   const focusAt = useCallback(
     (nextCursor: number) => {
       const rootElement = editor.getRootElement();
       if (!rootElement) return;
-      const boundedCursor = clampCollapsedComposerCursor(snapshotRef.current.value, nextCursor);
+      const boundedCursor = clampComposerCursor(snapshotRef.current.value, nextCursor);
       rootElement.focus({ preventScroll: true });
       editor.update(() => {
         $setSelectionAtComposerOffset(boundedCursor);
@@ -1792,12 +1683,8 @@ function ComposerPromptEditorInner({
       snapshotRef.current = {
         value: snapshotRef.current.value,
         cursor: boundedCursor,
-        expandedCursor: expandCollapsedComposerCursor(snapshotRef.current.value, boundedCursor),
+        expandedCursor: expandComposerCursor(snapshotRef.current.value, boundedCursor),
         terminalContextIds: snapshotRef.current.terminalContextIds,
-      };
-      selectionRangeRef.current = {
-        start: snapshotRef.current.expandedCursor,
-        end: snapshotRef.current.expandedCursor,
       };
       onChangeRef.current(
         snapshotRef.current.value,
@@ -1807,8 +1694,31 @@ function ComposerPromptEditorInner({
         snapshotRef.current.terminalContextIds,
       );
     },
-    [editor],
+    [clampComposerCursor, editor, expandComposerCursor],
   );
+
+  // The plainText flip remounts the editor (see the LexicalComposer key),
+  // replacing the focused contenteditable and silently dropping focus. Record
+  // focus ownership when this instance unmounts and take it back on the next
+  // mount, so a question opening or resolving mid-typing doesn't eat
+  // keystrokes. Every dep is stable for the lifetime of a mount, so this runs
+  // once per editor instance.
+  useLayoutEffect(() => {
+    if (restoreFocusOnRemountRef.current) {
+      restoreFocusOnRemountRef.current = false;
+      // Focus at the end: the snapshot cursor was seeded from the previous
+      // mode's stale cursor prop, while both mode transitions settle the
+      // caret at the end (answer end on question open, draft end on resolve).
+      // Placing it there directly leaves no window for keystrokes to land at
+      // a stale offset before the parent's effects run.
+      focusAt(collapseComposerCursor(snapshotRef.current.value, snapshotRef.current.value.length));
+    }
+    return () => {
+      // Layout cleanup runs before the old DOM node is detached, so
+      // activeElement still points at it here.
+      restoreFocusOnRemountRef.current = editor.getRootElement() === document.activeElement;
+    };
+  }, [collapseComposerCursor, editor, focusAt, restoreFocusOnRemountRef]);
 
   const readSnapshot = useCallback((): {
     value: string;
@@ -1819,8 +1729,8 @@ function ComposerPromptEditorInner({
     let snapshot = snapshotRef.current;
     editor.getEditorState().read(() => {
       const nextValue = $getRoot().getTextContent();
-      const fallbackCursor = clampCollapsedComposerCursor(nextValue, snapshotRef.current.cursor);
-      const nextCursor = clampCollapsedComposerCursor(
+      const fallbackCursor = clampComposerCursor(nextValue, snapshotRef.current.cursor);
+      const nextCursor = clampComposerCursor(
         nextValue,
         $readSelectionOffsetFromEditorState(fallbackCursor),
       );
@@ -1832,7 +1742,6 @@ function ComposerPromptEditorInner({
         nextValue,
         $readExpandedSelectionOffsetFromEditorState(fallbackExpandedCursor),
       );
-      const selectionRange = getSelectionRangeForExpandedComposerOffsets($getSelection());
       const terminalContextIds = collectTerminalContextIds($getRoot());
       snapshot = {
         value: nextValue,
@@ -1840,14 +1749,10 @@ function ComposerPromptEditorInner({
         expandedCursor: nextExpandedCursor,
         terminalContextIds,
       };
-      selectionRangeRef.current = selectionRange ?? {
-        start: nextExpandedCursor,
-        end: nextExpandedCursor,
-      };
     });
     snapshotRef.current = snapshot;
     return snapshot;
-  }, [editor]);
+  }, [clampComposerCursor, editor]);
 
   useImperativeHandle(
     editorRef,
@@ -1858,202 +1763,115 @@ function ComposerPromptEditorInner({
       focusAt,
       focusAtEnd: () => {
         focusAt(
-          collapseExpandedComposerCursor(
-            snapshotRef.current.value,
-            snapshotRef.current.value.length,
-          ),
+          collapseComposerCursor(snapshotRef.current.value, snapshotRef.current.value.length),
         );
       },
-      requestCitationComment: (request) => {
-        citationCommentRequestRef.current = request;
-        const target = editor
-          .getEditorState()
-          .read(() => $consumeComposerCitationCommentRequest(citationCommentRequestRef));
-        if (target) setOpenCitationComment(target);
-      },
       readSnapshot,
-      isCaretOnVisualEdge: (edge) => {
-        const snapshot = readSnapshot();
-        if (snapshot.value.length === 0) return true;
-        const beforeCaret = snapshot.value.slice(0, snapshot.expandedCursor);
-        const afterCaret = snapshot.value.slice(snapshot.expandedCursor);
-        if (edge === "start" ? beforeCaret.includes("\n") : afterCaret.includes("\n")) {
-          return false;
-        }
-        const rootElement = editor.getRootElement();
-        const selection = window.getSelection();
-        if (
-          !rootElement ||
-          !selection ||
-          !selection.isCollapsed ||
-          selection.rangeCount === 0 ||
-          !selection.anchorNode ||
-          !rootElement.contains(selection.anchorNode)
-        ) {
-          return false;
-        }
-        const caretRect = caretLineRect(selection.getRangeAt(0), edge);
-        if (!caretRect) return false;
-        const edgeElement =
-          edge === "start" ? rootElement.firstElementChild : rootElement.lastElementChild;
-        const edgeRect = (edgeElement ?? rootElement).getBoundingClientRect();
-        const threshold = caretRect.height / 2;
-        return edge === "start"
-          ? caretRect.top - edgeRect.top < threshold
-          : edgeRect.bottom - caretRect.bottom < threshold;
-      },
     }),
-    [editor, focusAt, readSnapshot],
+    [collapseComposerCursor, focusAt, readSnapshot],
   );
 
-  const handleEditorChange = useCallback((editorState: EditorState) => {
-    editorState.read(() => {
-      const nextValue = $getRoot().getTextContent();
-      const fallbackCursor = clampCollapsedComposerCursor(nextValue, snapshotRef.current.cursor);
-      const nextCursor = clampCollapsedComposerCursor(
-        nextValue,
-        $readSelectionOffsetFromEditorState(fallbackCursor),
-      );
-      const fallbackExpandedCursor = clampExpandedCursor(
-        nextValue,
-        snapshotRef.current.expandedCursor,
-      );
-      const nextExpandedCursor = clampExpandedCursor(
-        nextValue,
-        $readExpandedSelectionOffsetFromEditorState(fallbackExpandedCursor),
-      );
-      const nextSelectionRange = getSelectionRangeForExpandedComposerOffsets($getSelection());
-      const previousSelectionRange = selectionRangeRef.current;
-      selectionRangeRef.current = nextSelectionRange ?? {
-        start: nextExpandedCursor,
-        end: nextExpandedCursor,
-      };
-      const terminalContextIds = collectTerminalContextIds($getRoot());
-      const previousSnapshot = snapshotRef.current;
-      const snapshotChanged = !(
-        previousSnapshot.value === nextValue &&
-        previousSnapshot.cursor === nextCursor &&
-        previousSnapshot.expandedCursor === nextExpandedCursor &&
-        previousSnapshot.terminalContextIds.length === terminalContextIds.length &&
-        previousSnapshot.terminalContextIds.every((id, index) => id === terminalContextIds[index])
-      );
-      if (isApplyingControlledUpdateRef.current) {
-        return;
-      }
-      if (!snapshotChanged) {
-        if (didComposerSelectionChangeVisibly(previousSelectionRange, nextSelectionRange)) {
-          onVisibleSelectionChangeRef.current?.();
+  const handleEditorChange = useCallback(
+    (editorState: EditorState) => {
+      editorState.read(() => {
+        const nextValue = $getRoot().getTextContent();
+        const fallbackCursor = clampComposerCursor(nextValue, snapshotRef.current.cursor);
+        const nextCursor = clampComposerCursor(
+          nextValue,
+          $readSelectionOffsetFromEditorState(fallbackCursor),
+        );
+        const fallbackExpandedCursor = clampExpandedCursor(
+          nextValue,
+          snapshotRef.current.expandedCursor,
+        );
+        const nextExpandedCursor = clampExpandedCursor(
+          nextValue,
+          $readExpandedSelectionOffsetFromEditorState(fallbackExpandedCursor),
+        );
+        const terminalContextIds = collectTerminalContextIds($getRoot());
+        const previousSnapshot = snapshotRef.current;
+        if (
+          previousSnapshot.value === nextValue &&
+          previousSnapshot.cursor === nextCursor &&
+          previousSnapshot.expandedCursor === nextExpandedCursor &&
+          previousSnapshot.terminalContextIds.length === terminalContextIds.length &&
+          previousSnapshot.terminalContextIds.every((id, index) => id === terminalContextIds[index])
+        ) {
+          return;
         }
-        return;
-      }
-      snapshotRef.current = {
-        value: nextValue,
-        cursor: nextCursor,
-        expandedCursor: nextExpandedCursor,
-        terminalContextIds,
-      };
-      const cursorAdjacentToMention =
-        isCollapsedCursorAdjacentToInlineToken(nextValue, nextCursor, "left") ||
-        isCollapsedCursorAdjacentToInlineToken(nextValue, nextCursor, "right");
-      onChangeRef.current(
-        nextValue,
-        nextCursor,
-        nextExpandedCursor,
-        cursorAdjacentToMention,
-        terminalContextIds,
-      );
-    });
-  }, []);
+        if (isApplyingControlledUpdateRef.current) {
+          return;
+        }
+        snapshotRef.current = {
+          value: nextValue,
+          cursor: nextCursor,
+          expandedCursor: nextExpandedCursor,
+          terminalContextIds,
+        };
+        const cursorAdjacentToMention =
+          !plainText &&
+          (isCollapsedCursorAdjacentToInlineToken(nextValue, nextCursor, "left") ||
+            isCollapsedCursorAdjacentToInlineToken(nextValue, nextCursor, "right"));
+        onChangeRef.current(
+          nextValue,
+          nextCursor,
+          nextExpandedCursor,
+          cursorAdjacentToMention,
+          terminalContextIds,
+        );
+      });
+    },
+    [clampComposerCursor, plainText],
+  );
 
   return (
     <ComposerTerminalContextActionsContext value={terminalContextActions}>
-      <ComposerCitationCommentContext value={citationCommentActions}>
-        <div
-          className={cn(
-            "relative [font-family:var(--font-composer,var(--font-sans))] [font-size:var(--font-size-prompt,0.875rem)] [@media(max-width:39.999rem)_and_(pointer:coarse)]:[font-size:max(var(--font-size-prompt,1rem),16px)]",
-            containerClassName,
-          )}
-        >
-          <PlainTextPlugin
-            contentEditable={
-              <ContentEditable
-                className={cn(
-                  // The wrapper owns the appearance preference; keep everything else here.
-                  "block max-h-50 min-h-17.5 w-full overflow-y-auto whitespace-pre-wrap wrap-break-word bg-transparent leading-relaxed text-foreground focus:outline-none",
-                  className,
-                )}
-                data-testid="composer-editor"
-                aria-placeholder={placeholder}
-                placeholder={<span />}
-                onKeyDown={(event) => {
-                  if (
-                    event.key === "Control" ||
-                    event.key === "Meta" ||
-                    event.key === "Alt" ||
-                    event.key === "Shift"
-                  ) {
-                    onPageScrollRelease?.();
-                  }
-
-                  if (event.key !== "PageUp" && event.key !== "PageDown") {
-                    return;
-                  }
-
-                  const pageScrollKey = getTimelinePageScrollKey({
-                    altKey: event.altKey,
-                    clientHeight: event.currentTarget.clientHeight,
-                    ctrlKey: event.ctrlKey,
-                    defaultPrevented: event.defaultPrevented,
-                    isComposing: event.nativeEvent.isComposing,
-                    key: event.key,
-                    keyCode: event.keyCode,
-                    metaKey: event.metaKey,
-                    scrollHeight: event.currentTarget.scrollHeight,
-                    scrollTop: event.currentTarget.scrollTop,
-                    shiftKey: event.shiftKey,
-                  });
-                  if (!pageScrollKey) {
-                    onPageScrollRelease?.();
-                    return;
-                  }
-                  if (!onPageScrollKeyDown) {
-                    return;
-                  }
-
-                  event.preventDefault();
-                  onPageScrollKeyDown(pageScrollKey);
-                }}
-                onKeyUp={(event) => onPageScrollKeyUp?.(event.key)}
-                onBlur={onPageScrollRelease}
-                onPaste={onPaste}
-              />
-            }
-            placeholder={
-              terminalContexts.length > 0 ? null : (
-                <div
-                  className={cn(
-                    "pointer-events-none absolute inset-0 leading-relaxed text-placeholder/75",
-                    placeholderClassName,
-                  )}
-                >
-                  {placeholder}
-                </div>
-              )
-            }
-            ErrorBoundary={LexicalErrorBoundary}
-          />
-          <OnChangePlugin onChange={handleEditorChange} />
-          <ComposerCommandKeyPlugin {...(onCommandKeyDown ? { onCommandKeyDown } : {})} />
-          <ComposerSurroundSelectionPlugin terminalContexts={terminalContexts} skills={skills} />
-          <ComposerHomeEndKeyPlugin />
-          <ComposerInlineTokenArrowPlugin />
-          <ComposerInlineTokenSelectionNormalizePlugin />
-          <ComposerInlineTokenBackspacePlugin />
-          <ComposerInlineTokenPastePlugin />
-          <ComposerChipSelectionPlugin />
-          <HistoryPlugin />
-        </div>
-      </ComposerCitationCommentContext>
+      <div className="relative [font-family:var(--font-composer,var(--font-sans))] [font-size:var(--font-size-prompt,0.875rem)] [@media(max-width:39.999rem)_and_(pointer:coarse)]:[font-size:max(var(--font-size-prompt,1rem),16px)]">
+        <PlainTextPlugin
+          contentEditable={
+            <ContentEditable
+              className={cn(
+                // The wrapper owns the appearance preference; keep everything else here.
+                "block max-h-50 min-h-17.5 w-full overflow-y-auto whitespace-pre-wrap wrap-break-word bg-transparent leading-relaxed text-foreground focus:outline-none",
+                className,
+              )}
+              data-testid="composer-editor"
+              aria-placeholder={placeholder}
+              placeholder={<span />}
+              onPaste={onPaste}
+            />
+          }
+          placeholder={
+            terminalContexts.length > 0 ? null : (
+              <div className="pointer-events-none absolute inset-0 leading-relaxed text-placeholder">
+                {placeholder}
+              </div>
+            )
+          }
+          ErrorBoundary={LexicalErrorBoundary}
+        />
+        <OnChangePlugin onChange={handleEditorChange} />
+        <ComposerCommandKeyPlugin {...(onCommandKeyDown ? { onCommandKeyDown } : {})} />
+        {/* Surround-typing (wrap a selection in brackets/quotes) is plain
+            typing behavior, not token behavior, so it stays mounted in both
+            modes; only the token-dependent plugins are mode-gated. */}
+        <ComposerSurroundSelectionPlugin
+          terminalContexts={terminalContexts}
+          skills={skills}
+          plainText={plainText}
+        />
+        {plainText ? null : (
+          <>
+            <ComposerInlineTokenArrowPlugin />
+            <ComposerInlineTokenSelectionNormalizePlugin />
+            <ComposerInlineTokenBackspacePlugin />
+            <ComposerInlineTokenPastePlugin />
+            <ComposerChipSelectionPlugin />
+          </>
+        )}
+        <ComposerHomeEndKeyPlugin />
+        <HistoryPlugin />
+      </div>
     </ComposerTerminalContextActionsContext>
   );
 }
@@ -2063,40 +1881,41 @@ export function ComposerPromptEditor({
   cursor,
   terminalContexts,
   skills,
+  plainText = false,
   disabled,
   placeholder,
-  containerClassName,
   className,
-  placeholderClassName,
   onRemoveTerminalContext,
   onChange,
-  onVisibleSelectionChange,
   onCommandKeyDown,
-  onPageScrollKeyDown,
-  onPageScrollKeyUp,
-  onPageScrollRelease,
-  onCitationSubmitAndSend,
   onPaste,
   editorRef,
 }: ComposerPromptEditorProps) {
+  // The editor remounts when plainText flips (see the LexicalComposer key), so
+  // these refs must track the latest props for the initial editorState to seed
+  // the remounted editor with the current value, not the first-ever one.
   const initialValueRef = useRef(value);
+  initialValueRef.current = value;
   const initialTerminalContextsRef = useRef(terminalContexts);
+  initialTerminalContextsRef.current = terminalContexts;
   const initialSkillMetadataRef = useRef(skillMetadataByName(skills));
+  initialSkillMetadataRef.current = skillMetadataByName(skills);
+  const initialPlainTextRef = useRef(plainText);
+  initialPlainTextRef.current = plainText;
+  // Survives the plainText remount so the new editor instance knows whether
+  // its predecessor owned focus and should take it back.
+  const restoreFocusOnRemountRef = useRef(false);
   const initialConfig = useMemo<InitialConfigType>(
     () => ({
       namespace: "t3tools-composer-editor",
       editable: true,
-      nodes: [
-        ComposerMentionNode,
-        ComposerSkillNode,
-        ComposerCitationNode,
-        ComposerTerminalContextNode,
-      ],
+      nodes: [ComposerMentionNode, ComposerSkillNode, ComposerTerminalContextNode],
       editorState: () => {
         $setComposerEditorPrompt(
           initialValueRef.current,
           initialTerminalContextsRef.current,
           initialSkillMetadataRef.current,
+          initialPlainTextRef.current,
         );
       },
       onError: (error) => {
@@ -2107,27 +1926,25 @@ export function ComposerPromptEditor({
   );
 
   return (
-    <LexicalComposer key={COMPOSER_EDITOR_HMR_KEY} initialConfig={initialConfig}>
+    <LexicalComposer
+      key={`${COMPOSER_EDITOR_HMR_KEY}-${plainText ? "plain" : "rich"}`}
+      initialConfig={initialConfig}
+    >
       <ComposerPromptEditorInner
         value={value}
         cursor={cursor}
         terminalContexts={terminalContexts}
         skills={skills}
+        plainText={plainText}
         disabled={disabled}
         placeholder={placeholder}
-        {...(containerClassName ? { containerClassName } : {})}
         onRemoveTerminalContext={onRemoveTerminalContext}
         onChange={onChange}
-        {...(onVisibleSelectionChange ? { onVisibleSelectionChange } : {})}
         onPaste={onPaste}
-        {...(onCitationSubmitAndSend ? { onCitationSubmitAndSend } : {})}
         editorRef={editorRef}
+        restoreFocusOnRemountRef={restoreFocusOnRemountRef}
         {...(onCommandKeyDown ? { onCommandKeyDown } : {})}
-        {...(onPageScrollKeyDown ? { onPageScrollKeyDown } : {})}
-        {...(onPageScrollKeyUp ? { onPageScrollKeyUp } : {})}
-        {...(onPageScrollRelease ? { onPageScrollRelease } : {})}
         {...(className ? { className } : {})}
-        {...(placeholderClassName ? { placeholderClassName } : {})}
       />
     </LexicalComposer>
   );
