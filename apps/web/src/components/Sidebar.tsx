@@ -164,6 +164,7 @@ import {
   deleteSelectedThreadEntries,
   filterSidebarProjectScopeItems,
   discardDraftSession,
+  filterSidebarProjectScopeItems,
   formatWorkingDurationLabel,
   firstValidTimestampMs,
   hasUnseenCompletion,
