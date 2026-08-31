@@ -26,6 +26,7 @@ import {
   openCodeRuntimeErrorDetail,
   type OpenCodeInventory,
 } from "../opencodeRuntime.ts";
+import * as OpenCodeServerOwner from "../OpenCodeServerOwner.ts";
 import type { Agent, ProviderListResponse } from "@opencode-ai/sdk/v2";
 import { parseOpenCodeGoUsageHtml } from "../providerUsageLimits.ts";
 import { discoverOpenCodeSkills } from "../Drivers/OpenCodeSkills.ts";
@@ -378,7 +379,11 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
   openCodeSettings: OpenCodeSettings,
   cwd: string,
   environment?: NodeJS.ProcessEnv,
-): Effect.fn.Return<ServerProviderDraft, never, OpenCodeRuntime | HttpClient.HttpClient> {
+): Effect.fn.Return<
+  ServerProviderDraft,
+  never,
+  OpenCodeRuntime | HttpClient.HttpClient | OpenCodeServerOwner.OpenCodeServerOwner
+> {
   const openCodeRuntime = yield* OpenCodeRuntime;
   const serverOwner = yield* OpenCodeServerOwner.OpenCodeServerOwner;
   const resolvedEnvironment = environment ?? process.env;
@@ -527,7 +532,7 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
     customModels,
     DEFAULT_OPENCODE_MODEL_CAPABILITIES,
   );
-  const inventorySkills = flattenOpenCodeSkills(inventoryExit.value);
+  const inventorySkills = flattenOpenCodeSkills(inventoryExit.value.inventory);
   const usageLimits = yield* fetchOpenCodeGoUsageLimits({
     workspaceId: openCodeSettings.goWorkspaceId,
     authCookie: openCodeSettings.goAuthCookie,
@@ -539,7 +544,7 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
       [...inventorySkills, ...discoveredSkills].map((skill) => [skill.name, skill] as const),
     ).values(),
   ].toSorted((left, right) => left.name.localeCompare(right.name));
-  const connectedCount = inventoryExit.value.providerList.connected.length;
+  const connectedCount = inventoryExit.value.inventory.providerList.connected.length;
   return buildServerProvider({
     presentation: OPENCODE_PRESENTATION,
     enabled: true,

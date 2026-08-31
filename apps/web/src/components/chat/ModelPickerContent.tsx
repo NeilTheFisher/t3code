@@ -42,42 +42,34 @@ import {
 } from "../../providerInstances";
 import { providerModelKey, sortProviderModelItems } from "../../modelOrdering";
 
-type ModelPickerItem = ModelEsque & {
+type ModelPickerItem = {
+  slug: string;
+  name: string;
+  shortName?: string;
+  subProvider?: string;
   instanceId: ProviderInstanceId;
   driverKind: ProviderDriverKind;
   instanceDisplayName: string;
   instanceAccentColor?: string | undefined;
   continuationGroupKey?: string | undefined;
+  isLegacy?: boolean | undefined;
+  isUnavailable?: boolean | undefined;
 };
 
-export function buildModelPickerItems(
-  modelOptionsByInstance: ReadonlyMap<ProviderInstanceId, ReadonlyArray<ModelEsque>>,
-  entryByInstanceId: ReadonlyMap<
-    ProviderInstanceId,
-    Pick<
-      ProviderInstanceEntry,
-      "driverKind" | "displayName" | "accentColor" | "continuationGroupKey"
-    >
-  >,
-  readyInstanceSet: ReadonlySet<ProviderInstanceId>,
-): ModelPickerItem[] {
-  const out: ModelPickerItem[] = [];
-  for (const [instanceId, models] of modelOptionsByInstance) {
-    const entry = entryByInstanceId.get(instanceId);
-    if (!entry || !readyInstanceSet.has(instanceId)) continue;
-
-    for (const model of models) {
-      out.push({
-        ...model,
-        instanceId,
-        driverKind: entry.driverKind,
-        instanceDisplayName: entry.displayName,
-        ...(entry.accentColor ? { instanceAccentColor: entry.accentColor } : {}),
-        ...(entry.continuationGroupKey ? { continuationGroupKey: entry.continuationGroupKey } : {}),
-      });
-    }
-  }
-  return out;
+export function shouldIncludeModelPickerOption(input: {
+  readonly entry: ProviderInstanceEntry;
+  readonly option: ModelEsque;
+  readonly activeInstanceId: ProviderInstanceId;
+  readonly activeModel: string;
+}): boolean {
+  if (isProviderInstancePickerReady(input.entry)) return true;
+  return (
+    input.entry.enabled &&
+    input.entry.driverKind === "opencode" &&
+    input.entry.instanceId === input.activeInstanceId &&
+    input.option.slug === input.activeModel &&
+    input.option.isUnavailable === true
+  );
 }
 
 const EMPTY_MODEL_JUMP_LABELS = new Map<string, string>();
@@ -240,8 +232,44 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   // so the list row can render the right icon and display name without
   // another lookup.
   const flatModels = useMemo(() => {
-    return buildModelPickerItems(modelOptionsByInstance, entryByInstanceId, readyInstanceSet);
-  }, [modelOptionsByInstance, entryByInstanceId, readyInstanceSet]);
+    const out: ModelPickerItem[] = [];
+    for (const [instanceId, models] of modelOptionsByInstance) {
+      const entry = entryByInstanceId.get(instanceId);
+      if (!entry) {
+        // Instance disappeared between renders (configuration change). Skip
+        // its models — stale options shouldn't appear in the picker.
+        continue;
+      }
+      for (const model of models) {
+        if (
+          !shouldIncludeModelPickerOption({
+            entry,
+            option: model,
+            activeInstanceId: props.activeInstanceId,
+            activeModel: props.model,
+          })
+        ) {
+          continue;
+        }
+        out.push({
+          slug: model.slug,
+          name: model.name,
+          ...(model.shortName ? { shortName: model.shortName } : {}),
+          ...(model.subProvider ? { subProvider: model.subProvider } : {}),
+          ...(model.isLegacy ? { isLegacy: true } : {}),
+          ...(model.isUnavailable ? { isUnavailable: true } : {}),
+          instanceId,
+          driverKind: entry.driverKind,
+          instanceDisplayName: entry.displayName,
+          ...(entry.accentColor ? { instanceAccentColor: entry.accentColor } : {}),
+          ...(entry.continuationGroupKey
+            ? { continuationGroupKey: entry.continuationGroupKey }
+            : {}),
+        });
+      }
+    }
+    return out;
+  }, [modelOptionsByInstance, entryByInstanceId, props.activeInstanceId, props.model]);
 
   const isLocked = props.lockedProvider !== null;
   const isSearching = searchQuery.trim().length > 0;

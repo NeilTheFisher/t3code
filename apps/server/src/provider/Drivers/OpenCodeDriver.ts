@@ -162,6 +162,7 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
         Effect.map(stampIdentity),
         Effect.provideService(OpenCodeRuntime, openCodeRuntime),
         Effect.provideService(HttpClient.HttpClient, httpClient),
+        Effect.provideService(OpenCodeServerOwner.OpenCodeServerOwner, serverOwner),
       );
 
       const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings);
