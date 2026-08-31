@@ -273,13 +273,25 @@ export const authHttpApiLayer = HttpApiBuilder.group(
               args.payload.credential,
               deriveAuthClientMetadata({ request }),
             );
-            yield* appendSessionCookie(
-              sessions.cookieName,
-              result.sessionToken,
-              result.response.expiresAt,
+            const sessionCookies = yield* Effect.fromResult(
+              Cookies.set(Cookies.empty, sessions.cookieName, result.sessionToken, {
+                expires: DateTime.toDate(result.response.expiresAt),
+                httpOnly: true,
+                path: "/",
+                sameSite: "lax",
+              }),
+            ).pipe(Effect.catch(() => failEnvironmentInternal("browser_session_cookie_failed")));
+
+            // Return a concrete HttpServerResponse with the cookie attached directly.
+            // The previous `appendPreResponseHandler` → `mergeCookies` path was not
+            // reliably propagated through HttpApiBuilder → BunHttpServer, so the
+            // Set-Cookie header was silently dropped and the browser never stored
+            // the session (seen as POST 200 with no Set-Cookie in DevTools).
+            const jsonResponse = yield* HttpServerResponse.json(result.response).pipe(
+              Effect.catch(() => failEnvironmentInternal("browser_session_issuance_failed")),
             );
-            yield* appendCredentialResponseHeaders;
-            return result.response;
+            const withCookies = HttpServerResponse.mergeCookies(jsonResponse, sessionCookies);
+            return HttpServerResponse.setHeaders(withCookies, CREDENTIAL_RESPONSE_HEADERS);
           },
           Effect.catchIf(EnvironmentAuth.isServerAuthCredentialError, (error) =>
             failEnvironmentAuthInvalid(

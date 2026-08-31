@@ -70,9 +70,35 @@ function readInstanceCustomModels(
   return legacyProviders[driverKind]?.customModels ?? [];
 }
 
-export interface AppModelOption extends ModelEsque {
+export interface AppModelOption {
+  slug: string;
+  name: string;
+  shortName?: string;
+  subProvider?: string;
   isCustom: boolean;
   isDefault?: boolean;
+  isLegacy?: boolean;
+  isUnavailable?: boolean;
+}
+
+function appendUnavailableOpenCodeSelection(
+  options: AppModelOption[],
+  rawModels: ReadonlyArray<ServerProvider["models"][number]>,
+  provider: ProviderDriverKind,
+  selectedModel: string | null | undefined,
+  hiddenModels: ReadonlyArray<string>,
+): AppModelOption[] {
+  if (provider !== "opencode") return options;
+  const slug = normalizeCustomModelSlug(selectedModel);
+  if (!slug) return options;
+
+  // A model that exists in the raw catalog can be absent from `options`
+  // because the user hid it. Keep that preference authoritative.
+  if (rawModels.some((model) => model.slug === slug)) return options;
+  if (hiddenModels.includes(slug)) return options;
+  if (options.some((option) => option.slug === slug)) return options;
+
+  return [...options, { slug, name: slug, isCustom: false, isUnavailable: true }];
 }
 
 function toAppModelOption(model: ServerProvider["models"][number]): AppModelOption {
@@ -85,10 +111,6 @@ function toAppModelOption(model: ServerProvider["models"][number]): AppModelOpti
   if (model.subProvider) option.subProvider = model.subProvider;
   if (model.isDefault) option.isDefault = true;
   if (model.isLegacy) option.isLegacy = true;
-  if (model.contextWindowTokens !== undefined) {
-    option.contextWindowTokens = model.contextWindowTokens;
-  }
-  option.capabilities = model.capabilities;
   return option;
 }
 
@@ -246,29 +268,6 @@ export function resolveAppModelSelection(
     resolveSelectableModel(resolvedProvider, selectedModel, options) ??
     getDefaultServerModel(providers, resolvedProvider)
   );
-}
-
-/**
- * Resolve a human-friendly model label for a slug, preferring the provider
- * instance it belongs to. Falls back to a slug match across all providers,
- * then to the raw slug when the model is not in the catalog.
- */
-export function resolveModelDisplayName(
-  providers: ReadonlyArray<ServerProvider>,
-  instanceId: string | null | undefined,
-  slug: string | null | undefined,
-): string {
-  if (!slug) return "";
-  if (instanceId) {
-    const provider = providers.find((candidate) => candidate.instanceId === instanceId);
-    const model = provider?.models.find((entry) => entry.slug === slug);
-    if (model) return model.name;
-  }
-  for (const provider of providers) {
-    const model = provider.models.find((entry) => entry.slug === slug);
-    if (model) return model.name;
-  }
-  return slug;
 }
 
 export function resolveAppModelSelectionForInstance(
