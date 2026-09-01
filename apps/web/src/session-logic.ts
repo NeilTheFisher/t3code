@@ -5,52 +5,71 @@ import {
 import { UserInputAttachmentAnswerPayload } from "@t3tools/contracts";
 import { foldUserInputActivities } from "@t3tools/client-runtime/work-log/user-input";
 import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
 import * as Arr from "effect/Array";
-import { shallow } from "zustand/vanilla/shallow";
+import * as Schema from "effect/Schema";
 import { isBackgroundTaskActivity } from "@t3tools/client-runtime/state/subagentRuntime";
+import { isWorktreeSetupActivity } from "@t3tools/client-runtime/work-log/presentation";
 import {
-  extractCommandOutputText,
-  extractWorkLogToolLifecycleStatus,
-  isWorktreeSetupActivity,
-  workEntryIndicatesToolFailure,
-  workEntryIndicatesToolSuccess,
-  workLogEntryIsToolLike,
-  type WorkLogToolLifecycleStatus,
-} from "@t3tools/client-runtime/work-log/presentation";
-import { extractToolActivityPresentation } from "@t3tools/client-runtime/work-log/tool-presentation";
-import {
+  ApprovalRequestId,
   isToolLifecycleItemType,
-  type AssetResource,
   type OrchestrationLatestTurn,
   type OrchestrationThreadActivity,
   type OrchestrationProposedPlanId,
+  ProviderDriverKind,
+  ProviderApprovalOption,
+  ProviderRequestKind,
   type ToolLifecycleItemType,
+  type UserInputQuestion,
   type ThreadId,
   type TurnId,
 } from "@t3tools/contracts";
 
-import {
-  isImageAttachment,
-  type ChatAttachment,
-  type ChatMessage,
-  type ProposedPlan,
-  type SessionPhase,
-  type Thread,
-  type ThreadSession,
-  type TurnDiffSummary,
+import type {
+  ChatMessage,
+  ProposedPlan,
+  SessionPhase,
+  Thread,
+  ThreadSession,
+  TurnDiffSummary,
 } from "./types";
 
-export type { PendingApproval, PendingUserInput } from "@t3tools/client-runtime/pending-requests";
+export type ProviderPickerKind = ProviderDriverKind;
 
-export { formatDuration } from "@t3tools/shared/orchestrationTiming";
+export const PROVIDER_OPTIONS: Array<{
+  value: ProviderPickerKind;
+  label: string;
+  available: boolean;
+  /** Shown on the model picker sidebar when relevant */
+  pickerSidebarBadge?: "new" | "soon";
+}> = [
+  { value: ProviderDriverKind.make("codex"), label: "Codex", available: true },
+  { value: ProviderDriverKind.make("claudeAgent"), label: "Claude", available: true },
+  {
+    value: ProviderDriverKind.make("opencode"),
+    label: "OpenCode",
+    available: true,
+    pickerSidebarBadge: "new",
+  },
+  {
+    value: ProviderDriverKind.make("cursor"),
+    label: "Cursor",
+    available: true,
+    pickerSidebarBadge: "new",
+  },
+  {
+    value: ProviderDriverKind.make("grok"),
+    label: "Grok",
+    available: true,
+    pickerSidebarBadge: "new",
+  },
+];
 
-export {
-  workEntryDisplayIndicatesToolFailure,
-  workEntryIndicatesToolSuccess,
-  workLogEntryIsToolLike,
-  type WorkLogToolLifecycleStatus,
-} from "@t3tools/client-runtime/work-log/presentation";
+export type WorkLogToolLifecycleStatus =
+  | "inProgress"
+  | "completed"
+  | "failed"
+  | "declined"
+  | "stopped";
 
 export interface FileChange {
   filePath: string;
@@ -59,7 +78,6 @@ export interface FileChange {
 }
 
 export interface WorkLogEntry {
-  questionAnswer?: UserInputAttachmentAnswerPayload;
   id: string;
   createdAt: string;
   turnId?: TurnId | null;
@@ -67,15 +85,11 @@ export interface WorkLogEntry {
   toolCallId?: string;
   label: string;
   detail?: string;
-  viewedImagePath?: string;
   command?: string;
   rawCommand?: string;
   changedFiles?: ReadonlyArray<string>;
   tone: "thinking" | "tool" | "info" | "error";
   toolTitle?: string;
-  toolSurface?: import("@t3tools/contracts").ToolActivitySurface;
-  toolIcon?: import("@t3tools/contracts").ToolActivityIcon;
-  toolSource?: import("@t3tools/contracts").ToolActivitySource;
   toolData?: unknown;
   itemType?: ToolLifecycleItemType;
   requestKind?: PendingApproval["requestKind"];
@@ -118,6 +132,25 @@ const derivedWorkLogEntryByActivity = new WeakMap<
   OrchestrationThreadActivity,
   DerivedWorkLogEntry
 >();
+
+export interface PendingApproval {
+  requestId: ApprovalRequestId;
+  requestKind: ProviderRequestKind;
+  createdAt: string;
+  detail?: string;
+  appName?: string;
+  options?: ReadonlyArray<ProviderApprovalOption>;
+}
+
+const isProviderRequestKind = Schema.is(ProviderRequestKind);
+const isProviderApprovalOption = Schema.is(ProviderApprovalOption);
+
+export interface PendingUserInput {
+  requestId: ApprovalRequestId;
+  createdAt: string;
+  questions: ReadonlyArray<UserInputQuestion>;
+  dismissible?: boolean | undefined;
+}
 
 export interface ActivePlanState {
   createdAt: string;
@@ -203,6 +236,30 @@ export function workEntrySignalsSevereFailure(entry: WorkLogEntry): boolean {
   );
 }
 
+/** Tool/command row completed without failure (blue check affordance). */
+export function workEntryIndicatesToolSuccess(entry: WorkLogEntry): boolean {
+  if (!workLogEntryIsToolLike(entry)) {
+    return false;
+  }
+  if (workEntryIndicatesToolFailure(entry)) {
+    return false;
+  }
+  if (entry.tone === "thinking") {
+    return false;
+  }
+  const ls = entry.toolLifecycleStatus;
+  if (ls === "failed" || ls === "declined") {
+    return false;
+  }
+  if (ls === "inProgress") {
+    return false;
+  }
+  if (ls === "stopped") {
+    return false;
+  }
+  return true;
+}
+
 /** Tool-like row with neither clear success nor failure (empty, incomplete, in progress, etc.). */
 export function workEntryIndicatesToolNeutralStatus(entry: WorkLogEntry): boolean {
   // Spawn CTA rows are never neutral-hidden: mid-run they derive from
@@ -221,6 +278,32 @@ export function workEntryIndicatesToolNeutralStatus(entry: WorkLogEntry): boolea
     return false;
   }
   return true;
+}
+
+export function formatDuration(durationMs: number): string {
+  if (!Number.isFinite(durationMs) || durationMs < 0) return "0ms";
+  if (durationMs < 1_000) return `${Math.max(1, Math.round(durationMs))}ms`;
+  if (durationMs < 10_000) {
+    const tenths = Math.round(durationMs / 100) / 10;
+    // 9.95s+ rounds up to the next bucket — render "10s", not "10.0s".
+    return tenths >= 10 ? "10s" : `${tenths.toFixed(1)}s`;
+  }
+  if (durationMs < 60_000) return `${Math.round(durationMs / 1_000)}s`;
+  const minutes = Math.floor(durationMs / 60_000);
+  const seconds = Math.round((durationMs % 60_000) / 1_000);
+  if (seconds === 0) return `${minutes}m`;
+  if (seconds === 60) return `${minutes + 1}m`;
+  return `${minutes}m ${seconds}s`;
+}
+
+export function formatElapsed(startIso: string, endIso: string | undefined): string | null {
+  if (!endIso) return null;
+  const startedAt = Date.parse(startIso);
+  const endedAt = Date.parse(endIso);
+  if (Number.isNaN(startedAt) || Number.isNaN(endedAt) || endedAt < startedAt) {
+    return null;
+  }
+  return formatDuration(endedAt - startedAt);
 }
 
 type LatestTurnTiming = Pick<OrchestrationLatestTurn, "turnId" | "startedAt" | "completedAt">;
@@ -577,6 +660,60 @@ export function deriveActivePlanState(
   return addPlanStepDurations(plan, matchingActivities.slice(latestClearIndex + 1));
 }
 
+export interface TurnPlanEntry {
+  /** Stable per-turn row id (plans rewrite constantly; the row must not churn). */
+  id: string;
+  /** Anchor timestamp: the turn's FIRST plan activity, so the chip renders where planning began. */
+  createdAt: string;
+  turnId: TurnId | null;
+  plan: ActivePlanState;
+}
+
+/**
+ * One inline plan chip per turn that produced plan/todo steps: the latest
+ * snapshot for the turn, anchored at the first snapshot's timestamp. Turn-less
+ * plan activities collapse into a single chip keyed by thread order.
+ */
+export function deriveTurnPlans(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): TurnPlanEntry[] {
+  const ordered = [...activities].toSorted(compareActivitiesByOrder);
+  const byTurn = new Map<
+    string,
+    { activities: OrchestrationThreadActivity[]; entry: TurnPlanEntry }
+  >();
+  for (const activity of ordered) {
+    if (activity.kind !== "turn.plan.updated") {
+      continue;
+    }
+    const plan = planStateFromActivity(activity);
+    const key = activity.turnId ?? "no-turn";
+    if (!plan) {
+      byTurn.delete(key);
+      continue;
+    }
+    const existing = byTurn.get(key);
+    if (existing) {
+      existing.entry.plan = plan;
+      existing.activities.push(activity);
+    } else {
+      byTurn.set(key, {
+        activities: [activity],
+        entry: {
+          id: `turn-plan:${key}`,
+          createdAt: activity.createdAt,
+          turnId: activity.turnId,
+          plan,
+        },
+      });
+    }
+  }
+  return [...byTurn.values()].map(({ activities: planActivities, entry }) => ({
+    ...entry,
+    plan: addPlanStepDurations(entry.plan, planActivities),
+  }));
+}
+
 export function findLatestProposedPlan(
   proposedPlans: ReadonlyArray<ProposedPlan>,
   latestTurnId: TurnId | string | null | undefined,
@@ -767,7 +904,24 @@ function isPlanBoundaryToolActivity(activity: OrchestrationThreadActivity): bool
   return typeof payload?.detail === "string" && payload.detail.startsWith("ExitPlanMode:");
 }
 
-const decodeQuestionAttachmentAnswer = Schema.decodeUnknownOption(UserInputAttachmentAnswerPayload);
+function extractWorkLogToolLifecycleStatus(
+  payload: Record<string, unknown> | null,
+): WorkLogToolLifecycleStatus | undefined {
+  if (!payload) {
+    return undefined;
+  }
+  const s = payload.status;
+  if (
+    s === "inProgress" ||
+    s === "completed" ||
+    s === "failed" ||
+    s === "declined" ||
+    s === "stopped"
+  ) {
+    return s;
+  }
+  return undefined;
+}
 
 function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWorkLogEntry {
   const cachedEntry = derivedWorkLogEntryByActivity.get(activity);
@@ -782,7 +936,6 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   const changedFiles = extractChangedFiles(payload);
   const fileChanges = extractFileChanges(payload);
   const title = extractToolTitle(payload);
-  const toolPresentation = extractToolActivityPresentation(payload);
   const isTaskActivity =
     activity.kind === "task.started" ||
     activity.kind === "task.progress" ||
@@ -821,13 +974,8 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
           : activity.tone,
     sourceActivityKind: activity.kind,
   };
-  if (activity.kind === "user-input.answer-submitted") {
-    const answer = decodeQuestionAttachmentAnswer(payload);
-    if (Option.isSome(answer)) entry.questionAnswer = answer.value;
-  }
   const itemType = extractWorkLogItemType(payload);
   const requestKind = extractWorkLogRequestKind(payload);
-  const viewedImagePath = asTrimmedString(asRecord(payload?.data)?.imagePath);
   if (detail) {
     entry.detail = detail;
   } else if (activity.kind === "runtime.error" || activity.kind === "runtime.warning") {
@@ -838,9 +986,6 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
     ) {
       entry.detail = message;
     }
-  }
-  if (viewedImagePath) {
-    entry.viewedImagePath = viewedImagePath;
   }
   if (commandPreview.command) {
     entry.command = commandPreview.command;
@@ -861,20 +1006,10 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   if (title) {
     entry.toolTitle = title;
   }
-  if (toolPresentation.toolSurface) {
-    entry.toolSurface = toolPresentation.toolSurface;
-  }
-  if (toolPresentation.toolIcon) {
-    entry.toolIcon = toolPresentation.toolIcon;
-  }
-  if (toolPresentation.toolSource) {
-    entry.toolSource = toolPresentation.toolSource;
-  }
   if (itemType === "mcp_tool_call") {
     const data = asRecord(payload?.data);
-    const toolData = typeof data?.toolName === "string" ? (data.item ?? data) : data?.item;
-    if (toolData !== undefined) {
-      entry.toolData = toolData;
+    if (data?.item !== undefined) {
+      entry.toolData = data.item;
     }
   }
   if (itemType) {
@@ -1088,13 +1223,9 @@ function mergeDerivedWorkLogEntries(
 ): DerivedWorkLogEntry {
   const changedFiles = mergeChangedFiles(previous.changedFiles, next.changedFiles);
   const detail = next.detail ?? previous.detail;
-  const viewedImagePath = next.viewedImagePath ?? previous.viewedImagePath;
   const command = next.command ?? previous.command;
   const rawCommand = next.rawCommand ?? previous.rawCommand;
   const toolTitle = next.toolTitle ?? previous.toolTitle;
-  const toolSurface = next.toolSurface ?? previous.toolSurface;
-  const toolIcon = next.toolIcon ?? previous.toolIcon;
-  const toolSource = next.toolSource ?? previous.toolSource;
   const itemType = next.itemType ?? previous.itemType;
   const requestKind = next.requestKind ?? previous.requestKind;
   const collapseKey = next[workLogCollapseKey] ?? previous[workLogCollapseKey];
@@ -1106,14 +1237,10 @@ function mergeDerivedWorkLogEntries(
     ...previous,
     ...next,
     ...(detail ? { detail } : {}),
-    ...(viewedImagePath ? { viewedImagePath } : {}),
     ...(command ? { command } : {}),
     ...(rawCommand ? { rawCommand } : {}),
     ...(changedFiles.length > 0 ? { changedFiles } : {}),
     ...(toolTitle ? { toolTitle } : {}),
-    ...(toolSurface ? { toolSurface } : {}),
-    ...(toolIcon ? { toolIcon } : {}),
-    ...(toolSource ? { toolSource } : {}),
     ...(itemType ? { itemType } : {}),
     ...(requestKind ? { requestKind } : {}),
     ...(collapseKey ? { [workLogCollapseKey]: collapseKey } : {}),
@@ -1296,11 +1423,6 @@ function unwrapCommandRemainder(value: string, wrapperFlagPattern: RegExp): stri
 
   const command = value.slice(match.index + match[0].length).trim();
   if (command.length === 0) {
-    return null;
-  }
-
-  const openingQuote = command[0];
-  if ((openingQuote === "'" || openingQuote === '"') && !command.endsWith(openingQuote)) {
     return null;
   }
 
@@ -1492,9 +1614,6 @@ function summarizeToolRawOutput(payload: Record<string, unknown> | null): string
   return null;
 }
 
-function extractToolOutput(payload: Record<string, unknown> | null): string | null {
-  const output = extractCommandOutputText(payload?.data);
-  return output ? stripTrailingExitCode(output).output : null;
 function extractAcpTextContent(value: unknown): string | null {
   if (!Array.isArray(value)) {
     return null;
@@ -1652,6 +1771,18 @@ function extractToolDetail(
       normalizedCommand === normalizedUnwrappedDetail ||
       normalizedCommand === normalizedDetailWithoutToolName ||
       normalizedCommand === normalizedUnwrappedDetailWithoutToolName);
+
+  if (commandTool) {
+    const output = extractToolOutput(payload);
+    const normalizedOutput = normalizePreviewForComparison(output);
+    if (
+      output &&
+      normalizedOutput !== normalizedHeading &&
+      normalizedOutput !== normalizedCommand
+    ) {
+      return output;
+    }
+  }
 
   if (detail && normalizedHeading !== normalizedDetail && (!commandTool || !detailMatchesCommand)) {
     return detail;
