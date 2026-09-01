@@ -3974,6 +3974,9 @@ export function makeOpenCodeAdapter(
               reason: "Interrupted by user.",
             },
           });
+        const activeTurnId = context.activeTurnId;
+        if (turnId !== undefined && activeTurnId !== turnId) {
+          return;
         }
         const interruptedTurnId = turnId ?? activeTurnId;
         yield* cancelIdleReconciliation(context);

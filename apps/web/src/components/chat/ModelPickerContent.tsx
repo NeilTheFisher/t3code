@@ -59,8 +59,6 @@ type ModelPickerItem = ModelEsque & {
   instanceDisplayName: string;
   instanceAccentColor?: string | undefined;
   continuationGroupKey?: string | undefined;
-  isLegacy?: boolean | undefined;
-  isUnavailable?: boolean | undefined;
 };
 
 export function resolveModelPickerSelectedModel(input: {
@@ -238,6 +236,11 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         activeInstanceNeedsSetup
       ) {
         // Keep the active instance visible when it is locked or needs setup.
+  const [selectedInstanceId, setSelectedInstanceId] = useState<ProviderInstanceId | "favorites">(
+    () => {
+      if (props.lockedProvider !== null) {
+        // When locked, prime the sidebar to the currently-active instance
+        // so jumping into the picker keeps the focused instance visible.
         return props.activeInstanceId;
       }
       return favorites.length > 0 ? "favorites" : props.activeInstanceId;
@@ -335,6 +338,15 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     props.activeInstanceId,
     props.onOpenProviderSetup,
   ]);
+  const readyInstanceSet = useMemo(() => {
+    const ready = new Set<ProviderInstanceId>();
+    for (const entry of instanceEntries) {
+      if (isProviderInstancePickerReady(entry)) {
+        ready.add(entry.instanceId);
+      }
+    }
+    return ready;
+  }, [instanceEntries]);
 
   // Flatten models into a searchable array. One pass over the
   // instance-keyed map; each model carries its instance id + driver kind
@@ -388,6 +400,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     return buildModelPickerItems(modelOptionsByInstance, entryByInstanceId, readyInstanceSet);
   }, [modelOptionsByInstance, entryByInstanceId, readyInstanceSet]);
   }, [modelOptionsByInstance, entryByInstanceId, props.activeInstanceId, props.model]);
+    return buildModelPickerItems(modelOptionsByInstance, entryByInstanceId, readyInstanceSet);
+  }, [modelOptionsByInstance, entryByInstanceId, readyInstanceSet]);
 
   const isLocked = props.lockedProvider !== null;
   const isSearching = searchQuery.trim().length > 0;
@@ -780,7 +794,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             onSelectInstance={handleSelectInstance}
             instanceEntries={sidebarInstanceEntries}
             showFavorites
-            {...(selectableUnavailableInstanceIds ? { selectableUnavailableInstanceIds } : {})}
             {...(lockedDisabledInstanceIds
               ? {
                   disabledInstanceIds: lockedDisabledInstanceIds,
@@ -939,6 +952,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                         useTriggerLabel={false}
                         showNewBadge={model.badge === "new"}
                         unavailable={model.isUnavailable === true}
+                        showNewBadge={isModelPickerNewModel(model.driverKind, model.slug)}
                         jumpLabel={modelJumpLabelByKey.get(modelKey) ?? null}
                         disabledReason={disabledReason}
                         onToggleFavorite={() => toggleFavorite(model.instanceId, model.slug)}
