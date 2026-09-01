@@ -32,6 +32,7 @@ import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import { extractToolFileChanges } from "./DiffUtils.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import {
@@ -620,6 +621,14 @@ function detailFromToolPart(part: Extract<Part, { type: "tool" }>): string | und
     default:
       return undefined;
   }
+}
+
+export function extractOpenCodeToolFileChanges(
+  toolName: string,
+  input: Record<string, unknown>,
+): Array<{ path: string; diff: string }> | undefined {
+  const result = extractToolFileChanges(toolName, input);
+  return result && result.length > 0 ? result : undefined;
 }
 
 function toolStateCreatedAt(part: Extract<Part, { type: "tool" }>): string | undefined {
@@ -2110,6 +2119,13 @@ export function makeOpenCodeAdapter(
             const title =
               part.state.status === "running" ? (part.state.title ?? part.tool) : part.tool;
             const detail = detailFromToolPart(part);
+            const fileChanges =
+              part.state.status === "completed" && itemType === "file_change"
+                ? extractOpenCodeToolFileChanges(
+                    part.tool,
+                    part.state.input as Record<string, unknown>,
+                  )
+                : undefined;
             const payload = {
               itemType,
               ...(part.state.status === "error"
@@ -2122,6 +2138,7 @@ export function makeOpenCodeAdapter(
               data: {
                 tool: part.tool,
                 state: part.state,
+                ...(fileChanges ? { changes: fileChanges } : {}),
               },
             };
             const runtimeEvent: ProviderRuntimeEvent = {
@@ -2227,6 +2244,32 @@ export function makeOpenCodeAdapter(
               break;
             }
             yield* completeOpenCodeTurn(context, turnId, context.promptGeneration, event);
+          }
+          break;
+        }
+
+        case "session.diff": {
+          const diffs = (event.properties as { diff?: unknown }).diff;
+          if (!Array.isArray(diffs)) break;
+          for (const d of diffs) {
+            const record = d as Record<string, unknown>;
+            const file = typeof record.file === "string" ? record.file : undefined;
+            const patch = typeof record.patch === "string" ? record.patch : undefined;
+            if (!file || !patch) continue;
+            yield* emit({
+              ...(yield* buildEventBase({
+                threadId: context.session.threadId,
+                turnId,
+                raw: event,
+              })),
+              type: "item.updated",
+              payload: {
+                itemType: "file_change",
+                data: {
+                  changes: [{ path: file, diff: patch }],
+                },
+              },
+            });
           }
           break;
         }
