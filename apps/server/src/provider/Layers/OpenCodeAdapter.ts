@@ -2973,6 +2973,32 @@ export function makeOpenCodeAdapter(
           break;
         }
 
+        case "session.diff": {
+          const diffs = (event.properties as { diff?: unknown }).diff;
+          if (!Array.isArray(diffs)) break;
+          for (const d of diffs) {
+            const record = d as Record<string, unknown>;
+            const file = typeof record.file === "string" ? record.file : undefined;
+            const patch = typeof record.patch === "string" ? record.patch : undefined;
+            if (!file || !patch) continue;
+            yield* emit({
+              ...(yield* buildEventBase({
+                threadId: context.session.threadId,
+                turnId,
+                raw: event,
+              })),
+              type: "item.updated",
+              payload: {
+                itemType: "file_change",
+                data: {
+                  changes: [{ path: file, diff: patch }],
+                },
+              },
+            });
+          }
+          break;
+        }
+
         case "session.error": {
           const message = sessionErrorMessage(event.properties.error);
           const activeTurnId = context.activeTurnId;
