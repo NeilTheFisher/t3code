@@ -341,6 +341,11 @@ interface OpenCodeSessionContext {
   activeTurnId: TurnId | undefined;
   activeAgent: string | undefined;
   activeVariant: string | undefined;
+  accumulatedInputTokens: number;
+  accumulatedOutputTokens: number;
+  accumulatedReasoningTokens: number;
+  accumulatedCacheReadTokens: number;
+  modelContextWindow: number | undefined;
   cancellation: OpenCodeCancellation | undefined;
   interruptedTurnId: TurnId | undefined;
   reconcileIdleStatus: boolean;
@@ -2003,6 +2008,51 @@ export function makeOpenCodeAdapter(
         return;
       }
 
+      function* emitTokenUsage(
+        tokens: NonNullable<NonNullable<Part["tokens"]>>,
+      ): Generator<any, void, unknown> {
+        const inputTokens = tokens.input!;
+        const outputTokens = tokens.output!;
+        const reasoningTokens = tokens.reasoning ?? 0;
+        context.accumulatedInputTokens += inputTokens;
+        context.accumulatedOutputTokens += outputTokens;
+        context.accumulatedReasoningTokens += reasoningTokens;
+        context.accumulatedCacheReadTokens += tokens.cache?.read ?? 0;
+
+        const contextTokens = inputTokens + outputTokens + (tokens.cache?.read ?? 0);
+        const maxTokens = context.modelContextWindow;
+        const usedTokens =
+          maxTokens !== undefined ? Math.min(contextTokens, maxTokens) : contextTokens;
+        const totalProcessedTokens =
+          context.accumulatedInputTokens + context.accumulatedOutputTokens;
+
+        yield* emit({
+          ...(yield* buildEventBase({
+            threadId: context.session.threadId,
+            turnId,
+            raw: event,
+          })),
+          type: "thread.token-usage.updated",
+          payload: {
+            usage: {
+              usedTokens,
+              ...(maxTokens !== undefined ? { maxTokens } : {}),
+              ...(totalProcessedTokens > usedTokens ? { totalProcessedTokens } : {}),
+              inputTokens: context.accumulatedInputTokens,
+              outputTokens: context.accumulatedOutputTokens,
+              reasoningOutputTokens: context.accumulatedReasoningTokens,
+              cachedInputTokens: context.accumulatedCacheReadTokens,
+              lastUsedTokens: inputTokens + outputTokens,
+              lastInputTokens: inputTokens,
+              lastOutputTokens: outputTokens,
+              lastReasoningOutputTokens: reasoningTokens,
+              lastCachedInputTokens: tokens.cache?.read ?? 0,
+              compactsAutomatically: true,
+            },
+          },
+        });
+      }
+
       switch (event.type) {
         case "session.updated": {
           const title = openCodeEventSessionTitle(event);
@@ -2159,6 +2209,16 @@ export function makeOpenCodeAdapter(
             };
             appendTurnItem(context, turnId, part);
             yield* emit(runtimeEvent);
+          }
+
+          if (
+            part.type === "step-finish" &&
+            (part as { tokens?: { input?: unknown; output?: unknown } }).tokens?.input !==
+              undefined &&
+            (part as { tokens?: { input?: unknown; output?: unknown } }).tokens?.output !==
+              undefined
+          ) {
+            yield* emitTokenUsage((part as { tokens: NonNullable<Part["tokens"]> }).tokens);
           }
           break;
         }
@@ -2417,6 +2477,26 @@ export function makeOpenCodeAdapter(
       }
     });
 
+    // The context window only drives the cosmetic context circle, so every
+    // lookup failure degrades to `undefined` rather than failing the turn —
+    // custom models and older runtimes may not expose `provider.list` at all.
+    const resolveModelContextWindow = (
+      modelSlug: string | undefined,
+      client: OpencodeClient,
+    ): Effect.Effect<number | undefined> =>
+      Effect.gen(function* () {
+        const parsed = parseOpenCodeModelSlug(modelSlug);
+        if (!parsed) return undefined;
+        if (typeof client.provider?.list !== "function") return undefined;
+        const providerList = yield* runOpenCodeSdk("provider.list", () => client.provider.list());
+        const providerData = providerList.data;
+        if (!providerData) return undefined;
+        const provider = providerData.all.find((p) => p.id === parsed.providerID);
+        if (!provider) return undefined;
+        const model = provider.models?.[parsed.modelID];
+        return model?.limit?.context;
+      }).pipe(Effect.orElseSucceed(() => undefined));
+
     const startSession: OpenCodeAdapterShape["startSession"] = Effect.fn("startSession")(
       function* (input) {
         const binaryPath = openCodeSettings.binaryPath;
@@ -2569,6 +2649,11 @@ export function makeOpenCodeAdapter(
           return startedExit.value;
         });
 
+        const modelContextWindow: number | undefined = yield* resolveModelContextWindow(
+          input.modelSelection?.model,
+          started.client,
+        );
+
         const createdAt = yield* nowIso;
         const session: ProviderSession = {
           provider: PROVIDER,
@@ -2609,6 +2694,11 @@ export function makeOpenCodeAdapter(
           activeTurnId: undefined,
           activeAgent: undefined,
           activeVariant: undefined,
+          accumulatedInputTokens: 0,
+          accumulatedOutputTokens: 0,
+          accumulatedReasoningTokens: 0,
+          accumulatedCacheReadTokens: 0,
+          modelContextWindow,
           cancellation: undefined,
           interruptedTurnId: undefined,
           reconcileIdleStatus: false,
@@ -2776,6 +2866,21 @@ export function makeOpenCodeAdapter(
           };
           context.promptGeneration = promptGeneration;
           context.promptAdmission = promptAdmission;
+
+          // Update the context window limit when the model changes so the
+          // context circle reflects the new model's capacity. This is cosmetic
+          // (the provider handles real compaction) but avoids showing a stale
+          // percentage after a mid-session model switch.
+          const newModelSlug = modelSelection?.model;
+          if (newModelSlug !== undefined && newModelSlug !== context.session.model) {
+            const updatedContextWindow = yield* resolveModelContextWindow(
+              newModelSlug,
+              context.client,
+            );
+            if (updatedContextWindow !== undefined) {
+              context.modelContextWindow = updatedContextWindow;
+            }
+          }
 
           context.activeTurnId = turnId;
           context.activeAgent = agent ?? (input.interactionMode === "plan" ? "plan" : undefined);
