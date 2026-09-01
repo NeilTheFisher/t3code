@@ -47,6 +47,7 @@ import {
   shouldShowBranchMismatchBanner,
   shouldShowPlanFollowUpPrompt,
   shouldWriteThreadErrorToCurrentServerThread,
+  codexArtifactTemplatePromptToAppend,
 } from "./ChatView.logic";
 
 describe("loadVideoPreviewUrl", () => {

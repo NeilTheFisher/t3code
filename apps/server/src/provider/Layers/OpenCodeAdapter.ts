@@ -2997,31 +2997,6 @@ export function makeOpenCodeAdapter(
           return;
         }
         const existingCancellation = context.cancellation;
-        if (
-          existingCancellation !== undefined &&
-          existingCancellation.turnId === interruptedTurnId
-        ) {
-          return yield* Deferred.await(existingCancellation.completion);
-        }
-        const cancellation: OpenCodeCancellation = {
-          turnId: interruptedTurnId,
-          completion: Deferred.makeUnsafe<void, ProviderAdapterRequestError>(),
-        };
-        context.cancellation = cancellation;
-        const promptAdmission = context.promptAdmission;
-        if (promptAdmission !== undefined && promptAdmission.turnId === interruptedTurnId) {
-          promptAdmission.cancelled = true;
-          if (promptAdmission.promptFiber) {
-            yield* Fiber.interrupt(promptAdmission.promptFiber);
-          }
-          yield* Deferred.await(promptAdmission.submissionSettled);
-        }
-        const interruptedTurnId = turnId ?? activeTurnId;
-        yield* cancelIdleReconciliation(context);
-        if (interruptedTurnId && context.interruptedTurnId === interruptedTurnId) {
-          return;
-        }
-        const existingCancellation = context.cancellation;
         if (existingCancellation !== undefined) {
           return yield* Deferred.await(existingCancellation.completion);
         }

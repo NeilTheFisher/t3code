@@ -1135,13 +1135,13 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           sequence,
           created_at AS "createdAt"
         FROM projection_thread_activities
-        WHERE thread_id = \${threadId}
-          AND (sequence < \${beforeSequence} OR sequence IS NULL)
+        WHERE thread_id = ${threadId}
+          AND (sequence < ${beforeSequence} OR sequence IS NULL)
         ORDER BY
           sequence DESC,
           created_at DESC,
           activity_id DESC
-        LIMIT \${limit}
+        LIMIT ${limit}
       `,
   });
 
@@ -1169,19 +1169,19 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           sequence,
           created_at AS "createdAt"
         FROM projection_thread_activities
-        WHERE thread_id = \${threadId}
+        WHERE thread_id = ${threadId}
           AND sequence IS NULL
           AND (
-            created_at < \${beforeCreatedAt}
+            created_at < ${beforeCreatedAt}
             OR (
-              created_at = \${beforeCreatedAt}
-              AND activity_id < \${beforeActivityId}
+              created_at = ${beforeCreatedAt}
+              AND activity_id < ${beforeActivityId}
             )
           )
         ORDER BY
           created_at DESC,
           activity_id DESC
-        LIMIT \${limit}
+        LIMIT ${limit}
       `,
   });
 
@@ -1991,6 +1991,7 @@ pending_approval_requests AS (
                 messages: messagesByThread.get(row.threadId) ?? [],
                 proposedPlans: proposedPlansByThread.get(row.threadId) ?? [],
                 activities: activitiesByThread.get(row.threadId) ?? [],
+                hasMoreActivities: false,
                 checkpoints: checkpointsByThread.get(row.threadId) ?? [],
                 session: sessionsByThread.get(row.threadId) ?? null,
               }));
@@ -2860,68 +2861,14 @@ pending_approval_requests AS (
     );
   });
 
-  const getThreadDetailByIdBounded = (
-    threadId: ThreadId,
-    bounds: ThreadDetailBounds | undefined,
-    activityRead: ThreadDetailActivityRead = { mode: "raw" },
-  ) =>
+  const getThreadDetailByIdBounded = (threadId: ThreadId, bounds: ThreadDetailBounds | undefined) =>
     Effect.gen(function* () {
-      const activitiesEffect =
-        activityRead.mode === "client"
-          ? listProjectedThreadActivities(threadId, bounds)
-          : Effect.all([
-              (activityRead.query?.activityKinds === undefined
-                ? bounds === undefined
-                  ? listThreadActivityRowsByThread({ threadId })
-                  : listThreadActivityRowsByThreadWindow({ threadId, ...bounds })
-                : activityRead.query.activityKinds.length === 0
-                  ? Effect.succeed([])
-                  : listThreadActivityRowsByThreadAndKinds({
-                      threadId,
-                      activityKinds: activityRead.query.activityKinds,
-                    })
-              ).pipe(
-                Effect.mapError(
-                  toPersistenceSqlOrDecodeError(
-                    "ProjectionSnapshotQuery.getThreadDetailById:listActivities:query",
-                    "ProjectionSnapshotQuery.getThreadDetailById:listActivities:decodeRows",
-                  ),
-                ),
-              ),
-              activityRead.query?.activityKinds === undefined
-                ? listPinnedThreadActivityRowsByThread({ threadId }).pipe(
-                    Effect.mapError(
-                      toPersistenceSqlOrDecodeError(
-                        "ProjectionSnapshotQuery.getThreadDetailById:listPinnedActivities:query",
-                        "ProjectionSnapshotQuery.getThreadDetailById:listPinnedActivities:decodeRows",
-                      ),
-                    ),
-                  )
-                : Effect.succeed([]),
-            ]).pipe(
-              Effect.map(([activityRows, pinnedActivityRows]) =>
-                [
-                  ...new Map(
-                    [...activityRows, ...pinnedActivityRows].map(
-                      (row) => [row.activityId, row] as const,
-                    ),
-                  ).values(),
-                ]
-                  .toSorted(
-                    (left, right) =>
-                      (left.sequence ?? -1) - (right.sequence ?? -1) ||
-                      left.createdAt.localeCompare(right.createdAt) ||
-                      left.activityId.localeCompare(right.activityId),
-                  )
-                  .map(mapThreadActivityRow),
-              ),
-            );
-
       const [
         threadRow,
         messageRows,
         proposedPlanRows,
-        activities,
+        activityRows,
+        pinnedActivityRows,
         checkpointRows,
         latestTurnRow,
         sessionRow,
@@ -2953,7 +2900,25 @@ pending_approval_requests AS (
             ),
           ),
         ),
-        activitiesEffect,
+        (bounds === undefined
+          ? listThreadActivityRowsByThread({ threadId })
+          : listThreadActivityRowsByThreadWindow({ threadId, ...bounds })
+        ).pipe(
+          Effect.mapError(
+            toPersistenceSqlOrDecodeError(
+              "ProjectionSnapshotQuery.getThreadDetailById:listActivities:query",
+              "ProjectionSnapshotQuery.getThreadDetailById:listActivities:decodeRows",
+            ),
+          ),
+        ),
+        listPinnedThreadActivityRowsByThread({ threadId }).pipe(
+          Effect.mapError(
+            toPersistenceSqlOrDecodeError(
+              "ProjectionSnapshotQuery.getThreadDetailById:listPinnedActivities:query",
+              "ProjectionSnapshotQuery.getThreadDetailById:listPinnedActivities:decodeRows",
+            ),
+          ),
+        ),
         listCheckpointRowsByThread({ threadId }).pipe(
           Effect.mapError(
             toPersistenceSqlOrDecodeError(
@@ -2984,20 +2949,23 @@ pending_approval_requests AS (
         return Option.none<OrchestrationThread>();
       }
 
-      // hasMoreActivities for lazy-load: when the non-windowed detail exceeds the window, trim to window.
-      // Upstream's turn-window pagination handles message/turn windowing; this handles activity windowing.
       const hasMoreActivities =
-        bounds === undefined && (activities as unknown as { length: number }).length > THREAD_DETAIL_ACTIVITY_WINDOW;
-      // If activities came from raw path as OrchestrationThreadActivity[], slice; if from client path (projected), also slice.
-      // The +1 row is sliced away; pinned activities are already merged so we must not slice pinned separately.
-      // For now, handle the common raw case where activities is array of OrchestrationThreadActivity.
-      // When hasMore, drop the oldest beyond window (activities are ASC, so drop from start? Actually window keeps most recent => slice tail)
-      // Fork's original kept most recent WINDOW: activityRows.slice(length-WINDOW). Mapped activities are ASC, so oldest are first; to keep most recent, slice from end.
-      const boundedActivities = hasMoreActivities
-        ? (activities as unknown as OrchestrationThreadActivity[]).slice(
-            (activities as unknown as OrchestrationThreadActivity[]).length - THREAD_DETAIL_ACTIVITY_WINDOW,
-          )
-        : (activities as OrchestrationThreadActivity[]);
+        bounds === undefined && activityRows.length > THREAD_DETAIL_ACTIVITY_WINDOW;
+      const boundedActivityRows = hasMoreActivities
+        ? activityRows.slice(activityRows.length - THREAD_DETAIL_ACTIVITY_WINDOW)
+        : activityRows;
+      const selectedActivityRows = [
+        ...new Map(
+          [...boundedActivityRows, ...pinnedActivityRows].map(
+            (row) => [row.activityId, row] as const,
+          ),
+        ).values(),
+      ].toSorted(
+        (left, right) =>
+          (left.sequence ?? -1) - (right.sequence ?? -1) ||
+          left.createdAt.localeCompare(right.createdAt) ||
+          left.activityId.localeCompare(right.activityId),
+      );
 
       const thread = {
         id: threadRow.value.threadId,
@@ -3040,7 +3008,21 @@ pending_approval_requests AS (
           return message;
         }),
         proposedPlans: proposedPlanRows.map(mapProposedPlanRow),
-        activities: boundedActivities,
+        activities: selectedActivityRows.map((row) => {
+          const activity = {
+            id: row.activityId,
+            tone: row.tone,
+            kind: row.kind,
+            summary: row.summary,
+            payload: row.payload,
+            turnId: row.turnId,
+            createdAt: row.createdAt,
+          };
+          if (row.sequence !== null) {
+            return Object.assign(activity, { sequence: row.sequence });
+          }
+          return activity;
+        }),
         hasMoreActivities,
         checkpoints: checkpointRows.map((row) => ({
           turnId: row.turnId,

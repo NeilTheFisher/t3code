@@ -73,6 +73,23 @@ function readInstanceCustomModels(
 export interface AppModelOption extends ModelEsque {
   isCustom: boolean;
   isDefault?: boolean;
+  isUnavailable?: boolean;
+}
+
+function appendUnavailableOpenCodeSelection(
+  options: AppModelOption[],
+  rawModels: ReadonlyArray<ServerProvider["models"][number]>,
+  provider: ProviderDriverKind,
+  selectedModel: string | null | undefined,
+  hiddenModels: ReadonlyArray<string>,
+): AppModelOption[] {
+  if (provider !== "opencode") return options;
+  const slug = normalizeCustomModelSlug(selectedModel);
+  if (!slug) return options;
+  if (rawModels.some((model) => model.slug === slug)) return options;
+  if (hiddenModels.includes(slug)) return options;
+  if (options.some((option) => option.slug === slug)) return options;
+  return [...options, { slug, name: slug, isCustom: false, isUnavailable: true }];
 }
 
 function toAppModelOption(model: ServerProvider["models"][number]): AppModelOption {
@@ -150,9 +167,10 @@ export function getAppModelOptions(
   settings: UnifiedSettings,
   providers: ReadonlyArray<ServerProvider>,
   provider: ProviderDriverKind,
-  _selectedModel?: string | null,
+  selectedModel?: string | null,
 ): AppModelOption[] {
-  const options: AppModelOption[] = getProviderModels(providers, provider).map(toAppModelOption);
+  const rawModels = getProviderModels(providers, provider);
+  const options: AppModelOption[] = rawModels.map(toAppModelOption);
   const seen = new Set(options.map((option) => option.slug));
   const builtInModelSlugs = new Set(
     Arr.filterMap(getProviderModels(providers, provider), (model) =>
@@ -179,9 +197,13 @@ export function getAppModelOptions(
     });
   }
 
-  return applyInstanceModelPreferences(
-    options,
-    readInstanceModelPreferences(settings, defaultInstanceId),
+  const preferences = readInstanceModelPreferences(settings, defaultInstanceId);
+  return appendUnavailableOpenCodeSelection(
+    applyInstanceModelPreferences(options, preferences),
+    rawModels,
+    provider,
+    selectedModel,
+    preferences.hiddenModels,
   );
 }
 
@@ -199,8 +221,10 @@ export function getAppModelOptions(
 export function getAppModelOptionsForInstance(
   settings: UnifiedSettings,
   entry: ProviderInstanceEntry,
+  selectedModel?: string | null,
 ): AppModelOption[] {
-  const options: AppModelOption[] = entry.models.map(toAppModelOption);
+  const rawModels = entry.models;
+  const options: AppModelOption[] = rawModels.map(toAppModelOption);
   const seen = new Set(options.map((option) => option.slug));
   const builtInModelSlugs = new Set(
     Arr.filterMap(entry.models, (model) =>
@@ -218,9 +242,13 @@ export function getAppModelOptionsForInstance(
     options.push({ slug, name: slug, isCustom: true });
   }
 
-  return applyInstanceModelPreferences(
-    options,
-    readInstanceModelPreferences(settings, entry.instanceId),
+  const preferences = readInstanceModelPreferences(settings, entry.instanceId);
+  return appendUnavailableOpenCodeSelection(
+    applyInstanceModelPreferences(options, preferences),
+    rawModels,
+    entry.driverKind,
+    selectedModel,
+    preferences.hiddenModels,
   );
 }
 
@@ -266,16 +294,25 @@ export function resolveAppModelSelectionForInstance(
   settings: UnifiedSettings,
   providers: ReadonlyArray<ServerProvider>,
   selectedModel: string | null | undefined,
+  options?: { readonly preserveUnavailableSelection?: boolean },
 ): string | null {
   const entry = deriveProviderInstanceEntries(providers).find(
     (candidate) => candidate.instanceId === instanceId,
   );
   if (!entry) return null;
-  const options = getAppModelOptionsForInstance(settings, entry);
+  const preserve = options?.preserveUnavailableSelection === true;
+  const effectiveSelectedModel = preserve ? selectedModel : null;
+  const opts = getAppModelOptionsForInstance(settings, entry, effectiveSelectedModel);
+  // When preserving, also allow the selectedModel itself to be resolved even if not in opts (via isUnavailable)
+  // Otherwise, don't pass selectedModel so it won't be added as unavailable
   return (
-    resolveSelectableModel(entry.driverKind, selectedModel, options) ??
-    options.find((option) => option.isDefault)?.slug ??
-    options[0]?.slug ??
+    resolveSelectableModel(
+      entry.driverKind,
+      selectedModel,
+      preserve ? opts : getAppModelOptionsForInstance(settings, entry),
+    ) ??
+    opts.find((option) => option.isDefault)?.slug ??
+    opts[0]?.slug ??
     entry.models.find((model) => model.isDefault)?.slug ??
     entry.models[0]?.slug ??
     null
@@ -290,12 +327,19 @@ export function resolveAppModelSelectionForInstance(
 export function getCustomModelOptionsByInstance(
   settings: UnifiedSettings,
   providers: ReadonlyArray<ServerProvider>,
-  _selectedInstanceId?: ProviderInstanceId | null,
-  _selectedModel?: string | null,
+  selectedInstanceId?: ProviderInstanceId | null,
+  selectedModel?: string | null,
 ): ReadonlyMap<ProviderInstanceId, ReadonlyArray<ModelEsque>> {
   const out = new Map<ProviderInstanceId, ReadonlyArray<ModelEsque>>();
   for (const entry of deriveProviderInstanceEntries(providers)) {
-    out.set(entry.instanceId, getAppModelOptionsForInstance(settings, entry));
+    out.set(
+      entry.instanceId,
+      getAppModelOptionsForInstance(
+        settings,
+        entry,
+        entry.instanceId === selectedInstanceId ? selectedModel : null,
+      ),
+    );
   }
   return out;
 }
