@@ -19,6 +19,7 @@ import {
   workLogEntryIsToolLike,
   type ModelChangeNotice,
   type TimelineEntry,
+  type TurnPlanEntry,
   type WorkLogEntry,
 } from "../../session-logic";
 import { type ChatMessage, type ProposedPlan, type TurnDiffSummary } from "../../types";

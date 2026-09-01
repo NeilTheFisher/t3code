@@ -32,6 +32,7 @@ function DraftChatThreadRouteView() {
     : null;
   const serverThreadRef = draftSession?.promotedTo ?? inferredThreadRef;
   const serverThread = useThread(serverThreadRef);
+  const serverThreadStarted = threadHasStarted(serverThread);
   const backgroundSubmissionPending = useBackgroundDraftSubmissionPending(serverThreadRef);
   const promotedThreadRef = resolveDraftPromotionNavigationTarget({
     serverThreadRef,
