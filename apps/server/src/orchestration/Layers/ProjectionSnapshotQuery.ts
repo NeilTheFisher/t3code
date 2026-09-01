@@ -125,10 +125,7 @@ const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
   }),
 );
 const ProjectionTurnStartMessageDbRowSchema = ProjectionThreadMessageDbRowSchema.mapFields(
-  Struct.assign({
-    hasOtherUserMessages: Schema.Number,
-    hasInheritedForkMessages: Schema.Number,
-  }),
+  Struct.assign({ hasOtherUserMessages: Schema.Number }),
 );
 const ProjectionThreadProposedPlanDbRowSchema = ProjectionThreadProposedPlan;
 const ProjectionThreadPullRequestDbRowSchema = ProjectionThreadPullRequest.mapFields(
@@ -1421,14 +1418,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               LOWER(TRIM(other.text, ${MESSAGE_TRIM_WHITESPACE})) != '/compact'
               OR COALESCE(json_array_length(other.attachments_json), 0) > 0
             )
-        ) AS "hasOtherUserMessages",
-        EXISTS (
-          SELECT 1
-          FROM projection_thread_messages AS inherited
-          WHERE inherited.thread_id = ${threadId}
-            AND inherited.message_id != ${messageId}
-            AND inherited.message_id LIKE ${threadId} || ':fork:%'
-        ) AS "hasInheritedForkMessages"
+        ) AS "hasOtherUserMessages"
       FROM projection_thread_messages
       WHERE thread_id = ${threadId} AND message_id = ${messageId}
       LIMIT 1
@@ -3503,7 +3493,6 @@ pending_approval_requests AS (
         ...(row.context !== null ? { context: row.context } : {}),
       },
       hasOtherUserMessages: row.hasOtherUserMessages === 1,
-      hasInheritedForkMessages: row.hasInheritedForkMessages === 1,
     }));
   });
 
@@ -3550,16 +3539,8 @@ pending_approval_requests AS (
         ),
       ),
     ]);
-    // The ids query caps non-pinned rows at WINDOW+1 (newest first); the extra
-    // row reports hasMoreActivities. Pinned rows are exempt from the window.
-    const hasMoreActivities = activityIdRows.length > THREAD_DETAIL_ACTIVITY_WINDOW;
-    const boundedActivityIdRows = hasMoreActivities
-      ? activityIdRows.slice(0, THREAD_DETAIL_ACTIVITY_WINDOW)
-      : activityIdRows;
     const activityIds = [
-      ...new Set(
-        [...boundedActivityIdRows, ...pinnedActivityIdRows].map(({ activityId }) => activityId),
-      ),
+      ...new Set([...activityIdRows, ...pinnedActivityIdRows].map(({ activityId }) => activityId)),
     ];
     const activities: OrchestrationThreadActivity[] = [];
 
@@ -3585,86 +3566,16 @@ pending_approval_requests AS (
       }
     }
 
-    return {
-      activities: activities.toSorted(
-        (left, right) =>
-          (left.sequence ?? -1) - (right.sequence ?? -1) ||
-          left.createdAt.localeCompare(right.createdAt) ||
-          left.id.localeCompare(right.id),
-      ),
-      hasMoreActivities,
-    };
+    return activities.toSorted(
+      (left, right) =>
+        (left.sequence ?? -1) - (right.sequence ?? -1) ||
+        left.createdAt.localeCompare(right.createdAt) ||
+        left.id.localeCompare(right.id),
+    );
   });
 
-  const getThreadDetailByIdBounded = (
-    threadId: ThreadId,
-    bounds: ThreadDetailBounds | undefined,
-    activityRead: ThreadDetailActivityRead = { mode: "raw" },
-  ) =>
+  const getThreadDetailByIdBounded = (threadId: ThreadId, bounds: ThreadDetailBounds | undefined) =>
     Effect.gen(function* () {
-      // Client mode reads the projected activity read model (bounded ids query
-      // + batched payload decode). Raw mode decodes activity rows directly and
-      // honors the caller's activityKinds filter; an empty filter skips the
-      // activity query entirely.
-      const activitiesEffect =
-        activityRead.mode === "client"
-          ? listProjectedThreadActivities(threadId, bounds)
-          : Effect.all([
-              (activityRead.query?.activityKinds === undefined
-                ? bounds === undefined
-                  ? listThreadActivityRowsByThread({ threadId })
-                  : listThreadActivityRowsByThreadWindow({ threadId, ...bounds })
-                : activityRead.query.activityKinds.length === 0
-                  ? Effect.succeed([])
-                  : listThreadActivityRowsByThreadAndKinds({
-                      threadId,
-                      activityKinds: activityRead.query.activityKinds,
-                    })
-              ).pipe(
-                Effect.mapError(
-                  toPersistenceSqlOrDecodeError(
-                    "ProjectionSnapshotQuery.getThreadDetailById:listActivities:query",
-                    "ProjectionSnapshotQuery.getThreadDetailById:listActivities:decodeRows",
-                  ),
-                ),
-              ),
-              activityRead.query?.activityKinds === undefined
-                ? listPinnedThreadActivityRowsByThread({ threadId }).pipe(
-                    Effect.mapError(
-                      toPersistenceSqlOrDecodeError(
-                        "ProjectionSnapshotQuery.getThreadDetailById:listPinnedActivities:query",
-                        "ProjectionSnapshotQuery.getThreadDetailById:listPinnedActivities:decodeRows",
-                      ),
-                    ),
-                  )
-                : Effect.succeed([]),
-            ]).pipe(
-              Effect.map(([activityRows, pinnedActivityRows]) => {
-                // The retention window bounds the raw stream; pinned rows
-                // (retained approvals/requests) are exempt from it.
-                const hasMoreActivities =
-                  bounds === undefined && activityRows.length > THREAD_DETAIL_ACTIVITY_WINDOW;
-                const boundedActivityRows = hasMoreActivities
-                  ? activityRows.slice(activityRows.length - THREAD_DETAIL_ACTIVITY_WINDOW)
-                  : activityRows;
-                const activities = [
-                  ...new Map(
-                    [...boundedActivityRows, ...pinnedActivityRows].map(
-                      (row) => [row.activityId, row] as const,
-                    ),
-                  ).values(),
-                ]
-                  .toSorted(
-                    (left, right) =>
-                      (left.sequence ?? -1) - (right.sequence ?? -1) ||
-                      left.createdAt.localeCompare(right.createdAt) ||
-                      left.activityId.localeCompare(right.activityId),
-                  )
-                  .map((row) => projectActivityPayload(mapThreadActivityRow(row)));
-                return { activities, hasMoreActivities };
-              }),
-            );
-
       const [
         threadRow,
         messageRows,
@@ -3741,7 +3652,23 @@ pending_approval_requests AS (
         return Option.none<OrchestrationThread>();
       }
 
-      const { activities, hasMoreActivities } = activityEntries;
+      const hasMoreActivities =
+        bounds === undefined && activityRows.length > THREAD_DETAIL_ACTIVITY_WINDOW;
+      const boundedActivityRows = hasMoreActivities
+        ? activityRows.slice(activityRows.length - THREAD_DETAIL_ACTIVITY_WINDOW)
+        : activityRows;
+      const selectedActivityRows = [
+        ...new Map(
+          [...boundedActivityRows, ...pinnedActivityRows].map(
+            (row) => [row.activityId, row] as const,
+          ),
+        ).values(),
+      ].toSorted(
+        (left, right) =>
+          (left.sequence ?? -1) - (right.sequence ?? -1) ||
+          left.createdAt.localeCompare(right.createdAt) ||
+          left.activityId.localeCompare(right.activityId),
+      );
 
       const thread = {
         id: threadRow.value.threadId,
@@ -3796,7 +3723,21 @@ pending_approval_requests AS (
           return message;
         }),
         proposedPlans: proposedPlanRows.map(mapProposedPlanRow),
-        activities,
+        activities: selectedActivityRows.map((row) => {
+          const activity = {
+            id: row.activityId,
+            tone: row.tone,
+            kind: row.kind,
+            summary: row.summary,
+            payload: row.payload,
+            turnId: row.turnId,
+            createdAt: row.createdAt,
+          };
+          if (row.sequence !== null) {
+            return Object.assign(activity, { sequence: row.sequence });
+          }
+          return activity;
+        }),
         hasMoreActivities,
         checkpoints: checkpointRows.map((row) => ({
           turnId: row.turnId,

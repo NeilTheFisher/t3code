@@ -3406,7 +3406,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery windowed thread detail", (it) =
               aggregatedOutput: "failed command",
             },
             files: [{ path: "apps/server/src/failed.ts" }],
-            rawOutput: { content: "failed output" },
+            rawOutput: { output: "failed output" },
           },
         });
       }
