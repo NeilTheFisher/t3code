@@ -4,6 +4,7 @@ import type {
   ProviderOptionDescriptor,
   ProviderOptionSelection,
   RuntimeMode,
+  ServerConfig as T3ServerConfig,
 } from "@t3tools/contracts";
 import type { LegendListRenderItemProps } from "@legendapp/list/react-native";
 import { AnimatedLegendList } from "@legendapp/list/reanimated";
@@ -73,6 +74,59 @@ import {
  * provider headers remain user-collapsible.
  */
 const PRIMARY_PROVIDER_DRIVERS: ReadonlySet<string> = new Set(["claudeAgent", "codex"]);
+
+// Blocks in-thread model changes for providers that cannot resume their own
+// thread with a different model (`requiresNewThreadForModelChange`). Selecting
+// a *different* provider instance is never blocked: the server treats that as
+// a handoff and starts a fresh provider session with the prior conversation
+// replayed as context. Mirrors `getStartedThreadModelChangeBlockReason` in
+// `apps/web/src/components/ChatView.logic.ts:585`.
+function getStartedThreadModelChangeBlockReason(input: {
+  providers: ReadonlyArray<
+    Pick<
+      import("@t3tools/contracts").ServerProvider,
+      "instanceId" | "requiresNewThreadForModelChange"
+    > &
+      Partial<Pick<import("@t3tools/contracts").ServerProvider, "driver" | "continuation">>
+  >;
+  hasStartedSession: boolean;
+  currentModelSelection: ModelSelection;
+  nextModelSelection: ModelSelection;
+}): { title: string; description: string } | null {
+  if (!input.hasStartedSession) {
+    return null;
+  }
+  const currentProvider = input.providers.find(
+    (snapshot) => snapshot.instanceId === input.currentModelSelection.instanceId,
+  );
+  const nextProvider = input.providers.find(
+    (snapshot) => snapshot.instanceId === input.nextModelSelection.instanceId,
+  );
+
+  if (input.currentModelSelection.instanceId !== input.nextModelSelection.instanceId) {
+    const sameDriver =
+      currentProvider?.driver !== undefined && currentProvider.driver === nextProvider?.driver;
+    const currentKey = currentProvider?.continuation?.groupKey ?? null;
+    const nextKey = nextProvider?.continuation?.groupKey ?? null;
+    const sameContinuation = currentKey !== null && currentKey === nextKey;
+    if (!sameDriver || !sameContinuation) {
+      return null;
+    }
+  } else if (input.currentModelSelection.model === input.nextModelSelection.model) {
+    return null;
+  }
+
+  if (
+    currentProvider?.requiresNewThreadForModelChange !== true &&
+    nextProvider?.requiresNewThreadForModelChange !== true
+  ) {
+    return null;
+  }
+  return {
+    title: "Start a new chat to change models",
+    description: "This provider does not allow switching models after a conversation has started.",
+  };
+}
 /**
  * Keep measured row changes stable, but let catalog mutations use the list's
  * native bounds so a filtered catalog that underflows returns to the top.
@@ -308,6 +362,8 @@ type ThreadSettingsSessionProps = {
   readonly onUpdateOptionSelections: (selections: ReadonlyArray<ProviderOptionSelection>) => void;
   readonly runtimeMode: RuntimeMode;
   readonly onUpdateRuntimeMode: (mode: RuntimeMode) => void;
+  readonly serverConfig?: T3ServerConfig | null;
+  readonly hasStartedSession?: boolean;
 };
 
 export type ExistingThreadSettingsRouteSession = ThreadSettingsSessionProps & {
@@ -457,6 +513,18 @@ function ThreadSettingsSessionProvider(
 
   const pressModel = useCallback(
     (option: ModelOption) => {
+      if (props.serverConfig && props.hasStartedSession && props.selectedModel) {
+        const blockReason = getStartedThreadModelChangeBlockReason({
+          providers: props.serverConfig.providers,
+          hasStartedSession: props.hasStartedSession,
+          currentModelSelection: props.selectedModel,
+          nextModelSelection: option.selection,
+        });
+        if (blockReason) {
+          Alert.alert(blockReason.title, blockReason.description);
+          return;
+        }
+      }
       void Haptics.selectionAsync();
       setPendingModel((current) =>
         pendingModelAfterPress({
@@ -466,7 +534,7 @@ function ThreadSettingsSessionProvider(
         }),
       );
     },
-    [isApplied],
+    [isApplied, props.hasStartedSession, props.selectedModel, props.serverConfig],
   );
 
   const value = useMemo<ThreadSettingsSessionValue>(

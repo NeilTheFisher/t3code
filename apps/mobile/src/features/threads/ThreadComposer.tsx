@@ -466,12 +466,6 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     [props.serverConfig, currentModelSelection],
   );
   const providerGroups = useMemo(() => groupByProvider(modelOptions), [modelOptions]);
-  // An existing thread is bound to its harness: sessions can't move between
-  // provider instances, so the picker only offers the thread's own group.
-  const threadProviderGroups = useMemo(
-    () => providerGroups.filter((group) => group.providerKey === currentModelSelection.instanceId),
-    [providerGroups, currentModelSelection.instanceId],
-  );
   const currentModelOption =
     modelOptions.find(
       (option) =>
@@ -491,8 +485,10 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     () => ({
       ownerId: settingsOwnerId,
       environmentId: props.environmentId,
-      providerGroups: threadProviderGroups,
+      providerGroups,
       selectedModel: currentModelSelection,
+      serverConfig: props.serverConfig,
+      hasStartedSession: props.selectedThread.session !== null,
       onSelectModel: (option) => props.onUpdateModelSelection(option.selection),
       optionDescriptors: providerOptionDescriptors,
       onUpdateOptionSelections: (options) =>
@@ -506,8 +502,10 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
       props.onUpdateModelSelection,
       props.onUpdateRuntimeMode,
       providerOptionDescriptors,
+      props.serverConfig,
+      props.selectedThread.session,
+      providerGroups,
       settingsOwnerId,
-      threadProviderGroups,
     ],
   );
   const openSettings = useCallback(() => {
