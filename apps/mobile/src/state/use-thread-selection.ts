@@ -1,5 +1,5 @@
 import { useRoute, type RouteProp } from "@react-navigation/native";
-import { useMemo, useRef } from "react";
+import { useMemo } from "react";
 import {
   EnvironmentId,
   type OrchestrationThread,
@@ -84,11 +84,7 @@ function useResolvedThreadSelection(params: ThreadSelectionRouteParams | undefin
       threadId: ThreadId.make(threadId),
     };
   }, [routeParams.environmentId, routeParams.threadId]);
-  const lastRouteThreadRef = useRef<ScopedThreadRef | null>(null);
-  if (routeThreadRef !== null) {
-    lastRouteThreadRef.current = routeThreadRef;
-  }
-  const selectedThreadRef = routeThreadRef ?? lastRouteThreadRef.current;
+  const selectedThreadRef = routeThreadRef;
   const selectedThreadShell = useThreadShell(selectedThreadRef);
   const selectedThreadDetailState = useEnvironmentThread(
     selectedThreadRef?.environmentId ?? null,

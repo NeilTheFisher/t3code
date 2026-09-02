@@ -10,6 +10,7 @@ import type {
   OrchestrationSession,
   OrchestrationThread,
   OrchestrationThreadActivity,
+  ThreadId,
   TurnId,
 } from "@t3tools/contracts";
 
