@@ -1336,6 +1336,9 @@ function ChatViewContent(props: ChatViewProps) {
     reportFailure: false,
   });
   const startThreadTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
+  const refreshProviders = useAtomCommand(serverEnvironment.refreshProviders, {
+    reportFailure: false,
+  });
   const createAttachmentAssetUrl = useAtomQueryRunner(assetEnvironment.createUrl, {
     reportFailure: false,
   });
@@ -2360,6 +2363,49 @@ function ChatViewContent(props: ChatViewProps) {
     versionMismatchServerLabel,
   ]);
   const providerStatuses = serverConfig?.providers ?? EMPTY_PROVIDERS;
+
+  // Keep provider usage limits fresh: poll every minute, refresh at resetsAt, and right after a turn completes.
+  useEffect(() => {
+    if (!activeThreadEnvironmentId) return;
+    const interval = setInterval(() => {
+      void refreshProviders({ environmentId: activeThreadEnvironmentId }).catch(() => {});
+    }, 60_000);
+    return () => clearInterval(interval);
+  }, [activeThreadEnvironmentId, refreshProviders]);
+
+  useEffect(() => {
+    if (!activeThreadEnvironmentId) return;
+    const resetsAtStrings = providerStatuses.flatMap((provider) =>
+      (provider.usageLimits?.windows ?? [])
+        .map((window) => window.resetsAt)
+        .filter((value): value is string => typeof value === "string" && value.length > 0),
+    );
+    const nextResetMs = resetsAtStrings
+      .map((value) => Date.parse(value))
+      .filter((value) => Number.isFinite(value) && value > Date.now())
+      .sort((a, b) => a - b)[0];
+    if (nextResetMs === undefined) return;
+    const delay = nextResetMs - Date.now() + 2_000;
+    if (delay <= 0 || delay > 24 * 60 * 60 * 1000) return;
+    const timeout = setTimeout(() => {
+      void refreshProviders({ environmentId: activeThreadEnvironmentId }).catch(() => {});
+    }, delay);
+    return () => clearTimeout(timeout);
+  }, [providerStatuses, activeThreadEnvironmentId, refreshProviders]);
+
+  const prevActiveTurnIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const current = (activeThread?.session?.activeTurnId as string | undefined) ?? null;
+    const prev = prevActiveTurnIdRef.current;
+    prevActiveTurnIdRef.current = current;
+    if (prev && !current && activeThreadEnvironmentId) {
+      const timeout = setTimeout(() => {
+        void refreshProviders({ environmentId: activeThreadEnvironmentId }).catch(() => {});
+      }, 2_000);
+      return () => clearTimeout(timeout);
+    }
+  }, [activeThread?.session?.activeTurnId, activeThreadEnvironmentId, refreshProviders]);
+
   const unlockedSelectedProvider = resolveSelectableProvider(
     providerStatuses,
     selectedProviderByThreadId ?? threadProvider,
