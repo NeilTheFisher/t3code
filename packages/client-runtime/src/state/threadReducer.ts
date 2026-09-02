@@ -11,6 +11,7 @@ import type {
   OrchestrationThread,
   OrchestrationThreadActivity,
   ThreadPullRequestLink,
+  ThreadId,
   TurnId,
 } from "@t3tools/contracts";
 import { threadPullRequestKeysEqual } from "@t3tools/shared/threadPullRequests";
@@ -662,11 +663,11 @@ export function applyThreadDetailEvent(
 
       const retainedTurnIds = new Set(Arr.map(checkpoints, (entry) => entry.turnId));
       const messages = retainMessagesAfterRevert(
+        thread.id,
         thread.messages,
         retainedTurnIds,
         event.payload.turnCount,
       );
-      const messages = retainMessagesAfterRevert(thread.id, thread.messages, retainedTurnIds);
       const proposedPlans = pipe(
         thread.proposedPlans,
         Arr.filter((plan) => plan.turnId === null || retainedTurnIds.has(plan.turnId)),
