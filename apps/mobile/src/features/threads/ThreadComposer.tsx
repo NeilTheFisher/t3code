@@ -292,6 +292,8 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
 
   const [previewFile, setPreviewFile] = useState<FilePreviewSource | null>(null);
   const [previewVideo, setPreviewVideo] = useState<VideoPreviewSource | null>(null);
+  const [sendEpoch, setSendEpoch] = useState(0);
+  const composerDocumentKey = `${scopedThreadKey(props.environmentId, props.selectedThread.id)}:${sendEpoch}`;
   const hasContent = props.draftMessage.trim().length > 0 || props.draftAttachments.length > 0;
   // Only media belongs above the composer; every other file reads as its inline chip.
   const stripAttachments = useMemo(
@@ -488,6 +490,11 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     const threadKey = scopedThreadKey(props.environmentId, props.selectedThread.id);
     if (inFlightThreadIdsRef.current.has(threadKey)) return;
     inFlightThreadIdsRef.current.add(threadKey);
+    // Sending replaces the controlled document (the draft clears). Bump the
+    // document identity before the cleared draft can render, so the editor
+    // applies the empty document instead of stamping it behind a stale
+    // revision and rejecting it.
+    setSendEpoch((epoch) => epoch + 1);
     try {
       const messageId = await onSendMessage();
       if (messageId === null) {
@@ -746,6 +753,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
               layout={COMPOSER_LAYOUT_TRANSITION}
             >
               <ComposerEditor
+                key={composerDocumentKey}
                 draftKey={composerOwnerKey}
                 environmentId={props.environmentId}
                 onOpenMention={(path) => {
