@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { synthesizeSpeech, TTS_WAKE_TIMEOUT_MS, TtsServerError } from "./ttsClient";
+import {
+  synthesizeSpeech,
+  streamSpeechChunks,
+  TTS_WAKE_TIMEOUT_MS,
+  TtsServerError,
+} from "./ttsClient";
 
 const okResponse = () =>
   new Response(new Blob(["audio"]), { status: 200, headers: { "Content-Type": "audio/wav" } });
@@ -96,5 +101,44 @@ describe("synthesizeSpeech", () => {
     });
 
     expect(onWakingUp).not.toHaveBeenCalled();
+  });
+
+  it("streams PCM chunks progressively as they arrive", async () => {
+    const chunks = [new Uint8Array([1, 0]), new Uint8Array([2, 0, 3, 0])];
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(chunk);
+        controller.close();
+      },
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(stream, { status: 200, headers: { "Content-Type": "audio/pcm" } }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const received: number[] = [];
+    await streamSpeechChunks(
+      { text: "hi", voice: "af_heart", serverUrl: "http://127.0.0.1:8880" },
+      (chunk) => received.push(chunk.byteLength),
+    );
+
+    expect(received).toEqual([2, 4]);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.stream).toBe(true);
+    expect(body.response_format).toBe("pcm");
+  });
+
+  it("throws when the streaming response has no body", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      streamSpeechChunks(
+        { text: "hi", voice: "af_heart", serverUrl: "http://127.0.0.1:8880" },
+        () => {},
+      ),
+    ).rejects.toThrow("no stream body");
   });
 });
