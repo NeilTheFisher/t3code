@@ -130,6 +130,36 @@ describe("synthesizeSpeech", () => {
     expect(body.response_format).toBe("pcm");
   });
 
+  it("realigns reads that split a 16-bit sample across TCP boundaries", async () => {
+    // Three reads: the sample 0x0302 (bytes 2,3) is split across reads 1 and 2.
+    const reads = [
+      new Uint8Array([1, 0, 2]), // odd: last byte is the low half of 0x0302
+      new Uint8Array([3]), // odd: completes it
+      new Uint8Array([4, 0]), // even
+    ];
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const chunk of reads) controller.enqueue(chunk);
+        controller.close();
+      },
+    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(stream, { status: 200 })));
+
+    const received: number[][] = [];
+    await streamSpeechChunks(
+      { text: "hi", voice: "af_heart", serverUrl: "http://127.0.0.1:8880" },
+      (chunk) => received.push(Array.from(new Uint8Array(chunk))),
+    );
+
+    // First read yields its complete samples only; the carry byte joins the
+    // next read. Every delivered chunk is sample-aligned.
+    expect(received).toEqual([
+      [1, 0],
+      [2, 3],
+      [4, 0],
+    ]);
+  });
+
   it("throws when the streaming response has no body", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
