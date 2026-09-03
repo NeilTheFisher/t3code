@@ -10,7 +10,11 @@ import { useCallback } from "react";
 import { type MessageId } from "@t3tools/contracts";
 import { useClientSettings } from "./useSettings";
 import { useAudioPlayerStore } from "~/audioPlayerStore";
-import { markdownToSpokenText } from "~/lib/markdownToSpokenText";
+import {
+  markdownToSpokenText,
+  PARAGRAPH_PAUSE,
+  toSpokenParagraphs,
+} from "~/lib/markdownToSpokenText";
 import { estimateSpokenDuration, seekSchedule, type ChunkSpan } from "~/lib/ttsPlaybackMath";
 import { streamSpeechChunks, TTS_PCM_SAMPLE_RATE } from "~/lib/ttsClient";
 
@@ -44,6 +48,8 @@ interface PlayChunk {
   buffer: AudioBuffer;
   /** Message-time offset (seconds) where this chunk plays. */
   at: number;
+  /** Index of the spoken paragraph this chunk belongs to. */
+  paragraph: number;
 }
 
 interface EngineState {
@@ -66,6 +72,8 @@ interface EngineState {
   /** Ctx time when playback was suspended, if paused. */
   pausedAt: number | null;
   rate: number;
+  /** Paragraph time spans [start, end) in message-time, by index. */
+  paragraphSpans: Array<{ start: number; end: number }>;
 }
 
 let audioContext: AudioContext | null = null;
@@ -74,6 +82,20 @@ let abortController: AbortController | null = null;
 let scheduledSources: ScheduledSource[] = [];
 let engine: EngineState | null = null;
 let progressHandle: number | null = null;
+/** Opening words of each spoken paragraph, for DOM highlight matching. */
+let paragraphCues: string[] = [];
+
+/** Normalized text for cue matching: lowercase, whitespace collapsed. */
+function cueOf(paragraph: string): string {
+  return paragraph
+    .replace(/\[pause:[\d.]+s\]/g, " ")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .slice(0, 8)
+    .join(" ");
+}
 
 function ensureAudioGraph(): { ctx: AudioContext; gain: GainNode } {
   if (audioContext === null) {
@@ -127,6 +149,8 @@ function teardown(): void {
   }
   stopSources();
   engine = null;
+  paragraphCues = [];
+  useAudioPlayerStore.getState().setActiveParagraph(null, null);
 }
 
 function finishPlayback(): void {
@@ -140,7 +164,17 @@ function startProgressLoop(): void {
     const e = engine;
     if (e === null || e.paused || audioContext === null) return;
     const store = useAudioPlayerStore.getState();
-    store.setProgress(currentHead(), e.duration);
+    const head = currentHead();
+    store.setProgress(head, e.duration);
+
+    // Paragraph highlighting: the span containing the playback head.
+    const active = e.paragraphSpans.findIndex((span) => head >= span.start && head < span.end);
+    if ((store.activeParagraph ?? -1) !== active) {
+      store.setActiveParagraph(
+        active >= 0 ? active : null,
+        active >= 0 ? (paragraphCues[active] ?? null) : null,
+      );
+    }
 
     // Only settle when the stream is fully scheduled AND every source has
     // finished. During streaming, more sources may still arrive.
@@ -189,34 +223,29 @@ export function togglePausePlayback(): void {
 }
 
 /**
- * Seek to a message-time position (seconds). The chunk timeline is immutable;
- * only the schedule is rebuilt: the clock is re-anchored so message-time
- * `target` is "now", the chunk containing the target resumes mid-buffer, and
- * later chunks play whole at their original offsets.
+ * Rebuild the schedule from the chunk timeline anchored so that message-time
+ * `head` is "now" and played at `rate`. Shared by seek and live rate changes.
+ * Returns the message-time the reschedule started from (clamped to buffer).
  */
-export function seekPlayback(seconds: number): void {
+function rescheduleAt(head: number, rate: number): number {
   const e = engine;
   const { ctx, gain } = ensureAudioGraph();
-  if (e === null || !Number.isFinite(seconds)) return;
-  // The scrub bar is driven by the text-length estimate, which can exceed
-  // the synthesized-so-far extent while the stream is still filling. Seeking
-  // past the buffer would anchor the clock ahead of the arrival timeline
-  // and schedule later chunks at negative context times (which start()
-  // throws on), so clamp to the live edge.
-  const target = Math.min(Math.max(0, seconds), e.scheduledDuration);
+  if (e === null) return 0;
+  const target = Math.min(Math.max(0, head), e.scheduledDuration);
 
   stopSources();
+  e.rate = rate;
   e.baseTime = ctx.currentTime - target;
 
   const spans: ChunkSpan[] = e.chunks.map((chunk) => ({
     at: chunk.at,
-    duration: chunk.buffer.duration / e.rate,
+    duration: chunk.buffer.duration / rate,
   }));
   for (const { index, offset } of seekSchedule(spans, target)) {
     const chunk = e.chunks[index]!;
     const source = ctx.createBufferSource();
     source.buffer = chunk.buffer;
-    source.playbackRate.value = e.rate;
+    source.playbackRate.value = rate;
     source.connect(gain);
     const when = Math.max(0, e.baseTime + chunk.at);
     if (!Number.isFinite(when) || !Number.isFinite(offset)) continue;
@@ -224,7 +253,7 @@ export function seekPlayback(seconds: number): void {
     scheduledSources.push({
       source,
       startedAt: when,
-      duration: chunk.buffer.duration / e.rate - offset,
+      duration: chunk.buffer.duration / rate - offset,
     });
   }
 
@@ -233,6 +262,31 @@ export function seekPlayback(seconds: number): void {
   if (!e.paused && progressHandle === null) {
     startProgressLoop();
   }
+  return target;
+}
+
+/**
+ * Seek to a message-time position (seconds). The chunk timeline is immutable;
+ * only the schedule is rebuilt: the clock is re-anchored so message-time
+ * `target` is "now", the chunk containing the target resumes mid-buffer, and
+ * later chunks play whole at their original offsets.
+ */
+export function seekPlayback(seconds: number): void {
+  const e = engine;
+  if (e === null || !Number.isFinite(seconds)) return;
+  // The scrub bar is driven by the text-length estimate, which can exceed
+  // the synthesized-so-far extent while the stream is still filling. Seeking
+  // past the buffer would anchor the clock ahead of the arrival timeline
+  // and schedule later chunks at negative context times (which start()
+  // throws on); rescheduleAt clamps to the live edge.
+  rescheduleAt(seconds, e.rate);
+}
+
+/** Skip forward/backward by a relative message-time delta (seconds). */
+export function skipPlayback(delta: number): void {
+  const e = engine;
+  if (e === null) return;
+  rescheduleAt(currentHead() + delta, e.rate);
 }
 
 export function setPlaybackVolume(position: number): void {
@@ -241,9 +295,15 @@ export function setPlaybackVolume(position: number): void {
   useAudioPlayerStore.getState().setVolume(position);
 }
 
+/** Change playback rate live: the timeline is rescheduled from the current head. */
 export function setPlaybackRate(rate: number): void {
-  // Rate applies at schedule time; a live change would break position math, so
-  // this takes effect on the next playback.
+  const e = engine;
+  if (e === null) {
+    // Nothing playing yet; applies when playback starts.
+    useAudioPlayerStore.getState().setRate(rate);
+    return;
+  }
+  rescheduleAt(currentHead(), rate);
   useAudioPlayerStore.getState().setRate(rate);
 }
 
@@ -263,12 +323,13 @@ export async function startPlayback(
     return;
   }
 
+  const paragraphs = toSpokenParagraphs(text);
   const spoken = markdownToSpokenText(text);
   if (spoken.length === 0) {
     useAudioPlayerStore.getState().setError("Nothing to read aloud.", id);
     return;
   }
-
+  paragraphCues = paragraphs.map(cueOf);
   teardown();
   const controller = new AbortController();
   abortController = controller;
@@ -280,59 +341,82 @@ export async function startPlayback(
   if (ctx.state === "suspended") {
     await ctx.resume();
   }
+  // Estimated up front from text length so the scrub bar is stable while
+  // streaming; replaced by the exact extent when the stream completes.
+  const estimated = estimateSpokenDuration(spoken, rate);
   engine = {
     playingMessageId: id,
     chunks: [],
     scheduledDuration: 0,
-    // Estimated up front from text length so the scrub bar is stable while
-    // streaming; replaced by the exact extent when the stream completes.
-    duration: estimateSpokenDuration(spoken, rate),
+    duration: estimated,
     streamDone: false,
     baseTime: ctx.currentTime + 0.05,
     paused: false,
     pausedAt: null,
     rate,
+    paragraphSpans: [],
   };
   const e = engine;
 
+  /** Schedule one PCM chunk for paragraph `paragraph` at the playback head. */
+  const scheduleArriving = (chunkPcm: ArrayBuffer, paragraph: number) => {
+    if (engine !== e) return;
+    const buffer = pcmToAudioBuffer(ctx, chunkPcm);
+    const at = e.scheduledDuration;
+    e.chunks.push({ buffer, at, paragraph });
+
+    const span = e.paragraphSpans[paragraph];
+    if (span === undefined) {
+      e.paragraphSpans[paragraph] = { start: at, end: at };
+    }
+    e.scheduledDuration += buffer.duration / e.rate;
+    const cur = e.paragraphSpans[paragraph]!;
+    cur.end = e.scheduledDuration;
+
+    const when = e.baseTime + at;
+    // After a seek to the live edge, `when` can land slightly in the
+    // past; clamp to now. Never hand start() a non-finite time.
+    const safeWhen = Number.isFinite(when) ? Math.max(ctx.currentTime, when) : ctx.currentTime;
+    if (!Number.isFinite(safeWhen)) return;
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.playbackRate.value = e.rate;
+    source.connect(gain);
+    source.start(safeWhen);
+    scheduledSources.push({ source, startedAt: safeWhen, duration: buffer.duration / e.rate });
+
+    const s = useAudioPlayerStore.getState();
+    if (s.status === "loading" || s.status === "waking") {
+      s.setPlaying(id);
+      startProgressLoop();
+    }
+  };
+
+  // Synthesize paragraphs sequentially; one stream runs at a time, starting
+  // the next paragraph's request only after the previous audio is fully
+  // scheduled (the GPU outpaces realtime manyfold, so this still starts
+  // playing after only the first paragraph's latency).
   try {
-    await streamSpeechChunks(
-      {
-        text: spoken,
-        voice: options.voice,
-        serverUrl: options.serverUrl,
-        signal: controller.signal,
-        onWakingUp: () => {
-          useAudioPlayerStore.getState().setWaking(id);
+    for (let index = 0; index < paragraphs.length; index++) {
+      const paragraphText =
+        index === paragraphs.length - 1
+          ? paragraphs[index]!
+          : `${paragraphs[index]!} [pause:${PARAGRAPH_PAUSE}s]`;
+      if (paragraphText.replace(/\[pause:[\d.]+s\]/g, "").trim().length === 0) continue;
+      await streamSpeechChunks(
+        {
+          text: paragraphText,
+          voice: options.voice,
+          serverUrl: options.serverUrl,
+          signal: controller.signal,
+          onWakingUp: () => {
+            useAudioPlayerStore.getState().setWaking(id);
+          },
         },
-      },
-      (chunkPcm) => {
-        if (engine !== e) return;
-        const buffer = pcmToAudioBuffer(ctx, chunkPcm);
-        const at = e.scheduledDuration;
-        e.chunks.push({ buffer, at });
-        e.scheduledDuration += buffer.duration / e.rate;
-
-        const when = e.baseTime + at;
-        // After a seek to the live edge, `when` can land slightly in the
-        // past; clamp to now. Never hand start() a non-finite time.
-        const safeWhen = Number.isFinite(when) ? Math.max(ctx.currentTime, when) : ctx.currentTime;
-        if (!Number.isFinite(safeWhen)) return;
-        const source = ctx.createBufferSource();
-        source.buffer = buffer;
-        source.playbackRate.value = e.rate;
-        source.connect(gain);
-        source.start(safeWhen);
-        scheduledSources.push({ source, startedAt: safeWhen, duration: buffer.duration / e.rate });
-
-        const s = useAudioPlayerStore.getState();
-        if (s.status === "loading" || s.status === "waking") {
-          s.setPlaying(id);
-          startProgressLoop();
-        }
-      },
-    );
-    abortController = null; // stream ended; progress loop may now settle idle
+        (chunkPcm) => scheduleArriving(chunkPcm, index),
+      );
+    }
+    abortController = null; // all streams done; progress loop may now settle idle
     // Snap the display duration to the exact synthesized extent.
     if (engine === e) {
       e.streamDone = true;

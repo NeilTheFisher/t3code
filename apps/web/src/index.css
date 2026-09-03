@@ -1993,3 +1993,18 @@ code {
     transform: scaleX(0.9);
   }
 }
+
+/* TTS paragraph highlight: the assistant block currently being spoken. */
+.tts-active-paragraph {
+  transition:
+    background-color 300ms ease,
+    border-radius 300ms ease;
+  background-color: color-mix(in srgb, var(--primary) 7%, transparent);
+  border-radius: 0.375rem;
+  box-shadow: inset 2px 0 0 0 color-mix(in srgb, var(--primary) 45%, transparent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .tts-active-paragraph {
+    transition: none;
+  }
+}

@@ -3,8 +3,17 @@
  * player store so playback (and its controls) survive thread navigation.
  * Auto-hides when idle; scrub/volume/speed act on the singleton audio element.
  */
-import { useCallback } from "react";
-import { Loader2Icon, PauseIcon, PlayIcon, Volume2Icon, VolumeXIcon, XIcon } from "lucide-react";
+import { useCallback, useState } from "react";
+import {
+  Loader2Icon,
+  PauseIcon,
+  PlayIcon,
+  RotateCcwIcon,
+  RotateCwIcon,
+  Volume2Icon,
+  VolumeXIcon,
+  XIcon,
+} from "lucide-react";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
@@ -13,6 +22,7 @@ import {
   seekPlayback,
   setPlaybackRate,
   setPlaybackVolume,
+  skipPlayback,
   stopPlayback,
   togglePausePlayback,
 } from "~/hooks/useTtsPlayer";
@@ -39,8 +49,45 @@ export function MiniPlayerBar() {
   const isPlaying = status === "playing";
   const isLoading = status === "loading" || status === "waking";
 
-  const handleScrub = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
-    seekPlayback(Number(event.target.value));
+  // The thumb drag stays local for smoothness (a live seek per input event
+  // would stop/reschedule sources and stutter the native thumb); the seek is
+  // committed once when the drag releases. Keyboard input seeks immediately.
+  const [scrubValue, setScrubValue] = useState<number | null>(null);
+
+  const handleScrubStart = useCallback((event: React.PointerEvent<HTMLInputElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setScrubValue(Number(event.currentTarget.value));
+  }, []);
+
+  const handleScrubMove = useCallback(
+    (event: React.PointerEvent<HTMLInputElement>) => {
+      if (scrubValue === null) return;
+      setScrubValue(Number(event.currentTarget.value));
+    },
+    [scrubValue],
+  );
+
+  const commitScrub = useCallback(() => {
+    if (scrubValue === null) return;
+    seekPlayback(scrubValue);
+    setScrubValue(null);
+  }, [scrubValue]);
+
+  const cancelScrub = useCallback(() => {
+    setScrubValue(null);
+  }, []);
+
+  // Keyboard: arrows/page jump without pointer capture; commit immediately.
+  const handleScrubKey = useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
+    const target = event.currentTarget;
+    requestAnimationFrame(() => {
+      const value = Number(target.value);
+      if (Number.isFinite(value)) {
+        setScrubValue(null);
+        seekPlayback(value);
+      }
+    });
   }, []);
 
   const handleVolume = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
@@ -91,8 +138,18 @@ export function MiniPlayerBar() {
               : (title ?? "Audio")}
           </p>
           <div className="flex items-center gap-2">
+            <Button
+              aria-label="Back 10 seconds"
+              disabled={isLoading}
+              size="icon-xs"
+              variant="ghost"
+              onClick={() => skipPlayback(-10)}
+            >
+              <RotateCcwIcon className="size-3.5" />
+              <span className="sr-only">Back 10 seconds</span>
+            </Button>
             <span className="w-8 text-right text-[10px] tabular-nums text-muted-foreground">
-              {formatTime(currentTime)}
+              {formatTime(scrubValue ?? currentTime)}
             </span>
             <input
               aria-label="Seek"
@@ -100,14 +157,28 @@ export function MiniPlayerBar() {
               disabled={isLoading}
               max={Math.max(duration, 0.1)}
               min={0}
-              onChange={handleScrub}
-              step={0.1}
+              onKeyDown={handleScrubKey}
+              onLostPointerCapture={cancelScrub}
+              onPointerDown={handleScrubStart}
+              onPointerMove={handleScrubMove}
+              onPointerUp={commitScrub}
+              step="any"
               type="range"
-              value={Math.min(currentTime, duration || currentTime)}
+              value={scrubValue ?? Math.min(currentTime, duration || currentTime)}
             />
             <span className="w-8 text-[10px] tabular-nums text-muted-foreground">
               {formatTime(duration)}
             </span>
+            <Button
+              aria-label="Forward 10 seconds"
+              disabled={isLoading}
+              size="icon-xs"
+              variant="ghost"
+              onClick={() => skipPlayback(10)}
+            >
+              <RotateCwIcon className="size-3.5" />
+              <span className="sr-only">Forward 10 seconds</span>
+            </Button>
           </div>
         </div>
         <Button aria-label="Stop and close" size="icon-xs" variant="ghost" onClick={stopPlayback}>

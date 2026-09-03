@@ -3,16 +3,20 @@ import { describe, expect, it } from "vite-plus/test";
 import { markdownToSpokenText } from "./markdownToSpokenText";
 
 describe("markdownToSpokenText", () => {
-  it("strips heading markers", () => {
-    expect(markdownToSpokenText("## Section title\nBody text.")).toBe("Section title Body text.");
+  it("strips heading markers and pauses after the heading", () => {
+    expect(markdownToSpokenText("## Section title\nBody text.")).toBe(
+      "Section title [pause:0.8s] Body text.",
+    );
   });
 
   it("unwraps bold and italic", () => {
     expect(markdownToSpokenText("**bold** and *ital* and _em_")).toBe("bold and ital and em");
   });
 
-  it("drops fenced code blocks entirely", () => {
-    expect(markdownToSpokenText("before\n```ts\nconst x = 1;\n```\nafter")).toBe("before after");
+  it("replaces fenced code blocks with a pause", () => {
+    expect(markdownToSpokenText("before\n```ts\nconst x = 1;\n```\nafter")).toBe(
+      "before [pause:0.5s] after",
+    );
   });
 
   it("keeps inline code text without backticks", () => {
@@ -33,8 +37,22 @@ describe("markdownToSpokenText", () => {
     expect(markdownToSpokenText("go to https://example.com now")).toBe("go to now");
   });
 
-  it("strips list bullets and ordered markers", () => {
-    expect(markdownToSpokenText("- one\n- two\n1. three\n2) four")).toBe("one two three four");
+  it("strips list bullets and pauses after each item", () => {
+    expect(markdownToSpokenText("- one\n- two\n1. three\n2) four")).toBe(
+      "one [pause:0.4s] two [pause:0.4s] three [pause:0.4s] four [pause:0.4s]",
+    );
+  });
+
+  it("strips task-list checkboxes", () => {
+    expect(markdownToSpokenText("- [x] done\n- [ ] todo")).toBe(
+      "done [pause:0.4s] todo [pause:0.4s]",
+    );
+  });
+
+  it("pauses between paragraphs", () => {
+    expect(markdownToSpokenText("First paragraph.\n\nSecond paragraph.")).toBe(
+      "First paragraph. [pause:0.6s] Second paragraph.",
+    );
   });
 
   it("strips blockquote markers", () => {
@@ -45,12 +63,12 @@ describe("markdownToSpokenText", () => {
     expect(markdownToSpokenText("> [!NOTE]\n> This is a note.")).toBe("NOTE. This is a note.");
   });
 
-  it("strips strikethrough and task-list checkboxes", () => {
-    expect(markdownToSpokenText("~~gone~~\n- [x] done\n- [ ] todo")).toBe("gone done todo");
+  it("strips strikethrough", () => {
+    expect(markdownToSpokenText("~~gone~~")).toBe("gone");
   });
 
   it("collapses whitespace into single spaces", () => {
-    expect(markdownToSpokenText("a\n\n\n   b\t\tc")).toBe("a b c");
+    expect(markdownToSpokenText("a\n\n\n   b\t\tc")).toBe(`a [pause:0.6s] b c`);
   });
 
   it("passes plain text through unchanged", () => {

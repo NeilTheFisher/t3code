@@ -101,6 +101,7 @@ import {
 import { MessageCopyButton } from "./MessageCopyButton";
 import { MessageForkButton, type ForkMessageConfig } from "./MessageForkButton";
 import { MessagePlayButton } from "./MessagePlayButton";
+import { TtsParagraphHighlight } from "./TtsParagraphHighlight";
 import {
   computeStableMessagesTimelineRows,
   deriveMessagesTimelineRows,
@@ -1295,6 +1296,7 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
           onUseArtifactTemplate={ctx.onUseArtifactTemplate}
           onImageExpand={ctx.onImageExpand}
         />
+        <TtsParagraphHighlight messageId={row.message.id} />
         <AssistantChangedFilesSection
           turnSummary={row.assistantTurnDiffSummary}
           routeThreadKey={ctx.routeThreadKey}

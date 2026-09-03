@@ -23,6 +23,10 @@ interface AudioPlayerState {
   rate: number;
   /** Excerpt of the synthesized text for display in the mini-player. */
   title: string | null;
+  /** Index of the paragraph currently being spoken, for message highlighting. */
+  activeParagraph: number | null;
+  /** Normalized opening words of the active paragraph, for DOM matching. */
+  activeParagraphCue: string | null;
 }
 
 interface AudioPlayerActions {
@@ -35,6 +39,7 @@ interface AudioPlayerActions {
   setProgress: (currentTime: number, duration: number) => void;
   setVolume: (volume: number) => void;
   setRate: (rate: number) => void;
+  setActiveParagraph: (index: number | null, cue: string | null) => void;
 }
 export const useAudioPlayerStore = create<AudioPlayerState & AudioPlayerActions>((set) => ({
   status: "idle",
@@ -46,17 +51,27 @@ export const useAudioPlayerStore = create<AudioPlayerState & AudioPlayerActions>
   volume: 1,
   rate: 1,
   title: null,
+  activeParagraph: null,
+  activeParagraphCue: null,
   setLoading: (id, title) =>
-    set({ status: "loading", playingMessageId: id, error: null, errorMessageId: null, title }),
+    set({
+      status: "loading",
+      playingMessageId: id,
+      error: null,
+      errorMessageId: null,
+      title,
+      activeParagraph: null,
+    }),
   setWaking: (id) =>
     set({ status: "waking", playingMessageId: id, error: null, errorMessageId: null }),
   setPlaying: (id) =>
     set({ status: "playing", playingMessageId: id, error: null, errorMessageId: null }),
   setPaused: () => set({ status: "paused" }),
-  setIdle: () => set({ status: "idle", playingMessageId: null }),
+  setIdle: () => set({ status: "idle", playingMessageId: null, activeParagraph: null }),
   setError: (message, id) =>
     set({ status: "idle", playingMessageId: null, error: message, errorMessageId: id }),
   setProgress: (currentTime, duration) => set({ currentTime, duration }),
   setVolume: (volume) => set({ volume }),
   setRate: (rate) => set({ rate }),
+  setActiveParagraph: (index, cue) => set({ activeParagraph: index, activeParagraphCue: cue }),
 }));
