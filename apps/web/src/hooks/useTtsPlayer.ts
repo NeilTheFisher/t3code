@@ -77,6 +77,9 @@ export async function startPlayback(
       voice: options.voice,
       serverUrl: options.serverUrl,
       signal: controller.signal,
+      onWakingUp: () => {
+        useAudioPlayerStore.getState().setWaking(id);
+      },
     });
   } catch (error) {
     if (controller.signal.aborted) {
