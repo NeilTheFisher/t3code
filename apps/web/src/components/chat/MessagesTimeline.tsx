@@ -143,7 +143,6 @@ import {
 import { useAssistantCitationTarget, type CitationHistoryPage } from "./useAssistantCitationTarget";
 import { MessageForkButton, type ForkMessageConfig } from "./MessageForkButton";
 import { MessagePlayButton } from "./MessagePlayButton";
-import { stopPlayback as stopTtsPlayback } from "~/hooks/useTtsPlayer";
 import {
   computeStableMessagesTimelineRows,
   deriveMessagesTimelineRowsWithState,
@@ -527,14 +526,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     },
     [expandedWorkGroupIds, suspendEndScrollMaintenanceForDisclosure],
   );
-
-  // Stop playback on thread navigation: this timeline is keyed by thread id,
-  // so the cleanup runs exactly when the active thread changes.
-  useEffect(() => {
-    return () => {
-      stopTtsPlayback();
-    };
-  }, []);
 
   // An in-session interrupt leaves its turn expanded so the user keeps their
   // place; the next turn (or a reload, since this is local state) folds it.
