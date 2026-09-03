@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { estimateSpokenDuration, seekSchedule } from "./ttsPlaybackMath";
+import { convergeEstimatedDuration, estimateSpokenDuration, seekSchedule } from "./ttsPlaybackMath";
 
 describe("estimateSpokenDuration", () => {
   it("estimates ~15 chars per second at 1x", () => {
@@ -17,39 +17,39 @@ describe("estimateSpokenDuration", () => {
   });
 });
 
-describe("seekSchedule", () => {
-  const chunks = [
-    { at: 0, duration: 2 },
-    { at: 2, duration: 2 },
-    { at: 4, duration: 2 },
-    { at: 6, duration: 2 },
-  ];
-
-  it("drops chunks before the target and resumes mid-chunk", () => {
-    expect(seekSchedule(chunks, 3)).toEqual([
-      { index: 1, offset: 1 },
-      { index: 2, offset: 0 },
-      { index: 3, offset: 0 },
-    ]);
+describe("convergeEstimatedDuration", () => {
+  it("uses observed chars/sec once a paragraph has synthesized", () => {
+    // 60 chars synthesized into 3s of audio => 20 chars/sec observed.
+    const total = convergeEstimatedDuration({
+      scheduled: 3,
+      spokenCharsSynthesized: 60,
+      remainingChars: 40,
+      fallbackCharsPerSecond: 15,
+      speed: 1,
+    });
+    expect(total).toBe(5); // 3s known + 40/20 estimated
   });
 
-  it("keeps the current chunk when seeking to a chunk boundary", () => {
-    expect(seekSchedule(chunks, 2)).toEqual([
-      { index: 1, offset: 0 },
-      { index: 2, offset: 0 },
-      { index: 3, offset: 0 },
-    ]);
+  it("falls back to the base rate before any evidence", () => {
+    const total = convergeEstimatedDuration({
+      scheduled: 0,
+      spokenCharsSynthesized: 0,
+      remainingChars: 45,
+      fallbackCharsPerSecond: 15,
+      speed: 1,
+    });
+    expect(total).toBe(3);
   });
 
-  it("returns everything when seeking to the start", () => {
-    expect(seekSchedule(chunks, 0).map((e) => e.index)).toEqual([0, 1, 2, 3]);
-  });
-
-  it("drops everything when seeking past the end", () => {
-    expect(seekSchedule(chunks, 99)).toEqual([]);
-  });
-
-  it("handles an empty timeline", () => {
-    expect(seekSchedule([], 1)).toEqual([]);
+  it("returns the known extent when nothing remains", () => {
+    expect(
+      convergeEstimatedDuration({
+        scheduled: 4.5,
+        spokenCharsSynthesized: 100,
+        remainingChars: 0,
+        fallbackCharsPerSecond: 15,
+        speed: 2,
+      }),
+    ).toBe(4.5);
   });
 });

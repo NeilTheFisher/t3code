@@ -6,8 +6,8 @@
 
 /**
  * Kokoro synthesizes English at roughly this many characters per second of
- * audio at 1x speed. Used to estimate the total duration before the stream
- * finishes, so the scrub bar is stable instead of growing chunk by chunk.
+ * audio. Used to estimate the total duration before the stream finishes, so
+ * the scrub bar is stable instead of growing chunk by chunk.
  */
 export const TTS_CHARS_PER_SECOND = 15;
 
@@ -15,6 +15,26 @@ export const TTS_CHARS_PER_SECOND = 15;
 export function estimateSpokenDuration(text: string, rate: number): number {
   if (rate <= 0) return 0;
   return text.length / (TTS_CHARS_PER_SECOND * rate);
+}
+
+/**
+ * Converging estimate: known audio extent plus the estimated remainder,
+ * scaled by the observed chars/sec from already-synthesized text. Early
+ * paragraphs calibrate the estimate so the scrub bar rarely snaps at the end.
+ */
+export function convergeEstimatedDuration(params: {
+  scheduled: number;
+  spokenCharsSynthesized: number;
+  remainingChars: number;
+  fallbackCharsPerSecond: number;
+  speed: number;
+}): number {
+  const { scheduled, spokenCharsSynthesized, remainingChars, fallbackCharsPerSecond, speed } =
+    params;
+  if (remainingChars <= 0) return scheduled;
+  const observed = spokenCharsSynthesized > 0 ? spokenCharsSynthesized / scheduled : 0;
+  const charsPerSecond = observed > 0 ? observed * speed : fallbackCharsPerSecond * speed;
+  return scheduled + remainingChars / charsPerSecond;
 }
 
 export interface ChunkSpan {

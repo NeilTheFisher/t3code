@@ -3,7 +3,7 @@
  * player store so playback (and its controls) survive thread navigation.
  * Auto-hides when idle; scrub/volume/speed act on the singleton audio element.
  */
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   Loader2Icon,
   PauseIcon,
@@ -28,7 +28,6 @@ import {
 } from "~/hooks/useTtsPlayer";
 
 const RATE_OPTIONS = [0.75, 1, 1.25, 1.5, 2] as const;
-const TITLE_MAX_CHARS = 80;
 
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
@@ -38,7 +37,6 @@ function formatTime(seconds: number): string {
 }
 export function MiniPlayerBar() {
   const status = useAudioPlayerStore((s) => s.status);
-  const playingMessageId = useAudioPlayerStore((s) => s.playingMessageId);
   const currentTime = useAudioPlayerStore((s) => s.currentTime);
   const duration = useAudioPlayerStore((s) => s.duration);
   const volume = useAudioPlayerStore((s) => s.volume);
@@ -53,41 +51,34 @@ export function MiniPlayerBar() {
   // would stop/reschedule sources and stutter the native thumb); the seek is
   // committed once when the drag releases. Keyboard input seeks immediately.
   const [scrubValue, setScrubValue] = useState<number | null>(null);
+  const draggingRef = useRef(false);
 
-  const handleScrubStart = useCallback((event: React.PointerEvent<HTMLInputElement>) => {
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) return;
-    event.currentTarget.setPointerCapture(event.pointerId);
-    setScrubValue(Number(event.currentTarget.value));
+  // While dragging, only track the thumb; commit the seek on release.
+  const handleScrubChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const value = Number(event.currentTarget.value);
+    if (draggingRef.current) {
+      setScrubValue(value);
+      return;
+    }
+    if (Number.isFinite(value)) {
+      seekPlayback(value);
+    }
   }, []);
 
-  const handleScrubMove = useCallback(
-    (event: React.PointerEvent<HTMLInputElement>) => {
-      if (scrubValue === null) return;
-      setScrubValue(Number(event.currentTarget.value));
-    },
-    [scrubValue],
-  );
+  const handleScrubPointerDown = useCallback(() => {
+    draggingRef.current = true;
+  }, []);
 
   const commitScrub = useCallback(() => {
+    draggingRef.current = false;
     if (scrubValue === null) return;
     seekPlayback(scrubValue);
     setScrubValue(null);
   }, [scrubValue]);
 
   const cancelScrub = useCallback(() => {
+    draggingRef.current = false;
     setScrubValue(null);
-  }, []);
-
-  // Keyboard: arrows/page jump without pointer capture; commit immediately.
-  const handleScrubKey = useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
-    const target = event.currentTarget;
-    requestAnimationFrame(() => {
-      const value = Number(target.value);
-      if (Number.isFinite(value)) {
-        setScrubValue(null);
-        seekPlayback(value);
-      }
-    });
   }, []);
 
   const handleVolume = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
@@ -157,10 +148,9 @@ export function MiniPlayerBar() {
               disabled={isLoading}
               max={Math.max(duration, 0.1)}
               min={0}
-              onKeyDown={handleScrubKey}
-              onLostPointerCapture={cancelScrub}
-              onPointerDown={handleScrubStart}
-              onPointerMove={handleScrubMove}
+              onBlur={cancelScrub}
+              onChange={handleScrubChange}
+              onPointerDown={handleScrubPointerDown}
               onPointerUp={commitScrub}
               step="any"
               type="range"
