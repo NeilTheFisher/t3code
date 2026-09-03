@@ -1,13 +1,22 @@
 /**
  * Module-level singleton TTS player: one `<audio>` element + in-flight
- * AbortController shared app-wide, so audio survives row unmounts and a new
- * play supersedes the current one. Status mirrors into `useAudioPlayerStore`.
+ * AbortController shared app-wide, so audio survives row unmounts and thread
+ * navigation, and a new play supersedes the current one. Status mirrors into
+ * `useAudioPlayerStore`, which the global mini-player also renders from.
  */
 import { useCallback } from "react";
 import { type MessageId } from "@t3tools/contracts";
 import { useClientSettings } from "./useSettings";
 import { useAudioPlayerStore } from "~/audioPlayerStore";
 import { synthesizeSpeech } from "~/lib/ttsClient";
+
+const TITLE_MAX_CHARS = 80;
+
+/** Display excerpt of the synthesized text, prepared once at play time. */
+function excerptTitle(text: string): string {
+  const trimmed = text.trim().replace(/\s+/g, " ");
+  return trimmed.length > TITLE_MAX_CHARS ? `${trimmed.slice(0, TITLE_MAX_CHARS - 1)}…` : trimmed;
+}
 
 let audioElement: HTMLAudioElement | null = null;
 let abortController: AbortController | null = null;
@@ -16,13 +25,37 @@ let currentBlobUrl: string | null = null;
 function ensureAudioElement(): HTMLAudioElement {
   if (audioElement === null) {
     audioElement = new Audio();
+    const store = () => useAudioPlayerStore.getState();
     audioElement.addEventListener("ended", () => {
       stopPlayback();
     });
     audioElement.addEventListener("error", () => {
-      const store = useAudioPlayerStore.getState();
-      store.setError("Audio playback failed.", store.playingMessageId);
+      store().setError("Audio playback failed.", store().playingMessageId);
       teardown();
+    });
+    // Mirror position/duration into the store for the mini-player's scrub bar.
+    audioElement.addEventListener("timeupdate", () => {
+      const el = audioElement;
+      if (el === null) return;
+      store().setProgress(el.currentTime, Number.isFinite(el.duration) ? el.duration : 0);
+    });
+    audioElement.addEventListener("loadedmetadata", () => {
+      const el = audioElement;
+      if (el === null) return;
+      store().setProgress(0, Number.isFinite(el.duration) ? el.duration : 0);
+    });
+    audioElement.addEventListener("pause", () => {
+      const s = store();
+      // `ended` already transitions to idle; only surface mid-playback pauses.
+      if (s.status === "playing" && audioElement !== null && !audioElement.ended) {
+        s.setPaused();
+      }
+    });
+    audioElement.addEventListener("play", () => {
+      const s = store();
+      if (s.status === "paused" && s.playingMessageId !== null) {
+        s.setPlaying(s.playingMessageId);
+      }
     });
   }
   return audioElement;
@@ -49,6 +82,38 @@ export function stopPlayback(): void {
   useAudioPlayerStore.getState().setIdle();
 }
 
+/** Toggle pause/resume of the shared element; no-op when idle/loading. */
+export function togglePausePlayback(): void {
+  const el = audioElement;
+  const s = useAudioPlayerStore.getState();
+  if (el === null || s.status !== "playing") return;
+  if (el.paused) {
+    void el.play();
+  } else {
+    el.pause();
+  }
+}
+
+/** Seek the shared element (seconds); no-op when nothing is loaded. */
+export function seekPlayback(seconds: number): void {
+  if (audioElement !== null && Number.isFinite(seconds)) {
+    audioElement.currentTime = Math.max(0, seconds);
+  }
+}
+
+export function setPlaybackVolume(volume: number): void {
+  const el = ensureAudioElement();
+  el.volume = Math.min(1, Math.max(0, volume));
+  el.muted = el.volume === 0;
+  useAudioPlayerStore.getState().setVolume(el.volume);
+}
+
+export function setPlaybackRate(rate: number): void {
+  const el = ensureAudioElement();
+  el.playbackRate = rate;
+  useAudioPlayerStore.getState().setRate(rate);
+}
+
 export interface PlayOptions {
   voice: string;
   serverUrl: string;
@@ -68,7 +133,8 @@ export async function startPlayback(
   teardown();
   const controller = new AbortController();
   abortController = controller;
-  store.setLoading(id);
+  const { volume, rate } = store;
+  store.setLoading(id, excerptTitle(text));
 
   let blob: Blob;
   try {
@@ -102,6 +168,9 @@ export async function startPlayback(
   currentBlobUrl = blobUrl;
   const audio = ensureAudioElement();
   audio.src = blobUrl;
+  audio.volume = volume;
+  audio.muted = volume === 0;
+  audio.playbackRate = rate;
 
   try {
     await audio.play();
