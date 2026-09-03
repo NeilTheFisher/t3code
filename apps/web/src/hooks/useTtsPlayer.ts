@@ -8,6 +8,7 @@ import { useCallback } from "react";
 import { type MessageId } from "@t3tools/contracts";
 import { useClientSettings } from "./useSettings";
 import { useAudioPlayerStore } from "~/audioPlayerStore";
+import { markdownToSpokenText } from "~/lib/markdownToSpokenText";
 import { synthesizeSpeech } from "~/lib/ttsClient";
 
 const TITLE_MAX_CHARS = 80;
@@ -86,7 +87,7 @@ export function stopPlayback(): void {
 export function togglePausePlayback(): void {
   const el = audioElement;
   const s = useAudioPlayerStore.getState();
-  if (el === null || s.status !== "playing") return;
+  if (el === null || (s.status !== "playing" && s.status !== "paused")) return;
   if (el.paused) {
     void el.play();
   } else {
@@ -101,11 +102,21 @@ export function seekPlayback(seconds: number): void {
   }
 }
 
-export function setPlaybackVolume(volume: number): void {
+/**
+ * Perceptual volume curve: slider position -> amplitude. Position 0.5 sounds
+ * "half as loud" at ~12% amplitude, matching how OS volume sliders behave.
+ */
+const VOLUME_EXP = 3;
+export function sliderToVolume(position: number): number {
+  const pos = Math.min(1, Math.max(0, position));
+  return pos ** VOLUME_EXP;
+}
+
+export function setPlaybackVolume(position: number): void {
   const el = ensureAudioElement();
-  el.volume = Math.min(1, Math.max(0, volume));
+  el.volume = sliderToVolume(position);
   el.muted = el.volume === 0;
-  useAudioPlayerStore.getState().setVolume(el.volume);
+  useAudioPlayerStore.getState().setVolume(position);
 }
 
 export function setPlaybackRate(rate: number): void {
@@ -134,12 +145,18 @@ export async function startPlayback(
   const controller = new AbortController();
   abortController = controller;
   const { volume, rate } = store;
-  store.setLoading(id, excerptTitle(text));
+  const spoken = markdownToSpokenText(text);
+  if (spoken.length === 0) {
+    // e.g. a message that was only a fenced code block.
+    useAudioPlayerStore.getState().setError("Nothing to read aloud.", id);
+    return;
+  }
+  store.setLoading(id, excerptTitle(spoken));
 
   let blob: Blob;
   try {
     blob = await synthesizeSpeech({
-      text,
+      text: spoken,
       voice: options.voice,
       serverUrl: options.serverUrl,
       signal: controller.signal,
@@ -168,8 +185,9 @@ export async function startPlayback(
   currentBlobUrl = blobUrl;
   const audio = ensureAudioElement();
   audio.src = blobUrl;
-  audio.volume = volume;
-  audio.muted = volume === 0;
+  const amplitude = sliderToVolume(volume);
+  audio.volume = amplitude;
+  audio.muted = amplitude === 0;
   audio.playbackRate = rate;
 
   try {
