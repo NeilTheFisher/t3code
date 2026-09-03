@@ -19,6 +19,8 @@ export type TtsRequest = {
   text: string;
   voice: string;
   serverUrl: string;
+  /** Synthesis speed: the server synthesizes faster/slower speech, pitch intact. */
+  speed?: number | undefined;
   signal?: AbortSignal | undefined;
   /** Called once when the first 503 is seen — lets the UI show a "waking" hint. */
   onWakingUp?: (() => void) | undefined;
@@ -53,6 +55,7 @@ async function postSpeech(req: TtsRequest, stream: boolean): Promise<Response> {
       input: req.text,
       voice: req.voice,
       response_format: "pcm",
+      speed: req.speed,
       stream: stream || undefined,
     }),
   };

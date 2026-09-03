@@ -15,7 +15,13 @@ import {
   PARAGRAPH_PAUSE,
   toSpokenParagraphs,
 } from "~/lib/markdownToSpokenText";
-import { estimateSpokenDuration, seekSchedule, type ChunkSpan } from "~/lib/ttsPlaybackMath";
+import {
+  convergeEstimatedDuration,
+  estimateSpokenDuration,
+  seekSchedule,
+  TTS_CHARS_PER_SECOND,
+  type ChunkSpan,
+} from "~/lib/ttsPlaybackMath";
 import { streamSpeechChunks, TTS_PCM_SAMPLE_RATE } from "~/lib/ttsClient";
 
 const TITLE_MAX_CHARS = 80;
@@ -74,6 +80,12 @@ interface EngineState {
   rate: number;
   /** Paragraph time spans [start, end) in message-time, by index. */
   paragraphSpans: Array<{ start: number; end: number }>;
+  /** Character count of each spoken paragraph, for duration convergence. */
+  spokenCharCounts: number[];
+  /** Characters whose synthesis has completed (paragraph granularity). */
+  synthesizedChars: number;
+  /** First paragraph index not yet fully synthesized. */
+  nextParagraphIndex: number;
 }
 
 let audioContext: AudioContext | null = null;
@@ -224,28 +236,28 @@ export function togglePausePlayback(): void {
 
 /**
  * Rebuild the schedule from the chunk timeline anchored so that message-time
- * `head` is "now" and played at `rate`. Shared by seek and live rate changes.
+ * `head` is "now". Shared by seek and skip. Playback rate is synthesis-side
+ * (the server speeds the voice, pitch intact), so all buffers play at 1x and
+ * message-time equals context-time.
  * Returns the message-time the reschedule started from (clamped to buffer).
  */
-function rescheduleAt(head: number, rate: number): number {
+function rescheduleAt(head: number): number {
   const e = engine;
   const { ctx, gain } = ensureAudioGraph();
   if (e === null) return 0;
   const target = Math.min(Math.max(0, head), e.scheduledDuration);
 
   stopSources();
-  e.rate = rate;
   e.baseTime = ctx.currentTime - target;
 
   const spans: ChunkSpan[] = e.chunks.map((chunk) => ({
     at: chunk.at,
-    duration: chunk.buffer.duration / rate,
+    duration: chunk.buffer.duration,
   }));
   for (const { index, offset } of seekSchedule(spans, target)) {
     const chunk = e.chunks[index]!;
     const source = ctx.createBufferSource();
     source.buffer = chunk.buffer;
-    source.playbackRate.value = rate;
     source.connect(gain);
     const when = Math.max(0, e.baseTime + chunk.at);
     if (!Number.isFinite(when) || !Number.isFinite(offset)) continue;
@@ -253,7 +265,7 @@ function rescheduleAt(head: number, rate: number): number {
     scheduledSources.push({
       source,
       startedAt: when,
-      duration: chunk.buffer.duration / rate - offset,
+      duration: chunk.buffer.duration - offset,
     });
   }
 
@@ -279,14 +291,14 @@ export function seekPlayback(seconds: number): void {
   // past the buffer would anchor the clock ahead of the arrival timeline
   // and schedule later chunks at negative context times (which start()
   // throws on); rescheduleAt clamps to the live edge.
-  rescheduleAt(seconds, e.rate);
+  rescheduleAt(seconds);
 }
 
 /** Skip forward/backward by a relative message-time delta (seconds). */
 export function skipPlayback(delta: number): void {
   const e = engine;
   if (e === null) return;
-  rescheduleAt(currentHead() + delta, e.rate);
+  rescheduleAt(currentHead() + delta);
 }
 
 export function setPlaybackVolume(position: number): void {
@@ -295,15 +307,27 @@ export function setPlaybackVolume(position: number): void {
   useAudioPlayerStore.getState().setVolume(position);
 }
 
-/** Change playback rate live: the timeline is rescheduled from the current head. */
+/**
+ * Change synthesis speed. The server synthesizes faster speech at the same
+ * pitch, so the speed applies from the next paragraph request onward; the
+ * current paragraph finishes at its synthesized speed. Mid-playback speed
+ * changes therefore take effect within a few seconds, glitch-free.
+ */
 export function setPlaybackRate(rate: number): void {
   const e = engine;
-  if (e === null) {
-    // Nothing playing yet; applies when playback starts.
-    useAudioPlayerStore.getState().setRate(rate);
-    return;
+  if (e !== null) {
+    e.rate = rate;
+    // Re-estimate the total with the new speed so the scrub bar rescales.
+    const remaining = e.spokenCharCounts.slice(e.nextParagraphIndex).reduce((a, b) => a + b, 0);
+    e.duration = convergeEstimatedDuration({
+      scheduled: e.scheduledDuration,
+      spokenCharsSynthesized: e.synthesizedChars,
+      remainingChars: remaining,
+      fallbackCharsPerSecond: TTS_CHARS_PER_SECOND,
+      speed: rate,
+    });
+    useAudioPlayerStore.getState().setProgress(currentHead(), e.duration);
   }
-  rescheduleAt(currentHead(), rate);
   useAudioPlayerStore.getState().setRate(rate);
 }
 
@@ -342,21 +366,39 @@ export async function startPlayback(
     await ctx.resume();
   }
   // Estimated up front from text length so the scrub bar is stable while
-  // streaming; replaced by the exact extent when the stream completes.
-  const estimated = estimateSpokenDuration(spoken, rate);
+  // streaming; converges on the exact extent as paragraphs synthesize.
+  const spokenCharCounts = paragraphs.map((p) => p.length);
+  const totalChars = spokenCharCounts.reduce((a, b) => a + b, 0);
   engine = {
     playingMessageId: id,
     chunks: [],
     scheduledDuration: 0,
-    duration: estimated,
+    duration: estimateSpokenDuration(spoken, rate),
     streamDone: false,
     baseTime: ctx.currentTime + 0.05,
     paused: false,
     pausedAt: null,
     rate,
     paragraphSpans: [],
+    spokenCharCounts,
+    synthesizedChars: 0,
+    nextParagraphIndex: 0,
   };
   const e = engine;
+
+  /** Recompute the display duration estimate from synthesized evidence. */
+  const refreshEstimate = () => {
+    if (e.streamDone) return;
+    const remaining = spokenCharCounts.slice(e.nextParagraphIndex).reduce((a, b) => a + b, 0);
+    e.duration = convergeEstimatedDuration({
+      scheduled: e.scheduledDuration,
+      spokenCharsSynthesized: e.synthesizedChars,
+      remainingChars: remaining,
+      fallbackCharsPerSecond: TTS_CHARS_PER_SECOND,
+      speed: e.rate,
+    });
+    useAudioPlayerStore.getState().setProgress(currentHead(), e.duration);
+  };
 
   /** Schedule one PCM chunk for paragraph `paragraph` at the playback head. */
   const scheduleArriving = (chunkPcm: ArrayBuffer, paragraph: number) => {
@@ -369,7 +411,7 @@ export async function startPlayback(
     if (span === undefined) {
       e.paragraphSpans[paragraph] = { start: at, end: at };
     }
-    e.scheduledDuration += buffer.duration / e.rate;
+    e.scheduledDuration += buffer.duration;
     const cur = e.paragraphSpans[paragraph]!;
     cur.end = e.scheduledDuration;
 
@@ -380,10 +422,9 @@ export async function startPlayback(
     if (!Number.isFinite(safeWhen)) return;
     const source = ctx.createBufferSource();
     source.buffer = buffer;
-    source.playbackRate.value = e.rate;
     source.connect(gain);
     source.start(safeWhen);
-    scheduledSources.push({ source, startedAt: safeWhen, duration: buffer.duration / e.rate });
+    scheduledSources.push({ source, startedAt: safeWhen, duration: buffer.duration });
 
     const s = useAudioPlayerStore.getState();
     if (s.status === "loading" || s.status === "waking") {
@@ -395,7 +436,8 @@ export async function startPlayback(
   // Synthesize paragraphs sequentially; one stream runs at a time, starting
   // the next paragraph's request only after the previous audio is fully
   // scheduled (the GPU outpaces realtime manyfold, so this still starts
-  // playing after only the first paragraph's latency).
+  // playing after only the first paragraph's latency). Speed is synthesis-
+  // side: the server generates faster speech at the same pitch.
   try {
     for (let index = 0; index < paragraphs.length; index++) {
       const paragraphText =
@@ -403,11 +445,13 @@ export async function startPlayback(
           ? paragraphs[index]!
           : `${paragraphs[index]!} [pause:${PARAGRAPH_PAUSE}s]`;
       if (paragraphText.replace(/\[pause:[\d.]+s\]/g, "").trim().length === 0) continue;
+      const speedAtRequest = e.rate;
       await streamSpeechChunks(
         {
           text: paragraphText,
           voice: options.voice,
           serverUrl: options.serverUrl,
+          speed: speedAtRequest,
           signal: controller.signal,
           onWakingUp: () => {
             useAudioPlayerStore.getState().setWaking(id);
@@ -415,6 +459,10 @@ export async function startPlayback(
         },
         (chunkPcm) => scheduleArriving(chunkPcm, index),
       );
+      if (engine !== e) return;
+      e.synthesizedChars += spokenCharCounts[index] ?? 0;
+      e.nextParagraphIndex = index + 1;
+      refreshEstimate();
     }
     abortController = null; // all streams done; progress loop may now settle idle
     // Snap the display duration to the exact synthesized extent.
