@@ -108,6 +108,10 @@ export const TTS_PCM_SAMPLE_RATE = 24_000;
  * Progressive PCM chunks of a streaming synthesis. Resolves once the HTTP
  * response starts; iterate the returned async iterable for each chunk. The
  * request aborts (and the server stops generating) if `signal` aborts.
+ *
+ * TCP read boundaries do not align with 16-bit sample boundaries, so a carry
+ * byte from the end of one read is prepended to the next — every chunk handed
+ * to `onChunk` always starts on a sample boundary and has an even byte length.
  */
 export async function streamSpeechChunks(
   req: TtsRequest,
@@ -118,13 +122,29 @@ export async function streamSpeechChunks(
   if (reader === undefined) {
     throw new Error("TTS server returned no stream body.");
   }
+  let carry = new Uint8Array(0);
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
-    if (value !== undefined && value.byteLength > 0) {
-      onChunk(value.buffer as ArrayBuffer);
+    if (value === undefined || value.byteLength === 0) continue;
+
+    // Prepend any odd leftover byte from the previous read.
+    let framed = value;
+    if (carry.byteLength > 0) {
+      framed = new Uint8Array(carry.byteLength + value.byteLength);
+      framed.set(carry, 0);
+      framed.set(value, carry.byteLength);
+      carry = new Uint8Array(0);
     }
+    const evenLength = framed.byteLength - (framed.byteLength % 2);
+    if (evenLength !== framed.byteLength) {
+      carry = framed.slice(evenLength);
+      framed = framed.slice(0, evenLength);
+    }
+    if (framed.byteLength === 0) continue;
+    onChunk(framed.buffer as ArrayBuffer);
   }
+  // A trailing unpaired byte is not audio; drop it.
 }
 
 export class TtsServerError extends Error {

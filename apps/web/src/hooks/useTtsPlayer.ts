@@ -11,6 +11,7 @@ import { type MessageId } from "@t3tools/contracts";
 import { useClientSettings } from "./useSettings";
 import { useAudioPlayerStore } from "~/audioPlayerStore";
 import { markdownToSpokenText } from "~/lib/markdownToSpokenText";
+import { estimateSpokenDuration, seekSchedule, type ChunkSpan } from "~/lib/ttsPlaybackMath";
 import { streamSpeechChunks, TTS_PCM_SAMPLE_RATE } from "~/lib/ttsClient";
 
 const TITLE_MAX_CHARS = 80;
@@ -49,8 +50,16 @@ interface EngineState {
   playingMessageId: MessageId;
   /** Decoded chunks in arrival order, with their message-time offsets. */
   chunks: PlayChunk[];
-  /** Total message duration scheduled so far. */
+  /** Exact message-time extent of scheduled audio so far. */
+  scheduledDuration: number;
+  /**
+   * Display duration: the text-length estimate until the stream completes,
+   * then the exact scheduled extent. Stops the scrub bar growing chunk by
+   * chunk during streaming.
+   */
   duration: number;
+  /** Whether the synthesis stream has finished. */
+  streamDone: boolean;
   /** Ctx time mapped to message-time 0. */
   baseTime: number;
   paused: boolean;
@@ -91,6 +100,7 @@ function pcmToAudioBuffer(ctx: AudioContext, chunk: ArrayBuffer): AudioBuffer {
 function currentHead(): number {
   const e = engine;
   if (e === null || audioContext === null) return 0;
+  // The ctx clock freezes while suspended, so pausedAt needs no adjustment.
   const ctxNow = e.paused ? (e.pausedAt ?? 0) : audioContext.currentTime;
   return Math.max(0, Math.min(ctxNow - e.baseTime, e.duration));
 }
@@ -132,11 +142,14 @@ function startProgressLoop(): void {
     const store = useAudioPlayerStore.getState();
     store.setProgress(currentHead(), e.duration);
 
+    // Only settle when the stream is fully scheduled AND every source has
+    // finished. During streaming, more sources may still arrive.
     const ctxNow = audioContext.currentTime;
-    const allDone = scheduledSources.every(
-      ({ startedAt, duration }) => ctxNow >= startedAt + duration,
-    );
-    if (allDone && scheduledSources.length > 0 && abortController === null) {
+    const allDone =
+      e.streamDone &&
+      scheduledSources.length > 0 &&
+      scheduledSources.every(({ startedAt, duration }) => ctxNow >= startedAt + duration);
+    if (allDone) {
       finishPlayback();
       return;
     }
@@ -160,55 +173,64 @@ export function togglePausePlayback(): void {
   if (!e.paused) {
     e.pausedAt = ctx.currentTime;
     e.paused = true;
+    if (progressHandle !== null) {
+      cancelAnimationFrame(progressHandle);
+      progressHandle = null;
+    }
     void ctx.suspend();
     s.setPaused();
   } else {
-    // Shift baseTime across the suspension so the head does not jump.
-    const pausedFor = (e.pausedAt ?? 0) - ctx.currentTime;
-    e.baseTime += pausedFor;
     e.paused = false;
     e.pausedAt = null;
     void ctx.resume();
     s.setPlaying(e.playingMessageId);
+    startProgressLoop();
   }
 }
 
 /**
- * Seek to a message-time position (seconds) by rebuilding the schedule from
- * the kept decoded chunks: chunks before the position are dropped, the rest
- * play back-to-back from now.
+ * Seek to a message-time position (seconds). The chunk timeline is immutable;
+ * only the schedule is rebuilt: the clock is re-anchored so message-time
+ * `target` is "now", the chunk containing the target resumes mid-buffer, and
+ * later chunks play whole at their original offsets.
  */
 export function seekPlayback(seconds: number): void {
   const e = engine;
   const { ctx, gain } = ensureAudioGraph();
   if (e === null || !Number.isFinite(seconds)) return;
-  const target = Math.min(Math.max(0, seconds), e.duration);
+  // The scrub bar is driven by the text-length estimate, which can exceed
+  // the synthesized-so-far extent while the stream is still filling. Seeking
+  // past the buffer would anchor the clock ahead of the arrival timeline
+  // and schedule later chunks at negative context times (which start()
+  // throws on), so clamp to the live edge.
+  const target = Math.min(Math.max(0, seconds), e.scheduledDuration);
 
   stopSources();
-  const keep = e.chunks.filter((chunk) => chunk.at >= target);
-  e.chunks = keep;
-  e.duration =
-    keep.length > 0 ? keep[keep.length - 1].at + keep[0]!.duration - keep[0]!.at : target;
-  // Recompute offsets so the kept audio starts at message-time `target`.
-  const firstAt = keep[0]?.at ?? target;
-  for (const chunk of keep) {
-    chunk.at = target + (chunk.at - firstAt);
-  }
   e.baseTime = ctx.currentTime - target;
 
-  let cursor = ctx.currentTime;
-  for (const chunk of keep) {
+  const spans: ChunkSpan[] = e.chunks.map((chunk) => ({
+    at: chunk.at,
+    duration: chunk.buffer.duration / e.rate,
+  }));
+  for (const { index, offset } of seekSchedule(spans, target)) {
+    const chunk = e.chunks[index]!;
     const source = ctx.createBufferSource();
     source.buffer = chunk.buffer;
     source.playbackRate.value = e.rate;
     source.connect(gain);
-    const when = Math.max(cursor, chunk.at + e.baseTime);
-    source.start(when);
-    const dur = chunk.buffer.duration / e.rate;
-    scheduledSources.push({ source, startedAt: when, duration: dur });
-    cursor = when + dur;
+    const when = Math.max(0, e.baseTime + chunk.at);
+    if (!Number.isFinite(when) || !Number.isFinite(offset)) continue;
+    source.start(when, offset);
+    scheduledSources.push({
+      source,
+      startedAt: when,
+      duration: chunk.buffer.duration / e.rate - offset,
+    });
   }
-  if (!e.paused) {
+
+  const s = useAudioPlayerStore.getState();
+  s.setProgress(target, e.duration);
+  if (!e.paused && progressHandle === null) {
     startProgressLoop();
   }
 }
@@ -261,7 +283,11 @@ export async function startPlayback(
   engine = {
     playingMessageId: id,
     chunks: [],
-    duration: 0,
+    scheduledDuration: 0,
+    // Estimated up front from text length so the scrub bar is stable while
+    // streaming; replaced by the exact extent when the stream completes.
+    duration: estimateSpokenDuration(spoken, rate),
+    streamDone: false,
     baseTime: ctx.currentTime + 0.05,
     paused: false,
     pausedAt: null,
@@ -283,17 +309,21 @@ export async function startPlayback(
       (chunkPcm) => {
         if (engine !== e) return;
         const buffer = pcmToAudioBuffer(ctx, chunkPcm);
-        const at = e.duration;
+        const at = e.scheduledDuration;
         e.chunks.push({ buffer, at });
-        e.duration += buffer.duration / e.rate;
+        e.scheduledDuration += buffer.duration / e.rate;
 
+        const when = e.baseTime + at;
+        // After a seek to the live edge, `when` can land slightly in the
+        // past; clamp to now. Never hand start() a non-finite time.
+        const safeWhen = Number.isFinite(when) ? Math.max(ctx.currentTime, when) : ctx.currentTime;
+        if (!Number.isFinite(safeWhen)) return;
         const source = ctx.createBufferSource();
         source.buffer = buffer;
         source.playbackRate.value = e.rate;
         source.connect(gain);
-        const when = e.baseTime + at;
-        source.start(when);
-        scheduledSources.push({ source, startedAt: when, duration: buffer.duration / e.rate });
+        source.start(safeWhen);
+        scheduledSources.push({ source, startedAt: safeWhen, duration: buffer.duration / e.rate });
 
         const s = useAudioPlayerStore.getState();
         if (s.status === "loading" || s.status === "waking") {
@@ -303,6 +333,12 @@ export async function startPlayback(
       },
     );
     abortController = null; // stream ended; progress loop may now settle idle
+    // Snap the display duration to the exact synthesized extent.
+    if (engine === e) {
+      e.streamDone = true;
+      e.duration = e.scheduledDuration;
+      useAudioPlayerStore.getState().setProgress(currentHead(), e.duration);
+    }
   } catch (error) {
     abortController = null;
     if (controller.signal.aborted) {
