@@ -6,7 +6,7 @@ import { type MessageId } from "@t3tools/contracts";
  * consistently without owning the shared audio element (see `useTtsPlayer`).
  */
 
-export type AudioPlayerStatus = "idle" | "loading" | "playing";
+export type AudioPlayerStatus = "idle" | "loading" | "waking" | "playing";
 
 interface AudioPlayerState {
   status: AudioPlayerStatus;
@@ -18,6 +18,7 @@ interface AudioPlayerState {
 
 interface AudioPlayerActions {
   setLoading: (id: MessageId) => void;
+  setWaking: (id: MessageId) => void;
   setPlaying: (id: MessageId) => void;
   setIdle: () => void;
   setError: (message: string, id: MessageId | null) => void;
@@ -30,6 +31,8 @@ export const useAudioPlayerStore = create<AudioPlayerState & AudioPlayerActions>
   errorMessageId: null,
   setLoading: (id) =>
     set({ status: "loading", playingMessageId: id, error: null, errorMessageId: null }),
+  setWaking: (id) =>
+    set({ status: "waking", playingMessageId: id, error: null, errorMessageId: null }),
   setPlaying: (id) =>
     set({ status: "playing", playingMessageId: id, error: null, errorMessageId: null }),
   setIdle: () => set({ status: "idle", playingMessageId: null }),

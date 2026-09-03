@@ -77,7 +77,7 @@ export type ThreadToastData = {
 
 const toastManager = Toast.createToastManager<ThreadToastData>();
 const anchoredToastManager = Toast.createToastManager<ThreadToastData>();
-type ToastId = ReturnType<typeof toastManager.add>;
+export type ToastId = ReturnType<typeof toastManager.add>;
 const threadToastVisibleTimeoutRemainingMs = new Map<ToastId, number>();
 
 const TOAST_ICONS = {
