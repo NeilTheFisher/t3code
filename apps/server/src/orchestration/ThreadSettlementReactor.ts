@@ -24,6 +24,7 @@ import { forkParked } from "../serverActivation.ts";
 import * as OrchestrationEngine from "./Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./Services/ProjectionSnapshotQuery.ts";
 import { pullRequestMatchesProject, readSweepSnapshot } from "./ThreadPullRequestReactor.ts";
+import { hasProviderCliUnavailableCause } from "../sourceControl/providerErrors.ts";
 import {
   isAutoSettlementCandidate,
   resolveAutoSettlementAt,
@@ -133,13 +134,19 @@ export const make = Effect.gen(function* () {
       },
       (effect, thread) =>
         effect.pipe(
-          Effect.catchCauseIf(
-            (cause) => !Cause.hasInterruptsOnly(cause),
-            (cause) =>
-              Effect.logWarning("automatic thread settlement skipped", {
-                threadId: thread.id,
-                cause: Cause.pretty(cause),
-              }).pipe(Effect.as(null)),
+          Effect.catchCause((cause) =>
+            Cause.hasInterruptsOnly(cause)
+              ? Effect.failCause(cause)
+              : (hasProviderCliUnavailableCause(cause)
+                  ? Effect.logDebug(
+                      "automatic thread settlement skipped: provider CLI unavailable",
+                      { threadId: thread.id },
+                    )
+                  : Effect.logWarning("automatic thread settlement skipped", {
+                      threadId: thread.id,
+                      cause: Cause.pretty(cause),
+                    })
+                ).pipe(Effect.as(null)),
           ),
         ),
     );
@@ -301,13 +308,17 @@ export const make = Effect.gen(function* () {
             discard: true,
           });
         }).pipe(
-          Effect.catchCauseIf(
-            (cause) => !Cause.hasInterruptsOnly(cause),
-            (cause) =>
-              Effect.logWarning("automatic thread settlement skipped", {
-                threadIds: group.map((thread) => thread.id),
-                cause: Cause.pretty(cause),
-              }),
+          Effect.catchCause((cause) =>
+            Cause.hasInterruptsOnly(cause)
+              ? Effect.failCause(cause)
+              : hasProviderCliUnavailableCause(cause)
+                ? Effect.logDebug("automatic thread settlement skipped: provider CLI unavailable", {
+                    threadIds: group.map((thread) => thread.id),
+                  })
+                : Effect.logWarning("automatic thread settlement skipped", {
+                    threadIds: group.map((thread) => thread.id),
+                    cause: Cause.pretty(cause),
+                  }),
           ),
         ),
       { concurrency: 8, discard: true },
