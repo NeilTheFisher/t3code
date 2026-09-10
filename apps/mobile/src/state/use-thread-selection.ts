@@ -1,7 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useRoute, type RouteProp } from "@react-navigation/native";
 import { useMemo, useRef, useState } from "react";
-import { useMemo } from "react";
 import {
   EnvironmentId,
   type OrchestrationThread,

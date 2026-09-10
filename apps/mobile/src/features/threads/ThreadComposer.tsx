@@ -552,7 +552,6 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
       ownerId: settingsOwnerId,
       environmentId: props.environmentId,
       providerInstanceId: currentModelSelection.instanceId,
-      providerGroups: threadProviderGroups,
       providerGroups,
       selectedModel: currentModelSelection,
       serverConfig: props.serverConfig,

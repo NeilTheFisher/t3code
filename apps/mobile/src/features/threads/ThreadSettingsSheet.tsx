@@ -99,7 +99,6 @@ const PRIMARY_PROVIDER_DRIVERS: ReadonlySet<string> = new Set([
   "codex",
   "antigravity",
 ]);
-const PRIMARY_PROVIDER_DRIVERS: ReadonlySet<string> = new Set(["claudeAgent", "codex"]);
 
 // Blocks in-thread model changes for providers that cannot resume their own
 // thread with a different model (`requiresNewThreadForModelChange`). Selecting
