@@ -1625,7 +1625,13 @@ export const make = Effect.gen(function* () {
       | "isCrossRepository"
     >,
   ) {
+    // A repository with no supported remote has no change requests to ask for;
+    // without this the registry's unknown provider fails every lookup and the
+    // reactors log a warning on each sweep.
     const provider = yield* sourceControlProvider(cwd);
+    if (provider.kind === "unknown") {
+      return null;
+    }
     const headSelectors = probeableHeadSelectors(provider.kind, headContext.headSelectors);
     for (const headSelector of headSelectors) {
       const pullRequests = yield* provider.listChangeRequests({
@@ -1658,6 +1664,9 @@ export const make = Effect.gen(function* () {
     const parsedByNumber = new Map<number, PullRequestInfo>();
 
     const provider = yield* sourceControlProvider(cwd);
+    if (provider.kind === "unknown") {
+      return null;
+    }
     for (const headSelector of probeableHeadSelectors(provider.kind, headContext.headSelectors)) {
       const pullRequests = yield* provider.listChangeRequests({
         cwd,
