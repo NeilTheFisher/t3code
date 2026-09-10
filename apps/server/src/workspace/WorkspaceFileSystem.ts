@@ -130,7 +130,7 @@ export class WorkspaceFileSystem extends Context.Service<
       WorkspaceFileSystemError | WorkspacePaths.WorkspacePathOutsideRootError
     >;
   }
->()("t3/workspace/WorkspaceFileSystem") {}
+>()("@neilthefisher/t3/workspace/WorkspaceFileSystem") {}
 
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {

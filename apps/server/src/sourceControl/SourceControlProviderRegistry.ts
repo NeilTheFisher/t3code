@@ -62,7 +62,7 @@ export class SourceControlProviderRegistry extends Context.Service<
     >;
     readonly discover: Effect.Effect<ReadonlyArray<SourceControlProviderDiscoveryItem>>;
   }
->()("t3/sourceControl/SourceControlProviderRegistry") {}
+>()("@neilthefisher/t3/sourceControl/SourceControlProviderRegistry") {}
 
 function unsupportedProvider(
   kind: SourceControlProviderKind,

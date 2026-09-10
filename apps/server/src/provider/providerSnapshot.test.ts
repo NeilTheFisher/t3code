@@ -30,9 +30,8 @@ describe("buildServerProvider", () => {
         status: "ready",
         auth: { status: "authenticated" },
         usageLimits: {
-          source: "codexAppServer",
           checkedAt: "2026-07-22T12:00:00.000Z",
-          windows: [{ label: "Session", usedPercent: 30 }],
+          windows: [{ id: "session", kind: "session", label: "Session", usedPercent: 30 }],
         },
       },
     });

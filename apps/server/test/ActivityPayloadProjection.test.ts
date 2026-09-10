@@ -253,13 +253,12 @@ describe("projectActivityPayload", () => {
       const projected = projectActivityPayload(activity);
       if (activity === fixtures[0]) {
         // The projection keeps the command identity fields; the row detail
-        // stays the payload detail (the output survives as a bounded
-        // rawOutput summary).
+        // prefers the command output (fork output-first behavior).
         expect(deriveWorkLogEntries([projected])).toMatchObject([
           {
             command: "pnpm test",
             rawCommand: 'bash -lc "pnpm test"',
-            detail: "command_execution detail",
+            detail: "```\nfirst useful line\nsecond line",
           },
         ]);
         expect(comparableThreadFeed([projected])).toMatchObject([

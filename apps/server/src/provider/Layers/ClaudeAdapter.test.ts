@@ -61,7 +61,7 @@ const encodeUnknownJsonString = Schema.encodeSync(Schema.fromJsonString(Schema.U
 
 // Test-local service tag so the rest of the file can keep using `yield* ClaudeAdapter`.
 class ClaudeAdapter extends Context.Service<ClaudeAdapter, ClaudeAdapterShape>()(
-  "t3/provider/Layers/ClaudeAdapter.test/ClaudeAdapter",
+  "@neilthefisher/t3/provider/Layers/ClaudeAdapter.test/ClaudeAdapter",
 ) {}
 
 class FakeClaudeQuery implements AsyncIterable<SDKMessage> {

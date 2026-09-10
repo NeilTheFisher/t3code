@@ -29,4 +29,4 @@ export interface OrchestrationReactorShape {
 export class OrchestrationReactor extends Context.Service<
   OrchestrationReactor,
   OrchestrationReactorShape
->()("t3/orchestration/Services/OrchestrationReactor") {}
+>()("@neilthefisher/t3/orchestration/Services/OrchestrationReactor") {}

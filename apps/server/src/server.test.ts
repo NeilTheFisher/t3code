@@ -400,7 +400,7 @@ const makeDefaultOrchestrationThreadShell = (
     hasPendingApprovals: false,
     hasPendingUserInput: false,
     hasActionableProposedPlan: false,
-    hasPendingBackgroundTasks: false,
+    backgroundLiveness: null,
     ...overrides,
   };
 };
@@ -1259,8 +1259,7 @@ const buildAppUnderTest = (options?: {
           ...options?.layers?.voiceSessionService,
         }),
       ),
-      Layer.provideMerge(makeAuthTestLayer()),
-      Layer.provideMerge(ServerSecretStore.layer),
+      Layer.provideMerge(Layer.mergeAll(makeAuthTestLayer(), ServerSecretStore.layer)),
       Layer.provide(workspaceAndProjectServicesLayer),
       Layer.provideMerge(
         options?.layers?.httpClient === undefined

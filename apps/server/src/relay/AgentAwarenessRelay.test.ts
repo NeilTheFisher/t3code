@@ -351,7 +351,7 @@ describe("signRelayAgentActivityPublishProof", { concurrent: false }, () => {
       hasPendingApprovals: false,
       hasPendingUserInput: false,
       hasActionableProposedPlan: false,
-      hasPendingBackgroundTasks: false,
+      backgroundLiveness: null,
     } satisfies Omit<OrchestrationThreadShell, "id">;
 
     expect(
@@ -550,7 +550,7 @@ describe("signRelayAgentActivityPublishProof", { concurrent: false }, () => {
           hasPendingApprovals: false,
           hasPendingUserInput: false,
           hasActionableProposedPlan: false,
-          hasPendingBackgroundTasks: false,
+          backgroundLiveness: null,
         } satisfies OrchestrationThreadShell;
 
         const orchestrationEngine = {
@@ -743,7 +743,7 @@ describe("signRelayAgentActivityPublishProof", { concurrent: false }, () => {
           hasPendingApprovals: false,
           hasPendingUserInput: false,
           hasActionableProposedPlan: false,
-          hasPendingBackgroundTasks: false,
+          backgroundLiveness: null,
         } satisfies OrchestrationThreadShell;
 
         const descriptor = {

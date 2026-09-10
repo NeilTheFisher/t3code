@@ -38,6 +38,7 @@ const makeShell = (input: {
   interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
   branch: null,
   worktreePath: null,
+  pullRequests: [],
   latestTurn:
     input.latestTurnState === undefined
       ? null
@@ -52,6 +53,8 @@ const makeShell = (input: {
   createdAt: NOW,
   updatedAt: NOW,
   archivedAt: input.archivedAt ?? null,
+  settledOverride: null,
+  settledAt: null,
   session:
     input.sessionStatus === undefined
       ? null
@@ -72,7 +75,7 @@ const makeShell = (input: {
   hasPendingApprovals: false,
   hasPendingUserInput: false,
   hasActionableProposedPlan: false,
-  hasPendingBackgroundTasks: false,
+  backgroundLiveness: null,
 });
 
 const makeSnapshot = (
@@ -112,6 +115,8 @@ const provideStubs =
       } as never),
       Effect.provideService(OrchestrationEngine.OrchestrationEngineService, {
         readEvents: () => Stream.empty,
+        readThreadEvents: () => Stream.empty,
+        getThreadReplayStats: () => Effect.die("unused thread replay stats"),
         dispatch: (command) =>
           "threadId" in command && command.threadId === input.failDispatchForThreadId
             ? Effect.die("dispatch failed")
@@ -119,6 +124,8 @@ const provideStubs =
                 Effect.as({ sequence: 1 }),
               ),
         streamDomainEvents: Stream.empty,
+        subscribeDomainEvents: Effect.succeed(Stream.empty),
+        latestSequence: Effect.succeed(0),
       } satisfies OrchestrationEngine.OrchestrationEngineService["Service"]),
       Effect.provide(NodeServices.layer),
     );

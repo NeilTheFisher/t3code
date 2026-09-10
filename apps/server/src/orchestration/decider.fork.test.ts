@@ -72,6 +72,7 @@ function seedReadModel(): OrchestrationReadModel {
         interactionMode: "default",
         branch: "main",
         worktreePath: "/tmp/project",
+        pullRequests: [],
         latestTurn: {
           turnId: SECOND_TURN_ID,
           state: "completed",

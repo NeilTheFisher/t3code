@@ -450,6 +450,7 @@ it.layer(Layer.mergeAll(TestNodeServices, ServerSettingsModule.layerTest(), Test
                     primary: { usedPercent: 20, windowDurationMins: 300 },
                     secondary: { usedPercent: 40, windowDurationMins: 10_080 },
                   },
+                  resetCredits: null,
                 },
               }),
             ),
@@ -2785,9 +2786,8 @@ it.layer(Layer.mergeAll(TestNodeServices, ServerSettingsModule.layerTest(), Test
     describe("checkClaudeProviderStatus", () => {
       it("preserves Claude usage only for the same known account", () => {
         const available: ServerProvider["usageLimits"] = {
-          source: "claudePrint",
           checkedAt: "2026-07-22T12:00:00.000Z",
-          windows: [{ label: "Session", usedPercent: 30 }],
+          windows: [{ id: "five_hour", kind: "session", label: "Session", usedPercent: 30 }],
         };
 
         const initial = resolveRetainedClaudeUsage(undefined, "first@example.com", available);
@@ -2832,8 +2832,23 @@ it.layer(Layer.mergeAll(TestNodeServices, ServerSettingsModule.layerTest(), Test
         ),
       );
 
-      it.effect("includes best-effort Claude subscription usage", () =>
-        Effect.gen(function* () {
+      it.effect("includes best-effort Claude subscription usage", () => {
+        const spawner = mockSpawnerLayer((args) => {
+          const joined = args.join(" ");
+          if (joined === "--version") return { stdout: "2.1.218\n", stderr: "", code: 0 };
+          if (joined.startsWith("--print /usage --output-format json")) {
+            return {
+              stdout: JSON.stringify({
+                result: "Current session: 30% used \u00b7 resets Jul 23, 1:30am (America/Chicago)",
+              }),
+              stderr: "",
+              code: 0,
+            };
+          }
+          throw new Error(`Unexpected args: ${joined}`);
+        });
+
+        return Effect.gen(function* () {
           yield* TestClock.setTime(Date.parse("2026-07-22T12:00:00.000Z"));
           const status = yield* checkClaudeProviderStatus(
             defaultClaudeSettings,
@@ -2842,9 +2857,14 @@ it.layer(Layer.mergeAll(TestNodeServices, ServerSettingsModule.layerTest(), Test
             undefined,
             undefined,
             undefined,
+            undefined,
             // The driver owns the cached usage probe; it hands the layer a
             // resolver like this one, which falls back to the CLI print probe.
-            () => probeClaudeUsageLimits(defaultClaudeSettings),
+            // Discharge the probe's own services so the resolver stays closed.
+            () =>
+              probeClaudeUsageLimits(defaultClaudeSettings).pipe(
+                Effect.provide(Layer.merge(spawner, Path.layer)),
+              ),
           );
           assert.strictEqual(status.status, "ready");
           assert.deepStrictEqual(status.usageLimits?.windows, [
@@ -2857,26 +2877,8 @@ it.layer(Layer.mergeAll(TestNodeServices, ServerSettingsModule.layerTest(), Test
               resetsAt: "2026-07-23T06:30:00.000Z",
             },
           ]);
-        }).pipe(
-          Effect.provide(
-            mockSpawnerLayer((args) => {
-              const joined = args.join(" ");
-              if (joined === "--version") return { stdout: "2.1.218\n", stderr: "", code: 0 };
-              if (joined.startsWith("--print /usage --output-format json")) {
-                return {
-                  stdout: JSON.stringify({
-                    result:
-                      "Current session: 30% used \u00b7 resets Jul 23, 1:30am (America/Chicago)",
-                  }),
-                  stderr: "",
-                  code: 0,
-                };
-              }
-              throw new Error(`Unexpected args: ${joined}`);
-            }),
-          ),
-        ),
-      );
+        }).pipe(Effect.provide(spawner));
+      });
 
       it.effect("runs the Claude usage probe from the configured workspace cwd", () => {
         const recorded = recordingMockSpawnerLayer((args) => {

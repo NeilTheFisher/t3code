@@ -132,7 +132,7 @@ export class VoiceSessionService extends Context.Service<
       input: VoiceWebExtractInput,
     ) => Effect.Effect<VoiceWebExtractResult, VoiceApiError>;
   }
->()("t3/voice/VoiceSessionService") {}
+>()("@neilthefisher/t3/voice/VoiceSessionService") {}
 
 export const make = Effect.gen(function* () {
   const secretStore = yield* ServerSecretStore.ServerSecretStore;

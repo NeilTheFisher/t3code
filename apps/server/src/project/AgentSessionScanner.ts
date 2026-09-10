@@ -194,7 +194,7 @@ export class AgentSessionScanner extends Context.Service<
       completedSources?: ReadonlyArray<AgentSessionImportSource>,
     ) => Stream.Stream<AgentSessionRecentThread, AgentSessionScanError>;
   }
->()("t3/project/AgentSessionScanner") {}
+>()("@neilthefisher/t3/project/AgentSessionScanner") {}
 
 type AgentSessionSource = AgentSessionProjectCandidate["sources"][number];
 
