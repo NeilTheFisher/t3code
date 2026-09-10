@@ -1212,7 +1212,7 @@ const antigravityInstanceRouting = makeProviderServiceLayer({
 });
 antigravityInstanceRouting.layer("ProviderServiceLive instance-owned conversations", (it) => {
   it.effect(
-    "does not replace a native conversation with another instance or a removed-instance fallback",
+    "hands a native conversation to another instance when starting fresh, but rejects an explicit resume across instances",
     () =>
       Effect.gen(function* () {
         const provider = yield* ProviderService.ProviderService;
@@ -1236,21 +1236,34 @@ antigravityInstanceRouting.layer("ProviderServiceLive instance-owned conversatio
             const originalBinding = yield* directory.getBinding(threadId);
             replacementAntigravity.startSession.mockClear();
 
-            const error = yield* Effect.flip(
-              provider.startSession(threadId, {
+            const result = yield* provider
+              .startSession(threadId, {
                 providerInstanceId: replacementAntigravityInstanceId,
                 threadId,
                 runtimeMode: "approval-required",
                 ...(passCursor ? { resumeCursor } : {}),
-              }),
-            );
+              })
+              .pipe(Effect.exit);
 
-            assert.equal(
-              error._tag,
-              originalAvailable ? "ProviderValidationError" : "ProviderUnsupportedError",
-            );
-            assert.equal(replacementAntigravity.startSession.mock.calls.length, 0);
-            assert.deepEqual(yield* directory.getBinding(threadId), originalBinding);
+            if (passCursor) {
+              // An explicit cursor cannot cross to an incompatible instance.
+              assert.equal(Exit.isFailure(result), true);
+              if (Exit.isFailure(result)) {
+                const error = Cause.squash(result.cause) as { readonly _tag: string };
+                assert.equal(
+                  error._tag,
+                  originalAvailable ? "ProviderValidationError" : "ProviderUnsupportedError",
+                );
+              }
+              assert.equal(replacementAntigravity.startSession.mock.calls.length, 0);
+              assert.deepEqual(yield* directory.getBinding(threadId), originalBinding);
+            } else {
+              // Starting fresh hands the conversation to the replacement.
+              assert.equal(Exit.isSuccess(result), true);
+              assert.equal(replacementAntigravity.startSession.mock.calls.length, 1);
+              const binding = Option.getOrUndefined(yield* directory.getBinding(threadId));
+              assert.equal(binding?.providerInstanceId, replacementAntigravityInstanceId);
+            }
           }
         }
       }),
@@ -1741,9 +1754,12 @@ it.effect(
       );
       const projectionMessagesLayer = Layer.succeed(ProjectionThreadMessageRepository, {
         upsert: () => Effect.void,
-        getByMessageId: () => Effect.succeed(Option.none()),
+        appendStreaming: () => Effect.void,
+        getByMessageId: () => Effect.succeedNone,
+        hasAssistantMessageForTurn: () => Effect.succeed(false),
         listByThreadId,
         deleteByThreadId: () => Effect.void,
+        getLatestUserMessageAt: () => Effect.succeed(null),
       });
 
       const providerLayer = makeProviderServiceLive().pipe(
@@ -1833,9 +1849,12 @@ it.effect(
       );
       const projectionMessagesLayer = Layer.succeed(ProjectionThreadMessageRepository, {
         upsert: () => Effect.void,
-        getByMessageId: () => Effect.succeed(Option.none()),
+        appendStreaming: () => Effect.void,
+        getByMessageId: () => Effect.succeedNone,
+        hasAssistantMessageForTurn: () => Effect.succeed(false),
         listByThreadId,
         deleteByThreadId: () => Effect.void,
+        getLatestUserMessageAt: () => Effect.succeed(null),
       });
 
       const providerLayer = makeProviderServiceLive().pipe(
@@ -1890,6 +1909,75 @@ it.effect(
 );
 
 it.effect(
+  "ProviderServiceLive allows a fresh start on a different instance of the same driver (provider handoff)",
+  () =>
+    Effect.gen(function* () {
+      const codexA = makeFakeCodexAdapter();
+      const codexB = makeFakeCodexAdapter();
+      const instanceA = ProviderInstanceId.make("codex");
+      const instanceB = ProviderInstanceId.make("codex_2");
+      const registry = makeStaticInstanceRegistry([
+        [instanceA, codexA.adapter],
+        [instanceB, codexB.adapter],
+      ]);
+      const runtimeRepositoryLayer = ProviderSessionRuntime.layer.pipe(
+        Layer.provide(SqlitePersistenceMemory),
+      );
+      const directoryLayer = ProviderSessionDirectoryLive.pipe(
+        Layer.provide(runtimeRepositoryLayer),
+      );
+      const providerLayer = makeProviderServiceLive().pipe(
+        Layer.provide(NodeServices.layer),
+        Layer.provide(Layer.succeed(ProviderAdapterRegistry.ProviderAdapterRegistry, registry)),
+        Layer.provide(directoryLayer),
+        Layer.provide(defaultServerSettingsLayer),
+        Layer.provide(serverConfigTestLayer),
+        Layer.provide(AnalyticsService.layerTest),
+        Layer.provide(
+          Layer.succeed(
+            ProviderEventLoggers.ProviderEventLoggers,
+            ProviderEventLoggers.NoOpProviderEventLoggers,
+          ),
+        ),
+      );
+
+      const threadId = asThreadId("thread-instance-handoff");
+      yield* Effect.gen(function* () {
+        const provider = yield* ProviderService.ProviderService;
+        // Bind the thread to instance A; the fake adapter persists a resume cursor.
+        yield* provider.startSession(threadId, {
+          provider: CODEX_DRIVER,
+          providerInstanceId: instanceA,
+          threadId,
+          runtimeMode: "full-access",
+        });
+        // Switching to a sibling instance of the same driver must be allowed
+        // when the caller starts fresh (no resume cursor): the stale cursor is
+        // cleared on rebind and the prior transcript is re-injected.
+        yield* provider.startSession(threadId, {
+          provider: CODEX_DRIVER,
+          providerInstanceId: instanceB,
+          threadId,
+          runtimeMode: "full-access",
+        });
+        assert.equal(codexB.startSession.mock.calls.length, 1);
+
+        // An explicit resume cursor across incompatible instances is still rejected.
+        const failure = yield* provider
+          .startSession(threadId, {
+            provider: CODEX_DRIVER,
+            providerInstanceId: instanceA,
+            threadId,
+            runtimeMode: "full-access",
+            resumeCursor: { opaque: "stale-cursor" },
+          })
+          .pipe(Effect.flip);
+        assert.instanceOf(failure, ProviderValidationError);
+      }).pipe(Effect.provide(providerLayer));
+    }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect(
   "ProviderServiceLive does not inject history when startSession resumes with a cursor",
   () =>
     Effect.gen(function* () {
@@ -1912,9 +2000,12 @@ it.effect(
       const listByThreadId = vi.fn(() => Effect.succeed([]));
       const projectionMessagesLayer = Layer.succeed(ProjectionThreadMessageRepository, {
         upsert: () => Effect.void,
-        getByMessageId: () => Effect.succeed(Option.none()),
+        appendStreaming: () => Effect.void,
+        getByMessageId: () => Effect.succeedNone,
+        hasAssistantMessageForTurn: () => Effect.succeed(false),
         listByThreadId,
         deleteByThreadId: () => Effect.void,
+        getLatestUserMessageAt: () => Effect.succeed(null),
       });
 
       const providerLayer = makeProviderServiceLive().pipe(
@@ -5477,6 +5568,7 @@ describe("agent browser access", () => {
         getThreadDetailById: () => Effect.die("unused"),
         getThreadDetailSnapshot: () => Effect.die("unused"),
         searchThreads: () => Effect.die("unused"),
+        getThreadActivitiesPage: () => Effect.die("unused"),
       });
       const providerLayer = makeProviderServiceLive({
         issueMcpCredential: (request) =>
