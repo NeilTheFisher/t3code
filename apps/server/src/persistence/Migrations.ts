@@ -145,3 +145,46 @@ const migrationEntries = [
   // through 51 (ThreadsActiveOrderKey), it runs at 52 so fork databases
   // pick it up.
   [52, "ProjectionThreadPullRequests", Migration0051],
+] as const;
+
+export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
+
+const makeMigrationLoader = (throughId?: number) =>
+  Migrator.fromRecord(
+    Object.fromEntries(
+      migrationEntries
+        .filter(([id]) => throughId === undefined || id <= throughId)
+        .map(([id, name, migration]) => [`${id}_${name}`, migration]),
+    ),
+  );
+
+/**
+ * Migrator run function - no schema dumping needed
+ * Uses the base Migrator.make without platform dependencies
+ */
+const run = Migrator.make({});
+
+export interface RunMigrationsOptions {
+  readonly toMigrationInclusive?: number | undefined;
+}
+
+/**
+ * Run all pending migrations.
+ *
+ * Creates the migrations tracking table (effect_sql_migrations) if it doesn't exist,
+ * then runs any migrations with ID greater than the latest recorded migration.
+ *
+ * Returns array of [id, name] tuples for migrations that were run.
+ *
+ * @returns Effect containing array of executed migrations
+ */
+export const runMigrations = Effect.fn("runMigrations")(function* ({
+  toMigrationInclusive,
+}: RunMigrationsOptions = {}) {
+  const executedMigrations = yield* run({ loader: makeMigrationLoader(toMigrationInclusive) });
+  const migrations = executedMigrations.map(([id, name]) => `${id}_${name}`);
+  yield* migrations.length === 0
+    ? Effect.logDebug("Database schema is current")
+    : Effect.log("Migrations ran successfully").pipe(Effect.annotateLogs({ migrations }));
+  return executedMigrations;
+});

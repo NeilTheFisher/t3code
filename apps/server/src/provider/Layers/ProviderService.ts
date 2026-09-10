@@ -1396,10 +1396,16 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           );
         }
         const persistedBinding = Option.getOrUndefined(yield* directory.getBinding(threadId));
+        // A resumed cursor is unsafe across incompatible instances: it belongs
+        // to a different adapter. A caller that omits `resumeCursor` is
+        // deliberately starting a fresh session (a provider handoff), so allow
+        // the switch — the stale persisted cursor is never fed to the new
+        // adapter and is cleared on rebind below, and the service queues the
+        // prior transcript for injection into the next turn.
         if (
           persistedBinding?.provider === resolvedProvider &&
           persistedBinding.providerInstanceId !== resolvedInstanceId &&
-          (input.resumeCursor != null || persistedBinding.resumeCursor != null)
+          input.resumeCursor != null
         ) {
           const previousInstanceId = yield* requireBindingInstanceId(
             "ProviderService.startSession",
