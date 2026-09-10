@@ -46,13 +46,8 @@ import {
   type ProviderInstanceEntry,
 } from "../../providerInstances";
 import { providerModelKey, sortProviderModelItems } from "../../modelOrdering";
+import { isModelPickerNewModel } from "./modelPickerModelHighlights";
 
-type ModelPickerItem = {
-  slug: string;
-  name: string;
-  shortName?: string;
-  subProvider?: string;
-  badge?: "new";
 type ModelPickerItem = ModelEsque & {
   instanceId: ProviderInstanceId;
   driverKind: ProviderDriverKind;
@@ -91,14 +86,12 @@ export function shouldIncludeModelPickerOption(input: {
   return (
     input.entry.enabled &&
     (input.entry.driverKind === "opencode" || input.entry.driverKind === "antigravity") &&
-  if (isProviderInstancePickerReady(input.entry)) return true;
-  return (
-    input.entry.enabled &&
-    input.entry.driverKind === "opencode" &&
     input.entry.instanceId === input.activeInstanceId &&
     input.option.slug === input.activeModel &&
     input.option.isUnavailable === true
   );
+}
+
 export function buildModelPickerItems(
   modelOptionsByInstance: ReadonlyMap<ProviderInstanceId, ReadonlyArray<ModelEsque>>,
   entryByInstanceId: ReadonlyMap<
@@ -236,11 +229,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         activeInstanceNeedsSetup
       ) {
         // Keep the active instance visible when it is locked or needs setup.
-  const [selectedInstanceId, setSelectedInstanceId] = useState<ProviderInstanceId | "favorites">(
-    () => {
-      if (props.lockedProvider !== null) {
-        // When locked, prime the sidebar to the currently-active instance
-        // so jumping into the picker keeps the focused instance visible.
         return props.activeInstanceId;
       }
       return favorites.length > 0 ? "favorites" : props.activeInstanceId;
@@ -368,7 +356,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             option: model,
             activeInstanceId: props.activeInstanceId,
             activeModel: activeModelSlug,
-            activeModel: props.model,
           })
         ) {
           continue;
@@ -383,7 +370,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           ...(model.contextWindowTokens !== undefined
             ? { contextWindowTokens: model.contextWindowTokens }
             : {}),
-          ...(model.isLegacy ? { isLegacy: true } : {}),
           ...(model.isUnavailable ? { isUnavailable: true } : {}),
           instanceId,
           driverKind: entry.driverKind,
@@ -397,11 +383,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     }
     return out;
   }, [modelOptionsByInstance, entryByInstanceId, props.activeInstanceId, activeModelSlug]);
-    return buildModelPickerItems(modelOptionsByInstance, entryByInstanceId, readyInstanceSet);
-  }, [modelOptionsByInstance, entryByInstanceId, readyInstanceSet]);
-  }, [modelOptionsByInstance, entryByInstanceId, props.activeInstanceId, props.model]);
-    return buildModelPickerItems(modelOptionsByInstance, entryByInstanceId, readyInstanceSet);
-  }, [modelOptionsByInstance, entryByInstanceId, readyInstanceSet]);
 
   const isLocked = props.lockedProvider !== null;
   const isSearching = searchQuery.trim().length > 0;
@@ -950,9 +931,11 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                         showProvider
                         preferShortName={!isLocked}
                         useTriggerLabel={false}
-                        showNewBadge={model.badge === "new"}
+                        showNewBadge={
+                          model.badge === "new" ||
+                          isModelPickerNewModel(model.driverKind, model.slug)
+                        }
                         unavailable={model.isUnavailable === true}
-                        showNewBadge={isModelPickerNewModel(model.driverKind, model.slug)}
                         jumpLabel={modelJumpLabelByKey.get(modelKey) ?? null}
                         disabledReason={disabledReason}
                         onToggleFavorite={() => toggleFavorite(model.instanceId, model.slug)}
