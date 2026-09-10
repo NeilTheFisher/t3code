@@ -84,6 +84,7 @@ import {
   XAiExitPlanModeRequest,
 } from "../acp/XAiAcpExtension.ts";
 import { type GrokAdapterShape } from "../Services/GrokAdapter.ts";
+import { extractToolFileChanges } from "./DiffUtils.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
 const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.fromJsonString(Schema.Unknown));
@@ -249,6 +250,86 @@ export function isGrokEnterPlanModeToolCall(toolCall: {
     return true;
   }
   return false;
+}
+
+/**
+ * Extract inline-diff file changes from a Grok (ACP) tool call.
+ *
+ * Grok has no separate tool-name field: file edits arrive as ACP kind
+ * "edit"/"delete"/"move" with provider-defined `rawInput` (observed shapes:
+ * `{file_path, content}` and `{file_path, old_string, new_string}`, alongside
+ * `{variant: "Bash"|"EnterPlanMode", ...}` envelopes for non-file tools).
+ * The ACP `variant` string, `kind`, and `title` are tried in order as the
+ * tool-name hint for the shared {@link extractToolFileChanges} helper, and a
+ * `locations[0].path` fills in the file path when the input omits it.
+ *
+ * Returns `undefined` unless the call completed with diff-able fields, and
+ * emits the same `data.changes` shape Codex/OpenCode/Claude use so the web
+ * client's `extractFileChanges` picks it up with no client changes.
+ */
+export function extractGrokToolFileChanges(toolCall: {
+  readonly status?: "pending" | "inProgress" | "completed" | "failed";
+  readonly kind?: string;
+  readonly title?: string;
+  readonly data: Record<string, unknown>;
+}): Array<{ path: string; diff: string }> | undefined {
+  if (toolCall.status !== "completed") {
+    return undefined;
+  }
+  const rawInput = toolCall.data.rawInput;
+  const rawOutput = toolCall.data.rawOutput;
+  const candidates: Array<Record<string, unknown>> = [];
+  if (isRecord(rawInput)) {
+    candidates.push(rawInput);
+  }
+  if (isRecord(rawOutput)) {
+    candidates.push(rawOutput);
+  }
+  if (candidates.length === 0) {
+    return undefined;
+  }
+  const variantHint =
+    isRecord(rawInput) && typeof rawInput.variant === "string" ? rawInput.variant : undefined;
+  const hints: Array<string> = [];
+  for (const hint of [variantHint, toolCall.kind, toolCall.title]) {
+    if (typeof hint === "string" && hint.trim().length > 0) {
+      hints.push(hint);
+    }
+  }
+  if (hints.length === 0) {
+    return undefined;
+  }
+  const locations = toolCall.data.locations;
+  const locationPath =
+    Array.isArray(locations) &&
+    isRecord(locations[0]) &&
+    typeof locations[0].path === "string" &&
+    locations[0].path.length > 0
+      ? (locations[0].path as string)
+      : undefined;
+  for (const input of candidates) {
+    for (const hint of hints) {
+      const direct = extractToolFileChanges(hint, input);
+      if (direct && direct.length > 0) {
+        return direct;
+      }
+      if (
+        locationPath !== undefined &&
+        input.file_path === undefined &&
+        input.filePath === undefined &&
+        input.path === undefined
+      ) {
+        const withLocationPath = extractToolFileChanges(hint, {
+          ...input,
+          file_path: locationPath,
+        });
+        if (withLocationPath && withLocationPath.length > 0) {
+          return withLocationPath;
+        }
+      }
+    }
+  }
+  return undefined;
 }
 
 /** Failed enter_plan_mode must not leave planModeActive stuck on. */
@@ -1436,13 +1517,19 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                     );
                     return;
                   case "ToolCallUpdated": {
+                    const fileChanges = extractGrokToolFileChanges(event.toolCall);
                     yield* offerRuntimeEvent(
                       makeAcpToolCallEvent({
                         stamp,
                         provider: PROVIDER,
                         threadId: ctx.threadId,
                         turnId: notificationTurnId,
-                        toolCall: event.toolCall,
+                        toolCall: fileChanges
+                          ? {
+                              ...event.toolCall,
+                              data: { ...event.toolCall.data, changes: fileChanges },
+                            }
+                          : event.toolCall,
                         rawPayload: event.rawPayload,
                       }),
                     );

@@ -5,7 +5,7 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeURL from "node:url";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { assert, it } from "@effect/vitest";
+import { assert, describe, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -29,6 +29,7 @@ import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { ServerConfig } from "../../config.ts";
 import { execScriptSource, writeFakeCli } from "../../testUtils/fakeCli.ts";
 import {
+  extractGrokToolFileChanges,
   grokPromptSettlementBelongsToContext,
   isGrokEnterPlanModeToolCall,
   makeGrokAdapter,
@@ -2655,4 +2656,125 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
       // hang until the suite timeout instead of failing here.
     }).pipe(TestClock.withLive),
   );
+});
+
+describe("extractGrokToolFileChanges", () => {
+  it("extracts edit diff from snake_case rawInput via ACP kind", () => {
+    const result = extractGrokToolFileChanges({
+      status: "completed",
+      kind: "edit",
+      title: "Edit main.ts",
+      data: {
+        toolCallId: "tool-1",
+        rawInput: { file_path: "/repo/src/main.ts", old_string: "foo", new_string: "bar" },
+      },
+    });
+    assert.deepEqual(result, [{ path: "/repo/src/main.ts", diff: "@@ -1,1 +1,1 @@\n-foo\n+bar" }]);
+  });
+
+  it("extracts edit diff from camelCase rawInput", () => {
+    const result = extractGrokToolFileChanges({
+      status: "completed",
+      kind: "edit",
+      data: {
+        toolCallId: "tool-1",
+        rawInput: { filePath: "/repo/src/main.ts", oldString: "hello", newString: "world" },
+      },
+    });
+    assert.deepEqual(result, [
+      { path: "/repo/src/main.ts", diff: "@@ -1,1 +1,1 @@\n-hello\n+world" },
+    ]);
+  });
+
+  it("extracts write diff from content field", () => {
+    const result = extractGrokToolFileChanges({
+      status: "completed",
+      kind: "edit",
+      title: "Write plan",
+      data: {
+        toolCallId: "tool-1",
+        rawInput: { file_path: "/repo/plan.md", content: "# Plan\n" },
+      },
+    });
+    assert.isDefined(result);
+    assert.equal(result?.[0]?.path, "/repo/plan.md");
+    assert.include(result?.[0]?.diff ?? "", "+# Plan");
+  });
+
+  it("falls back to the title hint when kind is generic", () => {
+    const result = extractGrokToolFileChanges({
+      status: "completed",
+      kind: "other",
+      title: "Edit config",
+      data: {
+        toolCallId: "tool-1",
+        rawInput: { file_path: "/repo/x.ts", old_string: "a", new_string: "b" },
+      },
+    });
+    assert.isDefined(result);
+  });
+
+  it("fills the file path from locations when rawInput omits it", () => {
+    const result = extractGrokToolFileChanges({
+      status: "completed",
+      kind: "edit",
+      data: {
+        toolCallId: "tool-1",
+        rawInput: { old_string: "a", new_string: "b" },
+        locations: [{ path: "/repo/from-locations.ts" }],
+      },
+    });
+    assert.deepEqual(result, [
+      { path: "/repo/from-locations.ts", diff: "@@ -1,1 +1,1 @@\n-a\n+b" },
+    ]);
+  });
+
+  it("returns undefined while the tool call is still running", () => {
+    const result = extractGrokToolFileChanges({
+      status: "inProgress",
+      kind: "edit",
+      data: {
+        toolCallId: "tool-1",
+        rawInput: { file_path: "/repo/src/main.ts", old_string: "a", new_string: "b" },
+      },
+    });
+    assert.isUndefined(result);
+  });
+
+  it("returns undefined for non-file tools like Bash", () => {
+    const result = extractGrokToolFileChanges({
+      status: "completed",
+      kind: "execute",
+      title: "Terminal",
+      data: {
+        toolCallId: "tool-1",
+        rawInput: { variant: "Bash", command: "cat package.json" },
+      },
+    });
+    assert.isUndefined(result);
+  });
+
+  it("returns undefined when the file path is missing", () => {
+    const result = extractGrokToolFileChanges({
+      status: "completed",
+      kind: "edit",
+      data: {
+        toolCallId: "tool-1",
+        rawInput: { old_string: "a", new_string: "b" },
+      },
+    });
+    assert.isUndefined(result);
+  });
+
+  it("returns undefined when only old_string is present", () => {
+    const result = extractGrokToolFileChanges({
+      status: "completed",
+      kind: "edit",
+      data: {
+        toolCallId: "tool-1",
+        rawInput: { file_path: "/repo/x.ts", old_string: "old" },
+      },
+    });
+    assert.isUndefined(result);
+  });
 });
