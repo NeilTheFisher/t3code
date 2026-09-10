@@ -1,4 +1,5 @@
 import {
+  type ServerProviderModel,
   ANTIGRAVITY_DEFAULT_MODEL,
   DEFAULT_TEXT_GENERATION_MODEL,
   DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER,
@@ -89,6 +90,8 @@ export interface AppModelOption {
   isDefault?: boolean;
   isLegacy?: boolean;
   isUnavailable?: boolean;
+  contextWindowTokens?: number;
+  capabilities?: ServerProviderModel["capabilities"];
 }
 
 function appendUnavailableDynamicModelSelection(
@@ -109,27 +112,6 @@ function appendUnavailableDynamicModelSelection(
   if (hiddenModels.includes(slug)) return options;
   if (options.some((option) => option.slug === slug)) return options;
 
-  return [...options, { slug, name: slug, isCustom: false, isUnavailable: true }];
-  contextWindowTokens?: number;
-export interface AppModelOption extends ModelEsque {
-  isCustom: boolean;
-  isDefault?: boolean;
-  isUnavailable?: boolean;
-}
-
-function appendUnavailableOpenCodeSelection(
-  options: AppModelOption[],
-  rawModels: ReadonlyArray<ServerProvider["models"][number]>,
-  provider: ProviderDriverKind,
-  selectedModel: string | null | undefined,
-  hiddenModels: ReadonlyArray<string>,
-): AppModelOption[] {
-  if (provider !== "opencode") return options;
-  const slug = normalizeCustomModelSlug(selectedModel);
-  if (!slug) return options;
-  if (rawModels.some((model) => model.slug === slug)) return options;
-  if (hiddenModels.includes(slug)) return options;
-  if (options.some((option) => option.slug === slug)) return options;
   return [...options, { slug, name: slug, isCustom: false, isUnavailable: true }];
 }
 
@@ -217,8 +199,6 @@ function getAppModelOptions(
   const options: AppModelOption[] = rawModels
     .filter((model) => !model.isCustom)
     .map(toAppModelOption);
-  const options: AppModelOption[] = getProviderModels(providers, provider).map(toAppModelOption);
-  const options: AppModelOption[] = rawModels.map(toAppModelOption);
   const seen = new Set(options.map((option) => option.slug));
   const builtInModelSlugs = new Set(
     Arr.filterMap(getProviderModels(providers, provider), (model) =>
@@ -243,15 +223,11 @@ function getAppModelOptions(
 
   const preferences = readInstanceModelPreferences(settings, defaultInstanceId);
   return appendUnavailableDynamicModelSelection(
-  return appendUnavailableOpenCodeSelection(
     applyInstanceModelPreferences(options, preferences),
     rawModels,
     provider,
     selectedModel,
     preferences.hiddenModels,
-  return applyInstanceModelPreferences(
-    options,
-    readInstanceModelPreferences(settings, defaultInstanceId),
   );
 }
 
@@ -276,8 +252,6 @@ export function getAppModelOptionsForInstance(
   const options: AppModelOption[] = entry.models
     .filter((model) => !model.isCustom)
     .map(toAppModelOption);
-  const rawModels = entry.models;
-  const options: AppModelOption[] = rawModels.map(toAppModelOption);
   const seen = new Set(options.map((option) => option.slug));
   const builtInModelSlugs = new Set(
     Arr.filterMap(entry.models, (model) =>
@@ -302,15 +276,6 @@ export function getAppModelOptionsForInstance(
     entry.driverKind,
     selectedModel,
     preferences.hiddenModels,
-  return applyInstanceModelPreferences(
-    options,
-    readInstanceModelPreferences(settings, entry.instanceId),
-  return appendUnavailableOpenCodeSelection(
-    applyInstanceModelPreferences(options, preferences),
-    rawModels,
-    entry.driverKind,
-    selectedModel,
-    preferences.hiddenModels,
   );
 }
 
@@ -328,35 +293,12 @@ export function resolveAppModelSelection(
   );
 }
 
-/**
- * Resolve a human-friendly model label for a slug, preferring the provider
- * instance it belongs to. Falls back to a slug match across all providers,
- * then to the raw slug when the model is not in the catalog.
- */
-export function resolveModelDisplayName(
-  providers: ReadonlyArray<ServerProvider>,
-  instanceId: string | null | undefined,
-  slug: string | null | undefined,
-): string {
-  if (!slug) return "";
-  if (instanceId) {
-    const provider = providers.find((candidate) => candidate.instanceId === instanceId);
-    const model = provider?.models.find((entry) => entry.slug === slug);
-    if (model) return model.name;
-  }
-  for (const provider of providers) {
-    const model = provider.models.find((entry) => entry.slug === slug);
-    if (model) return model.name;
-  }
-  return slug;
-}
-
 export function resolveAppModelSelectionForInstance(
   instanceId: ProviderInstanceId,
   settings: UnifiedSettings,
   providers: ReadonlyArray<ServerProvider>,
   selectedModel: string | null | undefined,
-  options?: { readonly preserveUnavailableSelection?: boolean },
+  resolutionOptions?: { readonly preserveUnavailableSelection?: boolean },
 ): string | null {
   const entry = deriveProviderInstanceEntries(providers).find(
     (candidate) => candidate.instanceId === instanceId,
@@ -387,24 +329,6 @@ export function resolveAppModelSelectionForInstance(
     }
   }
   return options.find((option) => option.isDefault)?.slug ?? options[0]?.slug ?? null;
-  const options = getAppModelOptionsForInstance(settings, entry);
-  const preserve = options?.preserveUnavailableSelection === true;
-  const effectiveSelectedModel = preserve ? selectedModel : null;
-  const opts = getAppModelOptionsForInstance(settings, entry, effectiveSelectedModel);
-  // When preserving, also allow the selectedModel itself to be resolved even if not in opts (via isUnavailable)
-  // Otherwise, don't pass selectedModel so it won't be added as unavailable
-  return (
-    resolveSelectableModel(
-      entry.driverKind,
-      selectedModel,
-      preserve ? opts : getAppModelOptionsForInstance(settings, entry),
-    ) ??
-    opts.find((option) => option.isDefault)?.slug ??
-    opts[0]?.slug ??
-    entry.models.find((model) => model.isDefault)?.slug ??
-    entry.models[0]?.slug ??
-    null
-  );
 }
 
 /**
@@ -523,4 +447,22 @@ export function resolveAppModelSelectionState(
   }
 
   return NO_PROVIDER_MODEL_SELECTION;
+}
+
+export function resolveModelDisplayName(
+  providers: ReadonlyArray<ServerProvider>,
+  instanceId: string | null | undefined,
+  slug: string | null | undefined,
+): string {
+  if (!slug) return "";
+  if (instanceId) {
+    const provider = providers.find((candidate) => candidate.instanceId === instanceId);
+    const model = provider?.models.find((entry) => entry.slug === slug);
+    if (model) return model.name;
+  }
+  for (const provider of providers) {
+    const model = provider.models.find((entry) => entry.slug === slug);
+    if (model) return model.name;
+  }
+  return slug;
 }
