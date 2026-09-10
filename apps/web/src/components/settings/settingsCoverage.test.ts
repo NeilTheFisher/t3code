@@ -26,13 +26,12 @@ for (const source of settingsSources) {
   }
 }
 
-// Search entries that intentionally have no rendered control: upstream-only rows
-// this fork has not ported yet, plus anchor ids rendered without searchableSetting.
+// Search entries that intentionally have no rendered control: upstream rows the
+// fork has not ported yet, plus anchor ids rendered without searchableSetting.
 const NON_CONTROL_SEARCH_IDS = new Set<string>([
-  "panel-animations",
-  "hide-whitespace-changes",
-  "diff-layout",
+  // Server-scoped setting; the fork's unified settings do not carry it yet.
   "continue-threads-after-server-update",
+  // Anchor ids (rendered with a raw id, not a searchableSetting row).
   "device-hosts",
   "browser-default-profile",
 ]);
