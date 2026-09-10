@@ -18,7 +18,6 @@ import {
   PilcrowIcon,
   RefreshCwIcon,
   Rows3Icon,
-  SearchIcon,
   TextWrapIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -56,16 +55,17 @@ import { Switch } from "./ui/switch";
 import {
   Combobox,
   ComboboxEmpty,
-  ComboboxInput,
   ComboboxItem,
   ComboboxList,
   ComboboxPopup,
+  ComboboxSearchInput,
   ComboboxTrigger,
 } from "./ui/combobox";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
@@ -257,6 +257,10 @@ export default function DiffPanel({
     ? `${routeThreadRef.environmentId}:${routeThreadRef.threadId}:${reviewSectionId}`
     : null;
   const codeViewMountKey = `${collapseScopeKey ?? reviewSectionId}:${codeViewRevision}`;
+  const collapsedDiffFileKeys =
+    collapsedDiffFiles.scopeKey === collapseScopeKey
+      ? collapsedDiffFiles.fileKeys
+      : EMPTY_COLLAPSED_DIFF_FILE_KEYS;
   const reviewSectionTitle = selectedTurn
     ? `Turn ${selectedCheckpointTurnCount ?? "?"}`
     : selectedGitScope === "unstaged"
@@ -480,17 +484,6 @@ export default function DiffPanel({
       })),
     [renderableFiles],
   );
-  const defaultCollapsedDiffFileKeys = useMemo(
-    () =>
-      settings.diffFilesCollapsed
-        ? new Set(renderableFileEntries.map((file) => file.fileKey))
-        : EMPTY_COLLAPSED_DIFF_FILE_KEYS,
-    [renderableFileEntries, settings.diffFilesCollapsed],
-  );
-  const collapsedDiffFileKeys =
-    collapsedDiffFiles.scopeKey === collapseScopeKey
-      ? collapsedDiffFiles.fileKeys
-      : defaultCollapsedDiffFileKeys;
   const codeViewFiles = useMemo(
     () =>
       renderableFileEntries.map(({ fileDiff, fileKey }) => {
@@ -512,32 +505,9 @@ export default function DiffPanel({
     : null;
 
   useEffect(() => {
-    if (!selectedDiffFileKey || !codeView?.getInstance()) return;
-    codeView.scrollTo({ type: "item", id: selectedDiffFileKey, align: "start" });
-  }, [codeView, codeViewMountKey, selectedDiffFileKey, selectedFileRevealRequestId]);
-
-  const treeRevealScope = useMemo(
-    () => ({ collapseScopeKey, diffSelection }),
-    [collapseScopeKey, diffSelection],
-  );
-  const requestTreeReveal = useCodeViewFileReveal(codeView, treeRevealScope);
-  const revealDiffFile = useCallback(
-    (filePath: string) => {
-      const file = codeViewFiles.find((candidate) => candidate.filePath === filePath);
-      if (!file) return;
-      if (file.collapsed) {
-        setCollapsedDiffFiles((current) => {
-          const next = new Set(
-            current.scopeKey === collapseScopeKey ? current.fileKeys : defaultCollapsedDiffFileKeys,
-          );
-          next.delete(file.fileKey);
-          return { scopeKey: collapseScopeKey, fileKeys: next };
-        });
-      }
-      requestTreeReveal(file.fileKey);
-    },
-    [codeViewFiles, collapseScopeKey, defaultCollapsedDiffFileKeys, requestTreeReveal],
-  );
+    if (!selectedDiffFileKey) return;
+    codeViewRef.current?.scrollTo({ type: "item", id: selectedDiffFileKey, align: "start" });
+  }, [codeViewMountKey, selectedDiffFileKey, selectedFileRevealRequestId]);
 
   const openDiffFile = useCallback(
     (filePath: string) => {
@@ -569,9 +539,7 @@ export default function DiffPanel({
   const toggleDiffFileCollapsed = useCallback(
     (fileKey: string) => {
       setCollapsedDiffFiles((current) => {
-        const next = new Set(
-          current.scopeKey === collapseScopeKey ? current.fileKeys : defaultCollapsedDiffFileKeys,
-        );
+        const next = new Set(current.scopeKey === collapseScopeKey ? current.fileKeys : []);
         if (next.has(fileKey)) {
           next.delete(fileKey);
         } else {
@@ -580,21 +548,21 @@ export default function DiffPanel({
         return { scopeKey: collapseScopeKey, fileKeys: next };
       });
     },
-    [collapseScopeKey, defaultCollapsedDiffFileKeys],
+    [collapseScopeKey],
   );
 
   const toggleDiffFileCollapse = useCallback(() => {
     setCodeViewRevision((current) => current + 1);
     setCollapsedDiffFiles((current) => {
       const currentKeys =
-        current.scopeKey === collapseScopeKey ? current.fileKeys : defaultCollapsedDiffFileKeys;
+        current.scopeKey === collapseScopeKey ? current.fileKeys : EMPTY_COLLAPSED_DIFF_FILE_KEYS;
 
       return {
         scopeKey: collapseScopeKey,
         fileKeys: toggleAllDiffFiles(diffFileKeys, currentKeys),
       };
     });
-  }, [collapseScopeKey, defaultCollapsedDiffFileKeys, diffFileKeys]);
+  }, [collapseScopeKey, diffFileKeys]);
 
   const selectTurn = (turnId: TurnId) => {
     if (!routeThreadRef) return;
@@ -609,73 +577,74 @@ export default function DiffPanel({
     useDiffPanelStore.getState().selectBranchBaseRef(routeThreadRef, baseRef);
   };
 
+  // The scope menu has two radio groups: the top-level one treats the latest
+  // turn as "latest", while the turn sub-menu keys every turn by id so the
+  // latest turn is also marked there.
+  const selectedTurnValue = selectedTurn ? `turn:${selectedTurn.turnId}` : "";
+  const selectedScopeValue =
+    selectedTurnId === null
+      ? selectedGitScope
+      : selectedTurn?.turnId === latestTurn?.turnId
+        ? "latest"
+        : selectedTurnValue;
+  const selectScopeValue = (value: string) => {
+    if (value === "unstaged" || value === "branch") {
+      selectGitScope(value);
+    } else if (value === "latest") {
+      if (latestTurn) selectTurn(latestTurn.turnId);
+    } else {
+      const turn = orderedTurnDiffSummaries.find((summary) => `turn:${summary.turnId}` === value);
+      if (turn) selectTurn(turn.turnId);
+    }
+  };
+
   const headerRow = (
     <>
       <div className="flex min-w-0 flex-1 items-center gap-3 [-webkit-app-region:no-drag]">
         <DropdownMenu>
           <DropdownMenuTrigger
-            className="inline-flex h-6 max-w-full items-center gap-1 rounded-md bg-accent px-2 text-xs font-medium text-accent-foreground outline-none transition-colors hover:bg-accent/80 focus-visible:ring-2 focus-visible:ring-ring"
+            render={<Button size="xs" variant="secondary" />}
+            className="max-w-full"
             aria-label={`Diff scope: ${selectedScopeLabel}`}
           >
             <span className="truncate">{selectedScopeLabel}</span>
             <ChevronDownIcon className="size-3.5 shrink-0 opacity-70" />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-60">
-            <DropdownMenuItem
-              className={
-                selectedTurnId === null && selectedGitScope === "unstaged"
-                  ? "bg-foreground/[0.08]"
-                  : undefined
-              }
-              onClick={() => selectGitScope("unstaged")}
-            >
-              <span>Working tree</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              className={
-                selectedTurnId === null && selectedGitScope === "branch"
-                  ? "bg-foreground/[0.08]"
-                  : undefined
-              }
-              onClick={() => selectGitScope("branch")}
-            >
-              <span>Branch changes</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              className={
-                selectedTurnId !== null && selectedTurn?.turnId === latestTurn?.turnId
-                  ? "bg-foreground/[0.08]"
-                  : undefined
-              }
-              onClick={() => {
-                if (latestTurn) selectTurn(latestTurn.turnId);
-              }}
-            >
-              <span>Latest turn</span>
-            </DropdownMenuItem>
+            <DropdownMenuRadioGroup value={selectedScopeValue} onValueChange={selectScopeValue}>
+              <DropdownMenuRadioItem value="unstaged" closeOnClick>
+                <span>Working tree</span>
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="branch" closeOnClick>
+                <span>Branch changes</span>
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="latest" closeOnClick>
+                <span>Latest turn</span>
+              </DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>Turn</DropdownMenuSubTrigger>
               <DropdownMenuSubContent className="w-64">
-                {orderedTurnDiffSummaries.map((summary) => {
-                  const turnCount =
-                    summary.checkpointTurnCount ??
-                    inferredCheckpointTurnCountByTurnId[summary.turnId] ??
-                    "?";
-                  return (
-                    <DropdownMenuItem
-                      key={summary.turnId}
-                      className={
-                        summary.turnId === selectedTurn?.turnId ? "bg-foreground/[0.08]" : undefined
-                      }
-                      onClick={() => selectTurn(summary.turnId)}
-                    >
-                      <span>Turn {turnCount}</span>
-                      <span className="ml-auto text-xs tabular-nums text-muted-foreground">
-                        {formatShortTimestamp(summary.completedAt, settings.timestampFormat)}
-                      </span>
-                    </DropdownMenuItem>
-                  );
-                })}
+                <DropdownMenuRadioGroup value={selectedTurnValue} onValueChange={selectScopeValue}>
+                  {orderedTurnDiffSummaries.map((summary) => {
+                    const turnCount =
+                      summary.checkpointTurnCount ??
+                      inferredCheckpointTurnCountByTurnId[summary.turnId] ??
+                      "?";
+                    return (
+                      <DropdownMenuRadioItem
+                        key={summary.turnId}
+                        value={`turn:${summary.turnId}`}
+                        closeOnClick
+                      >
+                        <span>Turn {turnCount}</span>
+                        <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+                          {formatShortTimestamp(summary.completedAt, settings.timestampFormat)}
+                        </span>
+                      </DropdownMenuRadioItem>
+                    );
+                  })}
+                </DropdownMenuRadioGroup>
               </DropdownMenuSubContent>
             </DropdownMenuSub>
           </DropdownMenuContent>
@@ -709,7 +678,8 @@ export default function DiffPanel({
               }}
             >
               <ComboboxTrigger
-                className="inline-flex min-w-0 max-w-48 items-center gap-1 overflow-hidden rounded-md px-1.5 py-1 outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                render={<Button variant="ghost-muted" size="xs" />}
+                className="min-w-0 max-w-48"
                 aria-label={`Change comparison target. Currently ${selectedGitSource.baseRef}`}
               >
                 <span className="min-w-0 truncate">{selectedGitSource.baseRef}</span>
@@ -724,8 +694,8 @@ export default function DiffPanel({
                   value={baseRefQuery}
                   onChange={(event) => setBaseRefQuery(event.target.value)}
                 />
-                <div className="grid shrink-0 grid-cols-[1rem_minmax(0,1fr)] items-center gap-2 border-b border-border/70 ps-3 pe-6.5 pt-2 pb-1.5 font-medium text-3xs text-muted-foreground uppercase tracking-wide">                  <span aria-hidden="true" />
-                  <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_2rem] items-center">
+                <div className="grid shrink-0 grid-cols-[1rem_minmax(0,1fr)] items-center gap-2 border-b border-border/70 ps-3 pe-6.5 pt-2 pb-1.5 font-medium text-[10px] text-muted-foreground uppercase tracking-wide">
+                  <span aria-hidden="true" />                  <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_2rem] items-center">
                     <span>Branch</span>
                     <span className="text-right">Remote</span>
                   </div>
@@ -733,8 +703,7 @@ export default function DiffPanel({
                 <ComboboxEmpty>No matching refs.</ComboboxEmpty>
                 <ComboboxList className="max-h-64 min-w-0 overflow-x-hidden">
                   <ComboboxItem
-                    className="h-8 w-full min-w-0 grid-cols-[1rem_minmax(0,1fr)] py-0"
-                    contentClassName="w-full min-w-0 overflow-hidden"
+                    className="w-full min-w-0 grid-cols-[1rem_minmax(0,1fr)]"
                     value={AUTOMATIC_BASE_REF}
                   >
                     <span className="block min-w-0 truncate">Automatic</span>
@@ -746,8 +715,7 @@ export default function DiffPanel({
                     return (
                       <ComboboxItem
                         key={choice.id}
-                        className="h-8 w-full min-w-0 grid-cols-[1rem_minmax(0,1fr)] py-0"
-                        contentClassName="w-full min-w-0 overflow-hidden"
+                        className="w-full min-w-0 grid-cols-[1rem_minmax(0,1fr)]"
                         value={item}
                       >
                         <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_2rem] items-center overflow-hidden">
@@ -852,7 +820,7 @@ export default function DiffPanel({
           </Tooltip>
         )}
         <ToggleGroup
-          className="shrink-0 gap-1"
+          className="shrink-0"
           size="sm"
           value={[diffRenderMode]}
           onValueChange={(value) => {
@@ -1021,11 +989,11 @@ export default function DiffPanel({
                     viewerRef={codeViewRef}
                     codeViewKey={codeViewMountKey}
                     className="diff-render-surface h-full min-h-0 overflow-auto"
-                    unsafeCSSExtra={DIFF_PANEL_UNSAFE_CSS}
                     files={codeViewFiles}
                     sectionId={reviewSectionId}
                     sectionTitle={reviewSectionTitle}
                     composerDraftTarget={composerDraftTarget}
+                    unsafeCSSExtra={DIFF_PANEL_UNSAFE_CSS}
                     renderHeaderFilenameSuffix={(fileDiff) => (
                       <DiffFilePathCopyButton filePath={resolveFileDiffPath(fileDiff)} />
                     )}

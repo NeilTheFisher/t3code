@@ -138,8 +138,20 @@ describe("ServerProvider", () => {
         source: "claudePrint",
         checkedAt: "2026-07-22T12:00:00.000Z",
         windows: [
-          { label: "Session", usedPercent: 30, windowDurationMins: 300 },
-          { label: "Weekly (Fable)", usedPercent: 26, windowDurationMins: 10_080 },
+          {
+            id: "session",
+            kind: "session",
+            label: "Session",
+            usedPercent: 30,
+            windowDurationMins: 300,
+          },
+          {
+            id: "weekly_fable",
+            kind: "weekly",
+            label: "Weekly (Fable)",
+            usedPercent: 26,
+            windowDurationMins: 10_080,
+          },
         ],
       },
     });

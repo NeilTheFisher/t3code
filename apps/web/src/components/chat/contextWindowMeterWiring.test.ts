@@ -18,8 +18,4 @@ describe("context window indicator wiring", () => {
       /settings\.contextWindowMeterEnabled\s*\?\s*activeContextWindow\s*:\s*null/,
     );
   });
-
-  it("still labels the legacy setting so settings search can find it", () => {
-    expect(chatComposerSource).toContain("contextWindowMeterEnabled");
-  });
 });

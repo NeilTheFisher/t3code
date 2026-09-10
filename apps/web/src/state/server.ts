@@ -85,6 +85,11 @@ export const primaryServerSettingsAtom = Atom.make(
   (get): ServerSettings => get(primaryServerConfigAtom)?.settings ?? DEFAULT_SERVER_SETTINGS,
 ).pipe(Atom.withLabel("web-primary-server-settings"));
 
+export const primaryServerObservabilityAtom = Atom.make(
+  (get): ServerConfig["observability"] | null =>
+    get(primaryServerConfigAtom)?.observability ?? null,
+).pipe(Atom.withLabel("web-primary-server-observability"));
+
 export const primaryServerProvidersAtom = Atom.make(
   (get): ReadonlyArray<ServerProvider> =>
     get(primaryServerConfigAtom)?.providers ?? EMPTY_SERVER_PROVIDERS,

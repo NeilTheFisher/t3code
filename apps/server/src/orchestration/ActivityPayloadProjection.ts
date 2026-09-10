@@ -172,13 +172,6 @@ function projectCommandData(data: Record<string, unknown>): Record<string, unkno
     if ("command" in result) {
       projectedResult.command = result.command;
     }
-    const content = asTrimmedString(result.content);
-    if (content) {
-      const summary = summarizeToolTextOutput(content);
-      if (summary) {
-        projectedResult.content = summary;
-      }
-    }
     if (Object.keys(projectedResult).length > 0) {
       projectedItem.result = projectedResult;
     }

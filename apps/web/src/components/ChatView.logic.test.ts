@@ -71,12 +71,12 @@ import {
   resolveSendEnvMode,
   threadShellHasStarted,
   resolveDraftHeroState,
+  revokeComposerImagePreviewUrls,
   isPaintOnlyThreadTimeline,
   peekHeldThreadTimeline,
   peekRememberedThreadTimeline,
   rememberReadyThreadTimeline,
   resetHeldThreadTimeline,
-  revokeComposerImagePreviewUrls,
   resolveThreadSwitchTimeline,
   threadKeysShareEnvironment,
   timelineHasEphemeralPreviewUrls,
@@ -92,9 +92,9 @@ import {
   shouldShowBranchMismatchBanner,
   shouldShowPlanFollowUpPrompt,
   shouldWriteThreadErrorToCurrentServerThread,
+  codexArtifactTemplatePromptToAppend,
   waitForRevertedMessage,
   prepareRevertedMessageAttachments,
-  codexArtifactTemplatePromptToAppend,
 } from "./ChatView.logic";
 
 describe("agent browser close confirmation", () => {

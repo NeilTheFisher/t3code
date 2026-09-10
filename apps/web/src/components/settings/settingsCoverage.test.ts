@@ -26,6 +26,14 @@ for (const source of settingsSources) {
   }
 }
 
+// Upstream anchors one search entry per keybinding command to that command's
+// first row. The id is built at runtime (`keybindingSearchAnchorId`), so the
+// literal scan above cannot see it; treat every `keybinding-*` entry as rendered
+// only while the Keybindings page still references that helper.
+const rendersKeybindingAnchors = settingsSources.some((source) =>
+  source.includes("keybindingSearchAnchorId("),
+);
+
 // Search entries that intentionally have no rendered control: upstream rows the
 // fork has not ported yet, plus anchor ids rendered without searchableSetting.
 const NON_CONTROL_SEARCH_IDS = new Set<string>([
@@ -34,6 +42,17 @@ const NON_CONTROL_SEARCH_IDS = new Set<string>([
   // Anchor ids (rendered with a raw id, not a searchableSetting row).
   "device-hosts",
   "browser-default-profile",
+  // Upstream storage sections anchor to `<SettingsSection id="storage-…">`.
+  "storage-worktrees",
+  "storage-artifacts",
+  // Upstream-only project/settings panels the fork has not ported yet.
+  "project-defaults",
+  "project-overview",
+  "default-model",
+  "default-diff-file-state",
+  "open-source-licenses",
+  "automatic-pull",
+  "project-actions",
 ]);
 
 // Settings the fork relies on and must never lose to a merge. Kept separate from
@@ -47,9 +66,16 @@ const FORK_CRITICAL_SETTING_IDS = [
 
 describe("settings search coverage", () => {
   it("renders a control for every searchable settings entry", () => {
-    const missing = SETTINGS_SEARCH_ITEMS.map((item) => item.id).filter(
-      (id) => !renderedSettingIds.has(id) && !NON_CONTROL_SEARCH_IDS.has(id),
-    );
+    const missing = SETTINGS_SEARCH_ITEMS.filter((item) => {
+      const { id } = item;
+      const targetId = "targetId" in item ? item.targetId : undefined;
+      if (renderedSettingIds.has(id) || NON_CONTROL_SEARCH_IDS.has(id)) return false;
+      if (id.startsWith("keybinding-") && rendersKeybindingAnchors) return false;
+      // Some entries are search aliases whose row is anchored under `targetId`
+      // (e.g. "environment-icon" -> "connections-environment").
+      if (targetId !== undefined && renderedSettingIds.has(targetId)) return false;
+      return true;
+    }).map((item) => item.id);
 
     expect(missing).toEqual([]);
   });

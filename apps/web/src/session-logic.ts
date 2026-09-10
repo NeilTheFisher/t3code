@@ -1,14 +1,10 @@
-import {
-  requestKindFromRequestType,
-  type PendingApproval,
-} from "@t3tools/client-runtime/pending-requests";
-import { UserInputAttachmentAnswerPayload } from "@t3tools/contracts";
-import { foldUserInputActivities } from "@t3tools/client-runtime/work-log/user-input";
 import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
 import * as Schema from "effect/Schema";
+import { shallow } from "zustand/vanilla/shallow";
 import { isBackgroundTaskActivity } from "@t3tools/client-runtime/state/subagentRuntime";
 import { isWorktreeSetupActivity } from "@t3tools/client-runtime/work-log/presentation";
+import { foldUserInputActivities } from "@t3tools/client-runtime/work-log/user-input";
 import {
   ApprovalRequestId,
   isToolLifecycleItemType,
@@ -19,10 +15,12 @@ import {
   ProviderApprovalOption,
   ProviderRequestKind,
   type ToolLifecycleItemType,
+  UserInputAttachmentAnswerPayload,
   type UserInputQuestion,
   type ThreadId,
   type TurnId,
 } from "@t3tools/contracts";
+import { extractToolActivityPresentation } from "@t3tools/client-runtime/work-log/tool-presentation";
 
 import type {
   ChatMessage,
@@ -78,6 +76,7 @@ export interface FileChange {
 }
 
 export interface WorkLogEntry {
+  questionAnswer?: UserInputAttachmentAnswerPayload;
   id: string;
   createdAt: string;
   turnId?: TurnId | null;
@@ -85,11 +84,15 @@ export interface WorkLogEntry {
   toolCallId?: string;
   label: string;
   detail?: string;
+  viewedImagePath?: string;
   command?: string;
   rawCommand?: string;
   changedFiles?: ReadonlyArray<string>;
   tone: "thinking" | "tool" | "info" | "error";
   toolTitle?: string;
+  toolSurface?: import("@t3tools/contracts").ToolActivitySurface;
+  toolIcon?: import("@t3tools/contracts").ToolActivityIcon;
+  toolSource?: import("@t3tools/contracts").ToolActivitySource;
   toolData?: unknown;
   itemType?: ToolLifecycleItemType;
   requestKind?: PendingApproval["requestKind"];
@@ -102,9 +105,10 @@ export interface WorkLogEntry {
   /** Agent role (subagent_type) for labeled timeline rows. */
   agentRole?: string;
   /**
-   * Present on agent-spawn rows: one per workflow run or per-turn batch of
-   * direct spawns. The row ("Kicked off N subagents") derives its live
-   * status and member list from the agent panel model at render time.
+   * Present on agent-spawn CTA rows: one per workflow run or per-turn batch
+   * of direct spawns. The row renders as a call-to-action ("Kicked off N
+   * subagents") whose live status is derived from the agent panel model at
+   * render time; clicking opens the Agents panel.
    */
   agentSpawn?: {
     /** Workflow coordinator taskId, or null for a direct-spawn batch. */
@@ -216,13 +220,101 @@ export type TimelineEntry =
       notice: ModelChangeNotice;
     };
 
-export interface TimelineEntriesProjection {
-  readonly messages: ReadonlyArray<ChatMessage>;
-  readonly proposedPlans: ReadonlyArray<ProposedPlan>;
-  readonly workEntries: ReadonlyArray<WorkLogEntry>;
-  readonly turnPlans: ReadonlyArray<TurnPlanEntry>;
-  readonly notices: ReadonlyArray<ModelChangeNotice>;
-  readonly entries: TimelineEntry[];
+export function workLogEntryIsToolLike(entry: WorkLogEntry): boolean {
+  if (entry.tone === "tool" || entry.tone === "thinking" || entry.tone === "error") {
+    return true;
+  }
+  if (entry.command !== undefined && entry.command.trim().length > 0) {
+    return true;
+  }
+  if (entry.requestKind !== undefined) {
+    return true;
+  }
+  return entry.itemType !== undefined && isToolLifecycleItemType(entry.itemType);
+}
+
+/** Heuristic: providers often emit successful lifecycle status while error text lives in `detail` / `command`. */
+function toolDetailTextLooksLikeFailure(text: string): boolean {
+  const t = text.toLowerCase();
+  if (t.includes("file not found")) {
+    return true;
+  }
+  if (t.includes("no files found")) {
+    return true;
+  }
+  if (
+    t.includes("enoent") ||
+    t.includes("no such file or directory") ||
+    t.includes("no such file")
+  ) {
+    return true;
+  }
+  if (t.includes("cannot find path") && t.includes("because it does not exist")) {
+    return true;
+  }
+  if (t.includes("commandnotfoundexception")) {
+    return true;
+  }
+  if (t.includes("is not recognized as the name of a cmdlet")) {
+    return true;
+  }
+  if (t.includes("is not recognized") && t.includes("the term '")) {
+    return true;
+  }
+  if (t.includes("a parameter cannot be found that matches parameter name")) {
+    return true;
+  }
+  if (t.includes("command not found")) {
+    return true;
+  }
+  if (/<exited with exit code\s+[1-9]\d*\s*>/i.test(text)) {
+    return true;
+  }
+  if (/exit(?:ed)? with exit code\s+[1-9]\d*/i.test(text)) {
+    return true;
+  }
+  if (/exit code\s*[:\s]\s*[1-9]\d*\b/i.test(text)) {
+    return true;
+  }
+  return false;
+}
+
+function workEntryIndicatesToolFailureFromOutput(
+  entry: WorkLogEntry,
+  includeCommand: boolean,
+): boolean {
+  if (entry.tone === "error") {
+    return true;
+  }
+  const ls = entry.toolLifecycleStatus;
+  if (ls === "failed" || ls === "declined") {
+    return true;
+  }
+  if (!workLogEntryIsToolLike(entry)) {
+    return false;
+  }
+  const parts: string[] = [];
+  if (entry.detail) {
+    parts.push(entry.detail);
+  }
+  if (includeCommand && entry.command) {
+    parts.push(entry.command);
+  }
+  const blob = parts.join("\n");
+  if (blob.length === 0) {
+    return false;
+  }
+  return toolDetailTextLooksLikeFailure(blob);
+}
+
+/** True when a tool failed, including providers that put error output in `command`. */
+export function workEntryIndicatesToolFailure(entry: WorkLogEntry): boolean {
+  return workEntryIndicatesToolFailureFromOutput(entry, true);
+}
+
+/** True when the rendered result indicates failure. The command itself is user intent, not output. */
+export function workEntryDisplayIndicatesToolFailure(entry: WorkLogEntry): boolean {
+  return workEntryIndicatesToolFailureFromOutput(entry, false);
 }
 
 /** Severe failures keep the red treatment ordinary tool failures lost: runtime
@@ -635,9 +727,8 @@ export function deriveActivePlanState(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
   latestTurnId: TurnId | undefined,
 ): ActivePlanState | null {
-  const allPlanActivities = activities
-    .filter((activity) => activity.kind === "turn.plan.updated")
-    .sort(compareActivitiesByOrder);
+  const ordered = [...activities].toSorted(compareActivitiesByOrder);
+  const allPlanActivities = ordered.filter((activity) => activity.kind === "turn.plan.updated");
   // Prefer plan from the current turn; fall back to the most recent plan from any turn
   // so that TodoWrite tasks persist across follow-up messages.
   const latest = Option.firstSomeOf([
@@ -758,8 +849,7 @@ export function hasActionableProposedPlan(
  * - tool rows attributed to an owning agent (payload.agentId) are re-homed;
  * - task.progress ticks collapse into one row per taskId;
  * - task.updated is fold input only (status patches are not narrative).
- * Unattributed rows stay unless a linked agent row replaces their launch;
- * failed launches stay so the only terminal signal cannot disappear.
+ * Unattributed rows always stay: over-hiding loses the only terminal signal.
  */
 /** Agent (non-background) task.started rows seed spawn CTA batches. */
 function isAgentTaskStartedActivity(activity: OrchestrationThreadActivity): boolean {
@@ -788,7 +878,7 @@ function isAgentInternalActivity(activity: OrchestrationThreadActivity): boolean
     activity.kind === "task.completed";
   // Task rows classify by the server stamp: a subagent's own background
   // shell (agentId + "background") is agent-internal, but a nested AGENT
-  // (agentId + "agent") stays visible so its rows can anchor a spawn row
+  // (agentId + "agent") stays visible so its rows can anchor a spawn CTA
   // (review finding: hiding on agentId alone removed nested agents and
   // their anchors). Bypassed agent lifecycle rows also pass — collapse
   // folds every such row into its batch's single CTA row, which is how
@@ -816,20 +906,6 @@ export function deriveWorkLogEntries(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
 ): WorkLogEntry[] {
   const ordered = [...activities].toSorted(compareActivitiesByOrder);
-  // A launch tool and its task lifecycle describe the same run. Only hide
-  // launch rows once their tool-use id has an agent row to replace them.
-  const agentLaunchToolIds = new Set<string>();
-  for (const activity of ordered) {
-    if (
-      (activity.kind === "task.started" ||
-        activity.kind === "task.progress" ||
-        activity.kind === "task.completed") &&
-      isAgentTaskStartedActivity(activity)
-    ) {
-      const toolUseId = asTrimmedString(asRecord(activity.payload)?.toolUseId);
-      if (toolUseId) agentLaunchToolIds.add(toolUseId);
-    }
-  }
   const entries: DerivedWorkLogEntry[] = [];
   for (const activity of foldUserInputActivities(ordered)) {
     if (
@@ -855,28 +931,7 @@ export function deriveWorkLogEntries(
     if (isNoContentRuntimeWarning(activity)) continue;
     if (isPlanBoundaryToolActivity(activity)) continue;
     if (isAgentInternalActivity(activity)) continue;
-    const entry = toDerivedWorkLogEntry(activity);
-    // Native agent launches get their visible row from task.started. Defer
-    // their active tool row so another launch cannot duplicate the batch.
-    if (
-      activity.kind === "tool.updated" &&
-      entry.itemType === "collab_agent_tool_call" &&
-      entry.toolLifecycleStatus === "inProgress" &&
-      entry.tone !== "error"
-    ) {
-      const toolName = asRecord(asRecord(activity.payload)?.data)?.toolName;
-      if (toolName === "Agent" || toolName === "Task") continue;
-    }
-    if (
-      (activity.kind === "tool.updated" || activity.kind === "tool.completed") &&
-      entry.toolCallId &&
-      agentLaunchToolIds.has(entry.toolCallId) &&
-      entry.tone !== "error" &&
-      entry.toolLifecycleStatus !== "failed"
-    ) {
-      continue;
-    }
-    entries.push(entry);
+    entries.push(toDerivedWorkLogEntry(activity));
   }
   return collapseDerivedWorkLogEntries(entries);
 }
@@ -923,6 +978,8 @@ function extractWorkLogToolLifecycleStatus(
   return undefined;
 }
 
+const decodeQuestionAttachmentAnswer = Schema.decodeUnknownOption(UserInputAttachmentAnswerPayload);
+
 function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWorkLogEntry {
   const cachedEntry = derivedWorkLogEntryByActivity.get(activity);
   if (cachedEntry) {
@@ -936,6 +993,7 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   const changedFiles = extractChangedFiles(payload);
   const fileChanges = extractFileChanges(payload);
   const title = extractToolTitle(payload);
+  const toolPresentation = extractToolActivityPresentation(payload);
   const isTaskActivity =
     activity.kind === "task.started" ||
     activity.kind === "task.progress" ||
@@ -974,8 +1032,13 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
           : activity.tone,
     sourceActivityKind: activity.kind,
   };
+  if (activity.kind === "user-input.answer-submitted") {
+    const answer = decodeQuestionAttachmentAnswer(payload);
+    if (Option.isSome(answer)) entry.questionAnswer = answer.value;
+  }
   const itemType = extractWorkLogItemType(payload);
   const requestKind = extractWorkLogRequestKind(payload);
+  const viewedImagePath = asTrimmedString(asRecord(payload?.data)?.imagePath);
   if (detail) {
     entry.detail = detail;
   } else if (activity.kind === "runtime.error" || activity.kind === "runtime.warning") {
@@ -986,6 +1049,9 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
     ) {
       entry.detail = message;
     }
+  }
+  if (viewedImagePath) {
+    entry.viewedImagePath = viewedImagePath;
   }
   if (commandPreview.command) {
     entry.command = commandPreview.command;
@@ -1005,6 +1071,15 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   }
   if (title) {
     entry.toolTitle = title;
+  }
+  if (toolPresentation.toolSurface) {
+    entry.toolSurface = toolPresentation.toolSurface;
+  }
+  if (toolPresentation.toolIcon) {
+    entry.toolIcon = toolPresentation.toolIcon;
+  }
+  if (toolPresentation.toolSource) {
+    entry.toolSource = toolPresentation.toolSource;
   }
   if (itemType === "mcp_tool_call") {
     const data = asRecord(payload?.data);
@@ -1094,7 +1169,7 @@ function collapseDerivedWorkLogEntries(
   const collapsed: DerivedWorkLogEntry[] = [];
   // Subagent rows collapse by spawn group, not adjacency: a workflow run (or
   // a turn's batch of direct spawns) is ONE narrative event in the chat — a
-  // spawn row in the timeline — no matter how many agents it
+  // CTA row that opens the Agents panel — no matter how many agents it
   // contains or how their progress rows interleave (quiet-timeline
   // guarantee).
   const spawnRowIndex = new Map<string, number>();
@@ -1973,337 +2048,6 @@ function compareActivityLifecycleRank(kind: string): number {
   return 1;
 }
 
-function timelineEntryFromMessage(message: ChatMessage): TimelineEntry {
-  return {
-    id: message.id,
-    kind: "message",
-    createdAt: message.createdAt,
-    message,
-  };
-}
-
-function timelineEntryFromProposedPlan(proposedPlan: ProposedPlan): TimelineEntry {
-  return {
-    id: proposedPlan.id,
-    kind: "proposed-plan",
-    createdAt: proposedPlan.createdAt,
-    proposedPlan,
-  };
-}
-
-function timelineEntryFromWork(workEntry: WorkLogEntry): TimelineEntry {
-  return {
-    id: workEntry.id,
-    kind: "work",
-    createdAt: workEntry.createdAt,
-    entry: workEntry,
-  };
-}
-
-function compareTimelineEntriesByCreatedAt(left: TimelineEntry, right: TimelineEntry): number {
-  return left.createdAt.localeCompare(right.createdAt);
-}
-
-/**
- * Model-change notices share their timestamp with the user message that
- * triggered the switch; render the notice just above that message so it reads
- * as a boundary ("switched to X" then the message sent to X).
- */
-function compareTimelineEntriesByCreatedAtWithNotices(
-  left: TimelineEntry,
-  right: TimelineEntry,
-): number {
-  const byTime = left.createdAt.localeCompare(right.createdAt);
-  if (byTime !== 0) return byTime;
-  const leftNotice = left.kind === "notice" ? 0 : 1;
-  const rightNotice = right.kind === "notice" ? 0 : 1;
-  return leftNotice - rightNotice;
-}
-
-function timelineEntrySourceOrder(entry: TimelineEntry): number {
-  switch (entry.kind) {
-    case "notice":
-      return -1;
-    case "message":
-      return 0;
-    case "proposed-plan":
-      return 1;
-    case "turn-plan":
-      return 2;
-    case "work":
-      return 3;
-  }
-}
-
-function shouldTakePreviousTimelineEntry(previous: TimelineEntry, suffix: TimelineEntry): boolean {
-  const createdAtComparison = compareTimelineEntriesByCreatedAt(previous, suffix);
-  if (createdAtComparison !== 0) return createdAtComparison < 0;
-  // The original full derivation sorts a source-ordered array with a stable
-  // comparator. On a tie, messages precede plans, plans precede work, and an
-  // older item in the same source array precedes a newly appended item.
-  return timelineEntrySourceOrder(previous) <= timelineEntrySourceOrder(suffix);
-}
-
-function hasExactArrayPrefix<T>(previous: ReadonlyArray<T>, next: ReadonlyArray<T>): boolean {
-  if (previous === next) return true;
-  if (next.length < previous.length) return false;
-  for (let index = 0; index < previous.length; index += 1) {
-    if (previous[index] !== next[index]) return false;
-  }
-  return true;
-}
-
-function mergeTimelineEntrySuffix(
-  previous: ReadonlyArray<TimelineEntry>,
-  suffix: ReadonlyArray<TimelineEntry>,
-): TimelineEntry[] {
-  if (suffix.length === 0) return [...previous];
-  const previousLast = previous.at(-1);
-  let suffixIsOrdered = true;
-  for (let index = 1; index < suffix.length; index += 1) {
-    if (compareTimelineEntriesByCreatedAt(suffix[index - 1]!, suffix[index]!) > 0) {
-      suffixIsOrdered = false;
-      break;
-    }
-  }
-  if (
-    suffixIsOrdered &&
-    (previousLast === undefined || shouldTakePreviousTimelineEntry(previousLast, suffix[0]!))
-  ) {
-    return [...previous, ...suffix];
-  }
-
-  const merged: TimelineEntry[] = [];
-  let previousIndex = 0;
-  let suffixIndex = 0;
-  while (previousIndex < previous.length || suffixIndex < suffix.length) {
-    const previousEntry = previous[previousIndex];
-    const suffixEntry = suffix[suffixIndex];
-    if (
-      previousEntry !== undefined &&
-      (suffixEntry === undefined || shouldTakePreviousTimelineEntry(previousEntry, suffixEntry))
-    ) {
-      merged.push(previousEntry);
-      previousIndex += 1;
-    } else if (suffixEntry !== undefined) {
-      merged.push(suffixEntry);
-      suffixIndex += 1;
-    }
-  }
-  return merged;
-}
-
-type AttachmentResource = Extract<AssetResource, { readonly _tag: "attachment" }>;
-const EMPTY_IMAGE_RESOURCES = Object.freeze<ReadonlyArray<AttachmentResource>>([]);
-
-/** A mounted row requests its stored images. Local previews keep their existing URLs. */
-export function selectMessageImageResources(
-  attachments: ChatMessage["attachments"],
-): ReadonlyArray<AttachmentResource> {
-  const attachmentIds = new Set<string>();
-  for (const attachment of attachments ?? []) {
-    if (!isImageAttachment(attachment)) continue;
-    const previewUrl = attachment.previewUrl;
-    if (previewUrl?.startsWith("blob:") || previewUrl?.startsWith("data:")) continue;
-    attachmentIds.add(attachment.id);
-  }
-  return attachmentIds.size === 0
-    ? EMPTY_IMAGE_RESOURCES
-    : Array.from(attachmentIds, (attachmentId) => ({ _tag: "attachment", attachmentId }));
-}
-
-/** Handoffs need server URLs even while their message rows are unmounted. */
-export function selectHandoffImageResources(
-  messages: ReadonlyArray<ChatMessage> | undefined,
-  handoffs: Readonly<Record<string, ReadonlyArray<string>>>,
-): ReadonlyArray<AttachmentResource> {
-  if (Object.keys(handoffs).length === 0) return EMPTY_IMAGE_RESOURCES;
-  const attachmentIds = new Set<string>();
-  for (const message of messages ?? []) {
-    if (message.role !== "user" || !handoffs[message.id]?.length) continue;
-    for (const attachment of message.attachments ?? []) {
-      if (isImageAttachment(attachment)) attachmentIds.add(attachment.id);
-    }
-  }
-  return attachmentIds.size === 0
-    ? EMPTY_IMAGE_RESOURCES
-    : Array.from(attachmentIds, (attachmentId) => ({ _tag: "attachment", attachmentId }));
-}
-
-/** Own one mapper per preview stage. Immutable messages retain unchanged preview objects. */
-export function createMessageAttachmentPreviewProjector() {
-  const attachmentsBySource = new WeakMap<
-    ReadonlyArray<ChatAttachment>,
-    ReadonlyArray<ChatAttachment>
-  >();
-  const messagesBySource = new WeakMap<ChatMessage, ChatMessage>();
-  return (
-    message: ChatMessage,
-    previewUrlFor: (attachment: ChatAttachment) => string | undefined,
-  ): ChatMessage => {
-    const source = message.attachments;
-    if (!source || source.length === 0) return message;
-    const previous = attachmentsBySource.get(source) ?? source;
-    let changed: ChatAttachment[] | undefined;
-    let hasOverrides = false;
-    for (const [index, attachment] of source.entries()) {
-      const previewUrl = previewUrlFor(attachment);
-      const sourceUrl = "previewUrl" in attachment ? attachment.previewUrl : undefined;
-      const previousAttachment = previous[index]!;
-      const previousUrl =
-        "previewUrl" in previousAttachment ? previousAttachment.previewUrl : undefined;
-      const next =
-        !previewUrl || previewUrl === sourceUrl
-          ? attachment
-          : previewUrl === previousUrl
-            ? previousAttachment
-            : { ...attachment, previewUrl };
-      hasOverrides ||= next !== attachment;
-      if (next !== previousAttachment) {
-        changed ??= previous.slice();
-        changed[index] = next;
-      }
-    }
-    const attachments = hasOverrides ? (changed ?? previous) : source;
-    attachmentsBySource.set(source, attachments);
-    if (attachments === source) {
-      messagesBySource.delete(message);
-      return message;
-    }
-    const previousMessage = messagesBySource.get(message);
-    if (previousMessage?.attachments === attachments) return previousMessage;
-    const result = { ...message, attachments };
-    messagesBySource.set(message, result);
-    return result;
-  };
-}
-
-const streamsText = (role: ChatMessage["role"]) => role === "assistant" || role === "reasoning";
-
-/** Text and update time do not change a streaming message's timeline structure. */
-export function isStreamingMessageTextUpdate(previous: ChatMessage, next: ChatMessage): boolean {
-  if (
-    !streamsText(previous.role) ||
-    previous.role !== next.role ||
-    !previous.streaming ||
-    !next.streaming
-  ) {
-    return false;
-  }
-  const { text: _previousText, updatedAt: _previousUpdatedAt, ...previousMetadata } = previous;
-  const { text: _nextText, updatedAt: _nextUpdatedAt, ...nextMetadata } = next;
-  return shallow(previousMetadata, nextMetadata);
-}
-
-function replaceStreamingTimelineMessages(
-  messages: ReadonlyArray<ChatMessage>,
-  previous: TimelineEntriesProjection,
-): TimelineEntry[] | null {
-  if (messages.length !== previous.messages.length) return null;
-  const replacements = new Map<ChatMessage, ChatMessage>();
-  for (const [index, message] of messages.entries()) {
-    const previousMessage = previous.messages[index]!;
-    if (message === previousMessage) continue;
-    if (!isStreamingMessageTextUpdate(previousMessage, message)) return null;
-    replacements.set(previousMessage, message);
-  }
-  if (replacements.size === 0) return previous.entries;
-  return previous.entries.map((entry) => {
-    const replacement = entry.kind === "message" ? replacements.get(entry.message) : undefined;
-    return replacement ? timelineEntryFromMessage(replacement) : entry;
-  });
-}
-
-/** Reuse ordered entries across immutable stream updates. Other changes keep the full sort. */
-export function deriveTimelineEntriesWithState(
-  messages: ReadonlyArray<ChatMessage>,
-  proposedPlans: ReadonlyArray<ProposedPlan>,
-  workEntries: ReadonlyArray<WorkLogEntry>,
-  turnPlans: ReadonlyArray<TurnPlanEntry> = [],
-  notices: ReadonlyArray<ModelChangeNotice> = [],
-  previous: TimelineEntriesProjection | null = null,
-): TimelineEntriesProjection {
-  if (
-    previous !== null &&
-    previous.proposedPlans.length === proposedPlans.length &&
-    previous.workEntries.length === workEntries.length &&
-    previous.turnPlans.length === turnPlans.length &&
-    previous.notices.length === notices.length &&
-    hasExactArrayPrefix(previous.proposedPlans, proposedPlans) &&
-    hasExactArrayPrefix(previous.workEntries, workEntries) &&
-    hasExactArrayPrefix(previous.turnPlans, turnPlans) &&
-    hasExactArrayPrefix(previous.notices, notices)
-  ) {
-    const entries = replaceStreamingTimelineMessages(messages, previous);
-    if (entries !== null) {
-      return { messages, proposedPlans, workEntries, turnPlans, notices, entries };
-    }
-  }
-  const foldedAnswerMessageIds = new Set(
-    workEntries.flatMap((entry) =>
-      entry.questionAnswer ? [`async-answer:${entry.questionAnswer.requestId}`] : [],
-    ),
-  );
-  const showMessage = (message: ChatMessage) =>
-    message.role !== "user" || !foldedAnswerMessageIds.has(message.id);
-  const canAppend =
-    previous !== null &&
-    !previous.entries.some((entry) => entry.kind === "message" && !showMessage(entry.message)) &&
-    hasExactArrayPrefix(previous.messages, messages) &&
-    hasExactArrayPrefix(previous.proposedPlans, proposedPlans) &&
-    hasExactArrayPrefix(previous.workEntries, workEntries) &&
-    hasExactArrayPrefix(previous.turnPlans, turnPlans) &&
-    hasExactArrayPrefix(previous.notices, notices);
-
-  if (canAppend) {
-    const messageRows = messages
-      .slice(previous.messages.length)
-      .filter(showMessage)
-      .map(timelineEntryFromMessage);
-    const proposedPlanRows = proposedPlans
-      .slice(previous.proposedPlans.length)
-      .map(timelineEntryFromProposedPlan);
-    const workRows = workEntries.slice(previous.workEntries.length).map(timelineEntryFromWork);
-    const suffix = [...messageRows, ...proposedPlanRows, ...workRows].toSorted(
-      compareTimelineEntriesByCreatedAt,
-    );
-    return {
-      messages,
-      proposedPlans,
-      workEntries,
-      turnPlans,
-      notices,
-      entries: mergeTimelineEntrySuffix(previous.entries, suffix),
-    };
-  }
-
-  const rows: TimelineEntry[] = [
-    ...messages.filter(showMessage).map(timelineEntryFromMessage),
-    ...proposedPlans.map(timelineEntryFromProposedPlan),
-    ...turnPlans.map((turnPlan) => ({
-      id: turnPlan.id,
-      kind: "turn-plan" as const,
-      createdAt: turnPlan.createdAt,
-      turnPlan,
-    })),
-    ...workEntries.map(timelineEntryFromWork),
-    ...notices.map((notice) => ({
-      id: notice.id,
-      kind: "notice" as const,
-      createdAt: notice.createdAt,
-      notice,
-    })),
-  ];
-  return {
-    messages,
-    proposedPlans,
-    workEntries,
-    turnPlans,
-    notices,
-    entries: rows.toSorted(compareTimelineEntriesByCreatedAtWithNotices),
-  };
-}
-
 /**
  * Extract Codex-style "model/provider changed" notices from the thread's
  * activity log. These are appended by the server whenever the user swaps the
@@ -2333,60 +2077,6 @@ export function deriveModelChangeNotices(
     });
   }
   return notices;
-}
-
-export interface TurnPlanEntry {
-  /** Stable per-turn row id (plans rewrite constantly; the row must not churn). */
-  id: string;
-  /** Anchor timestamp: the turn's FIRST plan activity, so the chip renders where planning began. */
-  createdAt: string;
-  turnId: TurnId | null;
-  plan: ActivePlanState;
-}
-
-/**
- * One inline plan chip per turn that produced plan/todo steps: the latest
- * snapshot for the turn, anchored at the first snapshot's timestamp. Turn-less
- * plan activities collapse into a single chip keyed by thread order.
- */
-export function deriveTurnPlans(
-  activities: ReadonlyArray<OrchestrationThreadActivity>,
-): TurnPlanEntry[] {
-  const ordered = [...activities].toSorted(compareActivitiesByOrder);
-  const byTurn = new Map<
-    string,
-    { activities: OrchestrationThreadActivity[]; entry: TurnPlanEntry }
-  >();
-  for (const activity of ordered) {
-    if (activity.kind !== "turn.plan.updated") {
-      continue;
-    }
-    const plan = planStateFromActivity(activity);
-    const key = activity.turnId ?? "no-turn";
-    if (!plan) {
-      byTurn.delete(key);
-      continue;
-    }
-    const existing = byTurn.get(key);
-    if (existing) {
-      existing.entry.plan = plan;
-      existing.activities.push(activity);
-    } else {
-      byTurn.set(key, {
-        activities: [activity],
-        entry: {
-          id: `turn-plan:${key}`,
-          createdAt: activity.createdAt,
-          turnId: activity.turnId,
-          plan,
-        },
-      });
-    }
-  }
-  return [...byTurn.values()].map(({ activities: planActivities, entry }) => ({
-    ...entry,
-    plan: addPlanStepDurations(entry.plan, planActivities),
-  }));
 }
 
 export function deriveTimelineEntries(
@@ -2442,6 +2132,23 @@ export function deriveTimelineEntries(
     const bNotice = b.kind === "notice" ? 0 : 1;
     return aNotice - bNotice;
   });
+}
+
+const streamsText = (role: ChatMessage["role"]) => role === "assistant" || role === "reasoning";
+
+/** Text and update time do not change a streaming message's timeline structure. */
+export function isStreamingMessageTextUpdate(previous: ChatMessage, next: ChatMessage): boolean {
+  if (
+    !streamsText(previous.role) ||
+    previous.role !== next.role ||
+    !previous.streaming ||
+    !next.streaming
+  ) {
+    return false;
+  }
+  const { text: _previousText, updatedAt: _previousUpdatedAt, ...previousMetadata } = previous;
+  const { text: _nextText, updatedAt: _nextUpdatedAt, ...nextMetadata } = next;
+  return shallow(previousMetadata, nextMetadata);
 }
 
 export function inferCheckpointTurnCountByTurnId(

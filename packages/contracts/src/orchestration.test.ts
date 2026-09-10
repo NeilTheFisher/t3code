@@ -1591,6 +1591,9 @@ it.effect("rejects thread history imports without messages", () =>
     );
 
     assert.strictEqual(result._tag, "Failure");
+  }),
+);
+
 it.effect("decodes a user-message fork with an explicit destination model", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeOrchestrationCommand({

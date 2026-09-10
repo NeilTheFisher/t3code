@@ -563,12 +563,10 @@ const RuntimeDomainDependenciesLive = RuntimeCoreDependenciesLive.pipe(
   Layer.provideMerge(WorkspaceLayerLive),
   Layer.provideMerge(Layer.mergeAll(NativeAppIconResolver.layer, ProjectFaviconResolverLayerLive)),
   Layer.provideMerge(RepositoryIdentityResolverLayerLive),
-  Layer.provideMerge(ServerEnvironmentLayerLive),
-  Layer.provideMerge(RepositoryIdentityResolver.layer),
 );
 
 const RuntimeServerDependenciesLive = RuntimeDomainDependenciesLive.pipe(
-  Layer.provideMerge(ServerEnvironment.layer),
+  Layer.provideMerge(ServerEnvironmentLayerLive),
   Layer.provideMerge(AuthLayerLive),
   Layer.provideMerge(ServerSecretStore.layer),
   Layer.provideMerge(VoiceSessionService.layer.pipe(Layer.provide(ServerSecretStore.layer))),

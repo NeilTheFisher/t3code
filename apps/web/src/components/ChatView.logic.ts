@@ -783,17 +783,6 @@ export function revokeUserMessagePreviewUrls(message: ChatMessage): void {
   }
 }
 
-export function timelineHasEphemeralPreviewUrls(
-  entries: ReadonlyArray<Pick<TimelineEntry, "kind"> & { message?: ChatMessage }>,
-): boolean {
-  return entries.some(
-    (entry) =>
-      entry.kind === "message" &&
-      entry.message !== undefined &&
-      collectUserMessageBlobPreviewUrls(entry.message).length > 0,
-  );
-}
-
 export function revokeComposerImagePreviewUrls(
   images: ReadonlyArray<ComposerImageAttachment>,
 ): void {
@@ -834,6 +823,17 @@ export async function cloneUserMessageImagesForFork(
     revokeComposerImagePreviewUrls(images);
     throw error;
   }
+}
+
+export function timelineHasEphemeralPreviewUrls(
+  entries: ReadonlyArray<Pick<TimelineEntry, "kind"> & { message?: ChatMessage }>,
+): boolean {
+  return entries.some(
+    (entry) =>
+      entry.kind === "message" &&
+      entry.message !== undefined &&
+      collectUserMessageBlobPreviewUrls(entry.message).length > 0,
+  );
 }
 
 export function collectUserMessageBlobPreviewUrls(message: ChatMessage): string[] {
