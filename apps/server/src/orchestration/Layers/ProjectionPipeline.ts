@@ -141,7 +141,8 @@ function isStalePendingApprovalFailureDetail(detail: string | null): boolean {
   return (
     detail.includes("stale pending approval request") ||
     detail.includes("unknown pending approval request") ||
-    detail.includes("unknown pending permission request")
+    detail.includes("unknown pending permission request") ||
+    detail.includes("no active provider session is bound to this thread")
   );
 }
 
@@ -201,7 +202,8 @@ function derivePendingUserInputCountFromActivities(
       (detail.includes("stale pending user-input request") ||
         detail.includes("unknown pending user-input request") ||
         detail.includes("unknown pending user input request") ||
-        detail.includes("unknown pending codex user input request"))
+        detail.includes("unknown pending codex user input request") ||
+        detail.includes("no active provider session is bound to this thread"))
     ) {
       openRequestIds.delete(requestId);
     }
@@ -2167,6 +2169,14 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
 
     const applyAttachmentSideEffects = Effect.fn("applyAttachmentSideEffects")(
       function* (event: OrchestrationEvent, sideEffects: AttachmentSideEffects) {
+        if (
+          sideEffects.deletedThreadIds.size === 0 &&
+          sideEffects.prunedThreadRelativePaths.size === 0 &&
+          sideEffects.copiedAttachmentRelativePaths.size === 0
+        ) {
+          return;
+        }
+
         const deletedThreadIds = new Set<string>();
         for (const threadId of sideEffects.deletedThreadIds) {
           const recreatedLater = yield* eventStore.hasEventAfter({
@@ -2203,7 +2213,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         }
 
         yield* runAttachmentSideEffects({
-          copiedAttachmentRelativePaths: new Map<string, string>(),
+          copiedAttachmentRelativePaths: sideEffects.copiedAttachmentRelativePaths,
           deletedThreadIds,
           prunedThreadRelativePaths,
         });
@@ -2290,7 +2300,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           );
           const hasCleanup =
             attachmentSideEffects.deletedThreadIds.size > 0 ||
-            attachmentSideEffects.prunedThreadRelativePaths.size > 0;
+            attachmentSideEffects.prunedThreadRelativePaths.size > 0 ||
+            attachmentSideEffects.copiedAttachmentRelativePaths.size > 0;
           // Return the cleanup effect so the caller runs it after the outer transaction commits.
           // Most events have no cleanup, so they skip the call and write no cleanup span.
           // @effect-diagnostics-next-line returnEffectInGen:off

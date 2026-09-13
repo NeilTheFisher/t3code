@@ -1869,6 +1869,168 @@ it.layer(
   );
 });
 
+it.layer(
+  Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-projection-attachments-fork-copy-")),
+)("OrchestrationProjectionPipeline", (it) => {
+  it.effect("materializes inherited message attachments when a thread is forked", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const eventStore = yield* OrchestrationEventStore;
+      const { attachmentsDir } = yield* ServerConfig;
+      const now = "2026-01-01T00:00:00.000Z";
+      const sourceThreadId = ThreadId.make("Source Thread");
+      const forkThreadId = ThreadId.make("Thread Fork");
+      const sourceMessageId = MessageId.make("message-fork-source");
+      const sourceAttachmentId = "source-thread-00000000-0000-4000-8000-000000000001";
+      const forkAttachmentId = "thread-fork-00000000-0000-4000-8000-000000000001";
+
+      const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
+        eventStore
+          .append(event)
+          .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)));
+
+      yield* appendAndProject({
+        type: "project.created",
+        eventId: EventId.make("evt-fork-copy-1"),
+        aggregateKind: "project",
+        aggregateId: ProjectId.make("project-fork-copy"),
+        occurredAt: now,
+        commandId: CommandId.make("cmd-fork-copy-1"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-fork-copy-1"),
+        metadata: {},
+        payload: {
+          projectId: ProjectId.make("project-fork-copy"),
+          title: "Project Fork Copy",
+          workspaceRoot: "/tmp/project-fork-copy",
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.created",
+        eventId: EventId.make("evt-fork-copy-2"),
+        aggregateKind: "thread",
+        aggregateId: sourceThreadId,
+        occurredAt: now,
+        commandId: CommandId.make("cmd-fork-copy-2"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-fork-copy-2"),
+        metadata: {},
+        payload: {
+          threadId: sourceThreadId,
+          projectId: ProjectId.make("project-fork-copy"),
+          title: "Source Thread",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5-codex",
+          },
+          runtimeMode: "full-access",
+          branch: null,
+          worktreePath: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.message-sent",
+        eventId: EventId.make("evt-fork-copy-3"),
+        aggregateKind: "thread",
+        aggregateId: sourceThreadId,
+        occurredAt: now,
+        commandId: CommandId.make("cmd-fork-copy-3"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-fork-copy-3"),
+        metadata: {},
+        payload: {
+          threadId: sourceThreadId,
+          messageId: sourceMessageId,
+          role: "user",
+          text: "Source with attachment",
+          attachments: [
+            {
+              type: "image",
+              id: sourceAttachmentId,
+              name: "a.png",
+              mimeType: "image/png",
+              sizeBytes: 9,
+            },
+          ],
+          turnId: null,
+          streaming: false,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+
+      const sourcePath = path.join(attachmentsDir, `${sourceAttachmentId}.png`);
+      const destinationPath = path.join(attachmentsDir, `${forkAttachmentId}.png`);
+      yield* fileSystem.makeDirectory(attachmentsDir, { recursive: true });
+      yield* fileSystem.writeFileString(sourcePath, "fork me");
+      assert.isTrue(yield* exists(sourcePath));
+      assert.isFalse(yield* exists(destinationPath));
+
+      yield* appendAndProject({
+        type: "thread.forked",
+        eventId: EventId.make("evt-fork-copy-4"),
+        aggregateKind: "thread",
+        aggregateId: forkThreadId,
+        occurredAt: now,
+        commandId: CommandId.make("cmd-fork-copy-4"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-fork-copy-4"),
+        metadata: {},
+        payload: {
+          threadId: forkThreadId,
+          projectId: ProjectId.make("project-fork-copy"),
+          title: "Thread Fork",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5-codex",
+          },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          sourceThreadId,
+          sourceMessageId,
+          inheritedMessages: [
+            {
+              id: sourceMessageId,
+              role: "user",
+              text: "Source with attachment",
+              attachments: [
+                {
+                  type: "image",
+                  id: forkAttachmentId,
+                  name: "a.png",
+                  mimeType: "image/png",
+                  sizeBytes: 9,
+                },
+              ],
+              turnId: null,
+              streaming: false,
+              createdAt: now,
+              updatedAt: now,
+            },
+          ],
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+
+      assert.isTrue(yield* exists(destinationPath));
+      assert.equal(yield* fileSystem.readFileString(destinationPath), "fork me");
+    }),
+  );
+});
+
 it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-projection-attachments-revert-")))(
   "OrchestrationProjectionPipeline",
   (it) => {
@@ -3209,6 +3371,33 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
             json_object('requestId', 'user-input-active'),
             NULL,
             '2026-02-26T12:35:07.000Z'
+          ),
+          (
+            'activity-user-input-no-session-requested',
+            'thread-stale-user-input',
+            NULL,
+            'info',
+            'user-input.requested',
+            'User input requested',
+            json_object('requestId', 'user-input-no-session'),
+            NULL,
+            '2026-02-26T12:35:09.000Z'
+          ),
+          (
+            'activity-user-input-no-session-failed',
+            'thread-stale-user-input',
+            NULL,
+            'error',
+            'provider.user-input.respond.failed',
+            'Provider user input response failed',
+            json_object(
+              'requestId',
+              'user-input-no-session',
+              'detail',
+              'No active provider session is bound to this thread.'
+            ),
+            NULL,
+            '2026-02-26T12:35:10.000Z'
           )
       `;
 
