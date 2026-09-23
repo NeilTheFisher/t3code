@@ -8,7 +8,6 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   type BackgroundActivityProfile,
   type DesktopUpdateChannel,
-  type DiffLayout,
   ProviderDriverKind,
   type ScopedThreadRef,
   type SidebarProjectGroupingMode,
@@ -2068,7 +2067,9 @@ function LegacyFeaturesSection() {
     <section className="space-y-3">
       <Collapsible open={open} onOpenChange={setOpen}>
         <CollapsibleTrigger className="group flex min-h-8 w-full items-center gap-2 px-3 sm:px-4">
-          <h2 className="text-sm font-normal text-foreground/70 transition-colors group-hover:text-foreground">            Legacy features
+          <h2 className="text-sm font-normal text-foreground/70 transition-colors group-hover:text-foreground">
+            {" "}
+            Legacy features
           </h2>
           <ChevronRightIcon className="size-4 text-muted-foreground transition-transform duration-200 group-data-panel-open:rotate-90" />
         </CollapsibleTrigger>

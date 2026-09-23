@@ -1226,46 +1226,37 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
   }
 
   return (
-    <div
-      className={cn(
-        "grid shrink-0 overflow-clip",
-        active ? (visible ? "grid-rows-[1fr]" : "grid-rows-[0fr]") : "hidden",
-        active &&
-          "[[data-panel-animations=true]_&]:transition-[grid-template-rows] [[data-panel-animations=true]_&]:duration-(--panel-animation-duration) [[data-panel-animations=true]_&]:ease-out",
-        active && visible && "[[data-panel-animations=true]_&]:starting:grid-rows-[0fr]!",
-      )}
-    >
-      <div className="min-h-0 overflow-clip">
-        <ThreadTerminalDrawer
-          threadRef={threadRef}
-          threadId={threadId}
-          cwd={cwd}
-          worktreePath={effectiveWorktreePath}
-          runtimeEnv={runtimeEnv}
-          visible={visible}
-          height={terminalUiState.terminalHeight}
-          // Known-session order is MRU and changes on focus; persisted store order keeps sidebar labels stable.
-          terminalIds={terminalUiState.terminalIds}
-          activeTerminalId={terminalUiState.activeTerminalId}
-          terminalGroups={terminalUiState.terminalGroups}
-          activeTerminalGroupId={terminalUiState.activeTerminalGroupId}
-          focusRequestId={focusRequestId + localFocusRequestId + (visible ? 1 : 0)}
-          onSplitTerminal={splitTerminal}
-          onSplitTerminalVertical={splitTerminalVertical}
-          onNewTerminal={createNewTerminal}
-          splitShortcutLabel={visible ? splitShortcutLabel : undefined}
-          splitVerticalShortcutLabel={visible ? splitVerticalShortcutLabel : undefined}
-          newShortcutLabel={visible ? newShortcutLabel : undefined}
-          closeShortcutLabel={visible ? closeShortcutLabel : undefined}
-          keybindings={keybindings}
-          onActiveTerminalChange={activateTerminal}
-          onCloseTerminal={closeTerminal}
-          onHeightChange={setTerminalHeight}
-          onAddTerminalContext={handleAddTerminalContext}
-          terminalLabelsById={terminalLabelsById}
-          terminalLaunchLocationsById={terminalLaunchLocationsById}
-        />
-      </div>    </div>
+    <div className={visible ? undefined : "hidden"}>
+      <ThreadTerminalDrawer
+        threadRef={threadRef}
+        threadId={threadId}
+        cwd={cwd}
+        worktreePath={effectiveWorktreePath}
+        runtimeEnv={runtimeEnv}
+        visible={visible}
+        height={terminalUiState.terminalHeight}
+        // Known-session order is MRU and changes on focus; persisted store order keeps sidebar labels stable.
+        terminalIds={terminalUiState.terminalIds}
+        activeTerminalId={terminalUiState.activeTerminalId}
+        terminalGroups={terminalUiState.terminalGroups}
+        activeTerminalGroupId={terminalUiState.activeTerminalGroupId}
+        focusRequestId={focusRequestId + localFocusRequestId + (visible ? 1 : 0)}
+        onSplitTerminal={splitTerminal}
+        onSplitTerminalVertical={splitTerminalVertical}
+        onNewTerminal={createNewTerminal}
+        splitShortcutLabel={visible ? splitShortcutLabel : undefined}
+        splitVerticalShortcutLabel={visible ? splitVerticalShortcutLabel : undefined}
+        newShortcutLabel={visible ? newShortcutLabel : undefined}
+        closeShortcutLabel={visible ? closeShortcutLabel : undefined}
+        keybindings={keybindings}
+        onActiveTerminalChange={activateTerminal}
+        onCloseTerminal={closeTerminal}
+        onHeightChange={setTerminalHeight}
+        onAddTerminalContext={handleAddTerminalContext}
+        terminalLabelsById={terminalLabelsById}
+        terminalLaunchLocationsById={terminalLaunchLocationsById}
+      />
+    </div>
   );
 });
 
@@ -9179,7 +9170,8 @@ function ChatViewContent(props: ChatViewProps) {
             maximized={rightPanelMaximized}
             onToggle={toggleRightPanelMaximized}
           />
-        </span>      ) : null}
+        </span>
+      ) : null}
       {panelToggleControls}
     </div>
   );

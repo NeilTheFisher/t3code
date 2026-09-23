@@ -695,7 +695,8 @@ export default function DiffPanel({
                   onChange={(event) => setBaseRefQuery(event.target.value)}
                 />
                 <div className="grid shrink-0 grid-cols-[1rem_minmax(0,1fr)] items-center gap-2 border-b border-border/70 ps-3 pe-6.5 pt-2 pb-1.5 font-medium text-[10px] text-muted-foreground uppercase tracking-wide">
-                  <span aria-hidden="true" />                  <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_2rem] items-center">
+                  <span aria-hidden="true" />{" "}
+                  <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_2rem] items-center">
                     <span>Branch</span>
                     <span className="text-right">Remote</span>
                   </div>
@@ -904,7 +905,8 @@ export default function DiffPanel({
               <p className="shrink-0 border-b border-border/70 bg-muted/40 px-3 py-1.5 text-[11px] text-muted-foreground">
                 This diff was truncated because it exceeded the preview limit. The changes shown are
                 incomplete.
-              </p>            )}
+              </p>
+            )}
             {selectedTurn &&
               externalTurnChanges !== null &&
               externalTurnChanges.filePaths.length > 0 && (
@@ -1049,7 +1051,8 @@ export default function DiffPanel({
                 <div className="space-y-2">
                   <p className="text-2xs text-muted-foreground/75">
                     {renderablePatch?.kind === "raw" ? renderablePatch.reason : null}
-                  </p>                  <pre
+                  </p>{" "}
+                  <pre
                     className={cn(
                       "max-h-[72vh] rounded-md border border-border/70 bg-background/70 p-3 font-mono text-2xs leading-relaxed text-muted-foreground/90",
                       wordWrap

@@ -298,3 +298,13 @@ export function resolveDefaultProviderModelSelection(
   const model = getDefaultProviderInstanceModel(providers, instanceId);
   return model ? { instanceId, model } : null;
 }
+
+/** Resolve the driver kind for an explicit instance selection, if it names one. */
+export function resolveProviderDriverKindForInstanceSelection(
+  entries: ReadonlyArray<ProviderInstanceEntry>,
+  _providers: ReadonlyArray<ServerProvider>,
+  selection: ProviderInstanceId | ProviderDriverKind | null | undefined,
+): ProviderDriverKind | undefined {
+  const matchedEntry = entries.find((entry) => entry.instanceId === selection);
+  return matchedEntry?.driverKind;
+}

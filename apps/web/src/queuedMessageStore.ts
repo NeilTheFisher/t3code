@@ -8,6 +8,7 @@ import { create } from "zustand";
 
 import type { LocalDispatchSnapshot } from "./components/ChatView.logic";
 import type { ComposerFileAttachment, ComposerImageAttachment } from "./composerDraftStore";
+import type { ElementContextDraft } from "./lib/elementContext";
 import type { TerminalContextDraft } from "./lib/terminalContext";
 import { randomUUID } from "./lib/utils";
 import type { ReviewCommentContext } from "./reviewCommentContext";
@@ -36,6 +37,7 @@ export interface QueuedComposerMessage {
   images: ComposerImageAttachment[];
   files: ComposerFileAttachment[];
   terminalContexts: TerminalContextDraft[];
+  elementContexts: ElementContextDraft[];
   previewAnnotations: PreviewAnnotationPayload[];
   reviewComments: ReviewCommentContext[];
   sendSettings: QueuedMessageSendSettings;

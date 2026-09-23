@@ -4,11 +4,13 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { EnvironmentId, PreviewTabId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 import { McpProtocol, McpSchema, McpServer } from "effect/unstable/ai";
 import { HttpBody, HttpClient, HttpRouter, HttpServerResponse } from "effect/unstable/http";
 
@@ -213,19 +215,24 @@ it.effect.each([
   ).pipe(Effect.provide(TestLayer)),
 );
 
-it.effect("tells the agent how to fall back when no desktop app can run the snapshot", () =>
-  Effect.gen(function* () {
-    const snapshot = yield* callSnapshot({});
+it.effect("tells the agent how to fall back when no host can run the snapshot", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      // The fork's preview tools wait out a short grace window so a UI tab that
+      // is reloading can reconnect as the automation host before the request
+      // fails. Advance the test clock past that window to observe the fallback.
+      const fiber = yield* callSnapshot({}).pipe(Effect.forkScoped);
+      yield* TestClock.adjust("11 seconds");
+      const snapshot = yield* Fiber.join(fiber);
 
-    expect(snapshot.isError).toBe(true);
-    const [text] = snapshot.content;
-    expect(text?.type === "text" ? text.text : "").toContain(
-      "use a headless browser from the shell",
-    );
-    expect(snapshot.structuredContent).toMatchObject({
-      error: { _tag: "PreviewAutomationNoAvailableHostError" },
-    });
-  }).pipe(Effect.provide(TestLayer)),
+      expect(snapshot.isError).toBe(true);
+      const [text] = snapshot.content;
+      expect(text?.type === "text" ? text.text : "").toContain("acts as the automation host");
+      expect(snapshot.structuredContent).toMatchObject({
+        error: { _tag: "PreviewAutomationNoAvailableHostError" },
+      });
+    }),
+  ).pipe(Effect.provide(TestLayer)),
 );
 
 it.effect.each([

@@ -16,6 +16,8 @@ import { Route as PairRouteImport } from './routes/pair'
 import { Route as ConnectRouteImport } from './routes/connect'
 import { Route as ChatRouteImport } from './routes/_chat'
 import { Route as ChatIndexRouteImport } from './routes/_chat.index'
+import { Route as SettingsVoiceRouteImport } from './routes/settings.voice'
+import { Route as SettingsUserscriptsRouteImport } from './routes/settings.userscripts'
 import { Route as SettingsStorageRouteImport } from './routes/settings.storage'
 import { Route as SettingsSourceControlRouteImport } from './routes/settings.source-control'
 import { Route as SettingsSnapShotRouteImport } from './routes/settings.snap-shot'
@@ -67,6 +69,16 @@ const ChatIndexRoute = ChatIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => ChatRoute,
+} as any)
+const SettingsVoiceRoute = SettingsVoiceRouteImport.update({
+  id: '/voice',
+  path: '/voice',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsUserscriptsRoute = SettingsUserscriptsRouteImport.update({
+  id: '/userscripts',
+  path: '/userscripts',
+  getParentRoute: () => SettingsRoute,
 } as any)
 const SettingsStorageRoute = SettingsStorageRouteImport.update({
   id: '/storage',
@@ -178,6 +190,8 @@ export interface FileRoutesByFullPath {
   '/settings/snap-shot': typeof SettingsSnapShotRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
   '/settings/storage': typeof SettingsStorageRoute
+  '/settings/userscripts': typeof SettingsUserscriptsRoute
+  '/settings/voice': typeof SettingsVoiceRoute
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
 }
@@ -202,6 +216,8 @@ export interface FileRoutesByTo {
   '/settings/snap-shot': typeof SettingsSnapShotRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
   '/settings/storage': typeof SettingsStorageRoute
+  '/settings/userscripts': typeof SettingsUserscriptsRoute
+  '/settings/voice': typeof SettingsVoiceRoute
   '/': typeof ChatIndexRoute
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
@@ -229,6 +245,8 @@ export interface FileRoutesById {
   '/settings/snap-shot': typeof SettingsSnapShotRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
   '/settings/storage': typeof SettingsStorageRoute
+  '/settings/userscripts': typeof SettingsUserscriptsRoute
+  '/settings/voice': typeof SettingsVoiceRoute
   '/_chat/': typeof ChatIndexRoute
   '/_chat/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/_chat/draft/$draftId': typeof ChatDraftDraftIdRoute
@@ -257,6 +275,8 @@ export interface FileRouteTypes {
     | '/settings/snap-shot'
     | '/settings/source-control'
     | '/settings/storage'
+    | '/settings/userscripts'
+    | '/settings/voice'
     | '/$environmentId/$threadId'
     | '/draft/$draftId'
   fileRoutesByTo: FileRoutesByTo
@@ -281,6 +301,8 @@ export interface FileRouteTypes {
     | '/settings/snap-shot'
     | '/settings/source-control'
     | '/settings/storage'
+    | '/settings/userscripts'
+    | '/settings/voice'
     | '/'
     | '/$environmentId/$threadId'
     | '/draft/$draftId'
@@ -307,6 +329,8 @@ export interface FileRouteTypes {
     | '/settings/snap-shot'
     | '/settings/source-control'
     | '/settings/storage'
+    | '/settings/userscripts'
+    | '/settings/voice'
     | '/_chat/'
     | '/_chat/$environmentId/$threadId'
     | '/_chat/draft/$draftId'
@@ -372,6 +396,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/'
       preLoaderRoute: typeof ChatIndexRouteImport
       parentRoute: typeof ChatRoute
+    }
+    '/settings/voice': {
+      id: '/settings/voice'
+      path: '/voice'
+      fullPath: '/settings/voice'
+      preLoaderRoute: typeof SettingsVoiceRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/userscripts': {
+      id: '/settings/userscripts'
+      path: '/userscripts'
+      fullPath: '/settings/userscripts'
+      preLoaderRoute: typeof SettingsUserscriptsRouteImport
+      parentRoute: typeof SettingsRoute
     }
     '/settings/storage': {
       id: '/settings/storage'
@@ -525,6 +563,8 @@ interface SettingsRouteChildren {
   SettingsSnapShotRoute: typeof SettingsSnapShotRoute
   SettingsSourceControlRoute: typeof SettingsSourceControlRoute
   SettingsStorageRoute: typeof SettingsStorageRoute
+  SettingsUserscriptsRoute: typeof SettingsUserscriptsRoute
+  SettingsVoiceRoute: typeof SettingsVoiceRoute
 }
 
 const SettingsRouteChildren: SettingsRouteChildren = {
@@ -541,6 +581,8 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsSnapShotRoute: SettingsSnapShotRoute,
   SettingsSourceControlRoute: SettingsSourceControlRoute,
   SettingsStorageRoute: SettingsStorageRoute,
+  SettingsUserscriptsRoute: SettingsUserscriptsRoute,
+  SettingsVoiceRoute: SettingsVoiceRoute,
 }
 
 const SettingsRouteWithChildren = SettingsRoute._addFileChildren(

@@ -2,11 +2,6 @@ import { ArrowUpIcon, ClockIcon } from "lucide-react";
 import { ReadOnlySourcePreview } from "../files/AttachmentFilePreview";
 import { useRightPanelStore } from "~/rightPanelStore";
 import {
-  deriveTimelineMinimapItems,
-  resolveTimelineMinimapPreview,
-  type TimelineMinimapItem,
-} from "./timelineMinimapItems";
-import {
   COMPOSER_CONTEXT_KINDS,
   type AssistantCitation,
   type ComposerContextId,
@@ -51,6 +46,7 @@ import {
   use,
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -101,6 +97,7 @@ import {
   CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  ChevronUpIcon,
   CircleAlertIcon,
   DownloadIcon,
   EyeIcon,
@@ -153,12 +150,16 @@ import {
   rememberTimelinePosition,
   timelineContentOverflowsViewport,
 } from "./timelineScrollAnchoring";
-import type { CitationHistoryPage } from "./useAssistantCitationTarget";
+import { useAssistantCitationTarget, type CitationHistoryPage } from "./useAssistantCitationTarget";
 import { MessageCopyButton } from "./MessageCopyButton";
 import { MessageForkButton, type ForkMessageConfig } from "./MessageForkButton";
 import { AssistantSelectionToolbar } from "./AssistantSelectionToolbar";
 import type { AssistantCitationSourceAnchor } from "~/lib/assistantTextSelection";
-import type { AssistantCitationRequest } from "./AssistantCitationSource";
+import {
+  AssistantCitationSource,
+  type AssistantCitationRequest,
+  type AssistantCitationTarget,
+} from "./AssistantCitationSource";
 import { MessagePlayButton } from "./MessagePlayButton";
 import { TtsParagraphHighlight } from "./TtsParagraphHighlight";
 import {
@@ -177,6 +178,7 @@ import {
   resolveTimelineMinimapHitStripWidth,
   resolveTimelineMinimapIndexFromPointer,
   resolveTimelineMinimapInteractiveWidth,
+  resolveTimelineMinimapCurrentIndex,
   resolveTimelineMinimapNavigationInteractive,
   resolveTimelineMinimapTopPercent,
   shouldPreserveAssistantLineBreaks,
@@ -189,6 +191,11 @@ import {
   TIMELINE_MINIMAP_MIN_ITEMS,
   type TimelineLatestTurn,
 } from "./MessagesTimeline.logic";
+import {
+  deriveTimelineMinimapItems,
+  resolveTimelineMinimapPreview,
+  type TimelineMinimapItem,
+} from "./timelineMinimapItems";
 import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Spinner } from "../ui/spinner";
@@ -243,7 +250,6 @@ import { cn } from "~/lib/utils";
 import { useUiStateStore } from "~/uiStateStore";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { formatChatTimestampTooltip, formatDayAwareTimestamp } from "../../timestampFormat";
-import { useClientSettings } from "../../hooks/useSettings";
 import { readProjectFileFresh } from "../files/projectFilesQueryState";
 import { toastManager } from "../ui/toast";
 import { Toggle } from "../ui/toggle";
@@ -263,7 +269,6 @@ import {
   type ReviewCommentContext,
 } from "../../reviewCommentContext";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
-import { ComputerUseAppIcon } from "~/components/Icons";
 
 // ---------------------------------------------------------------------------
 // Context — shared state consumed by every row component via Context.
@@ -281,6 +286,8 @@ interface TimelineRowSharedState {
   workspaceRoot: string | undefined;
   skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   activeThreadEnvironmentId: EnvironmentId;
+  citationRequest: AssistantCitationTarget | null;
+  listRef: React.RefObject<LegendListRef | null>;
   ttsEnabled: boolean;
   onUseArtifactTemplate: (template: CodexArtifactTemplate) => void;
   onRunShellCommand: ((command: string) => void) | undefined;
@@ -500,6 +507,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   hideEmptyPlaceholder = false,
   topFadeEnabled = false,
   loadEarlier = null,
+  citationRequest = null,
+  citationHistoryLoading = false,
   onCiteAssistantText,
   queuedMessages = EMPTY_QUEUED_MESSAGES,
   onSteerQueuedMessage = NOOP_QUEUED_MESSAGE_ACTION,
@@ -903,8 +912,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     onManualNavigation,
   });
   const [minimapHasPersistentGutter, setMinimapHasPersistentGutter] = useState(false);
-  const alwaysRender = restoringAlwaysRender;
+  const alwaysRender = citationAlwaysRender ?? restoringAlwaysRender;
   const [minimapHitStripWidth, setMinimapHitStripWidth] = useState(0);
+  const [minimapCurrentIndex, setMinimapCurrentIndex] = useState<number | null>(null);
   const handleAnchorReady = useCallback(
     (info: { anchorIndex: number | undefined }) => {
       if (anchorMessageId !== null && info.anchorIndex !== undefined) {
@@ -973,21 +983,33 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     const scrollTop = state.scroll ?? 0;
     const scrollBottom = scrollTop + (state.scrollLength ?? 0);
 
-    for (const item of minimapItems) {
-      const strip = minimapStripMap.get(item.id);
-      if (!strip) {
-        continue;
-      }
+    const itemBounds = minimapItems.map((item) => ({
+      top: resolveTimelineRowTop(state, item.rowIndex),
+      height: resolveTimelineRowHeight(state, item.rowIndex),
+    }));
 
-      const rowTop = resolveTimelineRowTop(state, item.rowIndex);
-      const rowHeight = resolveTimelineRowHeight(state, item.rowIndex);
+    for (const [index, item] of minimapItems.entries()) {
+      const strip = minimapStripMap.get(item.id);
+      const bounds = itemBounds[index];
+      const rowTop = bounds?.top ?? null;
+      const rowHeight = bounds?.height ?? null;
       const inView =
         rowTop !== null &&
         rowTop < scrollBottom &&
         rowTop + Math.max(1, rowHeight ?? 1) > scrollTop;
 
-      strip.dataset.inView = inView ? "true" : "false";
+      if (strip) {
+        strip.dataset.inView = inView ? "true" : "false";
+      }
     }
+    const nextCurrentIndex = resolveTimelineMinimapCurrentIndex({
+      scrollTop,
+      scrollBottom,
+      itemBounds,
+    });
+    setMinimapCurrentIndex((current) =>
+      current === nextCurrentIndex ? current : nextCurrentIndex,
+    );
   }, [
     contentInsetEndAdjustment,
     listRef,
@@ -1046,6 +1068,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       workspaceRoot,
       skills,
       activeThreadEnvironmentId,
+      citationRequest: readyCitationRequest,
+      listRef,
       ttsEnabled,
       onUseArtifactTemplate,
       onRunShellCommand,
@@ -1081,6 +1105,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       workspaceRoot,
       skills,
       activeThreadEnvironmentId,
+      readyCitationRequest,
+      listRef,
       ttsEnabled,
       onUseArtifactTemplate,
       onRunShellCommand,
@@ -1222,6 +1248,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             items={minimapItems}
             hasPersistentGutter={minimapHasPersistentGutter}
             hitStripWidth={minimapHitStripWidth}
+            currentIndex={minimapCurrentIndex}
             stripMap={minimapStripMap}
             onSelect={(item) => {
               onManualNavigation();
@@ -1659,6 +1686,9 @@ function QueuedMessageTimelineRow({
     queuedMessage.previewAnnotations.length +
     queuedMessage.reviewComments.length;
   const text = queuedMessage.prompt.trim();
+  const terminalContexts = extractTrailingTerminalContexts(
+    buildTerminalContextBlock(queuedMessage.terminalContexts),
+  ).contexts;
   const sending = queuedMessage.sending !== undefined;
   const statusLabel = sending
     ? "Sending to the agent"
@@ -2922,7 +2952,8 @@ function LiveActivityContent({
           <LiveActivityIcon
             name={resolvedIconName}
             toolIcon={toolIcon}
-            className={cn("block size-4 shrink-0 stroke-[1.8]", !highlighted && "opacity-70")}          />
+            className={cn("block size-4 shrink-0 stroke-[1.8]", !highlighted && "opacity-70")}
+          />
         </span>
       ) : null}
       <span className="min-w-0 flex-1 truncate">{label}</span>
@@ -3013,7 +3044,8 @@ function WorkGroupToggleTimelineRow({
       <span className="flex size-6 shrink-0 items-center justify-center text-icon-muted">
         <WorkEntryIconSvg
           name={toolGroupSummaryIconName(row.summaryKind)}
-          className="size-4 shrink-0 stroke-[1.8] opacity-70"        />
+          className="size-4 shrink-0 stroke-[1.8] opacity-70"
+        />
       </span>
       <span className="min-w-0 flex-1 truncate text-secondary-label">{row.summary}</span>
       <TimelineRowTimestamp createdAt={row.createdAt} timestampFormat={ctx.timestampFormat} />
@@ -3236,7 +3268,8 @@ function UserMessagePreviewAnnotationCard(props: {
           )}
         >
           {props.annotation.targetSummary ? (
-            <span className="truncate">{props.annotation.targetSummary}</span>          ) : null}
+            <span className="truncate">{props.annotation.targetSummary}</span>
+          ) : null}
           {props.annotation.styleChanges.length > 0 ? (
             <span className="inline-flex shrink-0 items-center gap-1">
               <PaintbrushIcon className="size-3" />
@@ -4021,7 +4054,8 @@ function ComputerUseAppIcon({ className }: { className: string }) {
   );
 }
 
-function WorkEntryIconSvg({ name, className }: { name: WorkEntryIconName; className: string }) {  switch (name) {
+function WorkEntryIconSvg({ name, className }: { name: WorkEntryIconName; className: string }) {
+  switch (name) {
     case "pull-request":
       return <PullRequestGlyph.pullRequest className={className} aria-hidden />;
     case "bot":
@@ -4447,7 +4481,8 @@ function InlineFileDiff(props: {
           overflow: props.wordWrap ? "wrap" : "scroll",
           theme: resolveDiffThemeName(props.theme),
         }}
-      />    </div>
+      />{" "}
+    </div>
   );
 }
 
@@ -4599,7 +4634,8 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
         >
           <WorkEntryIconSvg
             name={entryIconName}
-            className="block size-4 shrink-0 stroke-[1.8] opacity-70"          />
+            className="block size-4 shrink-0 stroke-[1.8] opacity-70"
+          />
         </span>
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
           <div className="min-w-0 flex-1 overflow-hidden">

@@ -65,6 +65,7 @@ function enqueue(overrides: Partial<QueuedComposerMessage> = {}) {
     images: [],
     files: [],
     terminalContexts: [],
+    elementContexts: [],
     previewAnnotations: [],
     reviewComments: [],
     sendSettings: {

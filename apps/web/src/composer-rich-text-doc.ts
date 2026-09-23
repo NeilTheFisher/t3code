@@ -4,7 +4,12 @@ import { TaskItem } from "@tiptap/extension-task-item";
 
 import { splitPromptIntoComposerSegments } from "~/composer-editor-mentions";
 import { parseInlineMarkdown, RICH_TEXT_DELIMITERS, type RichTextMark } from "~/composer-rich-text";
-import { collectInlineContextIds } from "~/lib/composerContextReferences";
+import {
+  collectInlineContextIds,
+  formatInlineContextReference,
+} from "~/lib/composerContextReferences";
+import { terminalContextReference } from "~/lib/composerContextRecords";
+import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "~/lib/terminalContext";
 
 /**
  * Pure document model for the rich text (Tiptap) composer.
@@ -124,6 +129,23 @@ function atomJsonForSegment(
     return {
       type: "composer-citation",
       attrs: { citation: segment.citation, source: segment.source, citeKey: randomNodeKey() },
+    };
+  }
+  if (segment.type === "terminal-context") {
+    if (!segment.context) {
+      // A placeholder with no matching draft (e.g. a literal paste) stays a
+      // literal character so the document round-trips byte-for-byte.
+      return { type: "text", text: INLINE_TERMINAL_CONTEXT_PLACEHOLDER };
+    }
+    const reference = terminalContextReference(segment.context);
+    return {
+      type: "composer-context-reference",
+      attrs: {
+        kind: reference.kind,
+        contextId: reference.contextId,
+        label: reference.label,
+        source: formatInlineContextReference(reference),
+      },
     };
   }
   return {
