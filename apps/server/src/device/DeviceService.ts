@@ -395,19 +395,19 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
     const devices = [...list.simulators, ...list.emulators].map(toSummary);
     const host = yield* resolveHost(ready.hostId);
     if ((yield* host.platformAvailability("android")).available) {
+      // The emulator binary is optional: the hub already lists AVDs through
+      // `avdmanager` and physical devices need no emulator. Only add any extra
+      // AVD names when an emulator is installed and answers; a missing binary
+      // reports exit code 127 and is ignored rather than failing the refresh.
       const avds = yield* ready.run("emulator", ["-list-avds"]);
-      if (avds.code !== 0) {
-        return yield* new DeviceOperationError({
-          operation: "list",
-          reason: "command_failed",
-          exitCode: avds.code,
-          cause: avds,
-        });
-      }
-      for (const name of avds.stdout
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter(Boolean)) {
+      const avdNames =
+        avds.code === 0
+          ? avds.stdout
+              .split(/\r?\n/)
+              .map((line) => line.trim())
+              .filter(Boolean)
+          : [];
+      for (const name of avdNames) {
         if (!devices.some((device) => device.platform === "android" && device.name === name)) {
           devices.push({
             hostId: ready.hostId,
