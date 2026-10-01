@@ -7979,6 +7979,83 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
     }),
   );
 
+  it.effect("settles a still-running background child as stopped when the session stops", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-stop-subagent");
+      runtimeMock.state.subscribedEvents = [
+        {
+          type: "message.part.updated",
+          properties: {
+            sessionID: "http://127.0.0.1:9999/session",
+            part: {
+              id: "part-task-stop",
+              sessionID: "http://127.0.0.1:9999/session",
+              messageID: "msg-main-stop",
+              type: "tool",
+              callID: "call-task-stop",
+              tool: "task",
+              state: {
+                status: "running",
+                input: { description: "Background work", subagent_type: "general" },
+                title: "Background work",
+                metadata: { sessionID: "child-session-stop", background: true },
+                time: { start: 1 },
+              },
+            },
+          },
+        },
+        {
+          type: "session.created",
+          properties: {
+            info: {
+              id: "child-session-stop",
+              parentID: "http://127.0.0.1:9999/session",
+              title: "Background work",
+            },
+          },
+        },
+      ];
+
+      const startedSeen = yield* Deferred.make<void>();
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter(
+          (event) =>
+            event.threadId === threadId &&
+            (event.type === "task.started" || event.type === "task.completed"),
+        ),
+        Stream.tap((event) =>
+          event.type === "task.started" ? Deferred.succeed(startedSeen, undefined) : Effect.void,
+        ),
+        Stream.take(2),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      // The child must be registered before the stop can settle it.
+      yield* Deferred.await(startedSeen);
+      yield* adapter.stopSession(threadId);
+
+      const events = Array.from(yield* Fiber.join(eventsFiber).pipe(Effect.timeout("1 second")));
+      NodeAssert.equal(events[0]?.type, "task.started");
+      const completed = events[1];
+      NodeAssert.equal(completed?.type, "task.completed");
+      if (completed !== undefined && completed.type === "task.completed") {
+        NodeAssert.equal(String(completed.payload.taskId), "child-session-stop");
+        NodeAssert.equal(completed.payload.status, "stopped");
+        NodeAssert.equal(completed.payload.taskType, "local_agent");
+        NodeAssert.equal(completed.payload.role, "general");
+        NodeAssert.equal(completed.payload.timelineBypass, true);
+      }
+    }),
+  );
+
   it.effect("writes provider-native observability records using the session thread id", () =>
     Effect.gen(function* () {
       const nativeEvents: Array<{

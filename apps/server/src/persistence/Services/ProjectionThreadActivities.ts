@@ -48,6 +48,10 @@ export const GetLatestProjectionThreadTaskActivityInput = Schema.Struct({
 export type GetLatestProjectionThreadTaskActivityInput =
   typeof GetLatestProjectionThreadTaskActivityInput.Type;
 
+export const ListLatestProjectionThreadTaskActivitiesInput = Schema.Struct({});
+export type ListLatestProjectionThreadTaskActivitiesInput =
+  typeof ListLatestProjectionThreadTaskActivitiesInput.Type;
+
 export const DeleteProjectionThreadActivitiesInput = Schema.Struct({
   threadId: ThreadId,
 });
@@ -92,6 +96,18 @@ export interface ProjectionThreadActivityRepositoryShape {
   readonly getLatestTaskActivity: (
     input: GetLatestProjectionThreadTaskActivityInput,
   ) => Effect.Effect<Option.Option<ProjectionThreadActivity>, ProjectionRepositoryError>;
+
+  /**
+   * Read the newest task-lifecycle activity per (thread, task) pair.
+   *
+   * Startup recovery uses this to find background work orphaned by a
+   * restart: a task whose newest row is not terminal has no process left
+   * to finish it.
+   */
+  readonly listLatestTaskActivities: () => Effect.Effect<
+    ReadonlyArray<ProjectionThreadActivity>,
+    ProjectionRepositoryError
+  >;
 
   /**
    * Delete projected thread activity rows by thread.

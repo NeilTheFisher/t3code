@@ -1151,7 +1151,12 @@ export function makeOpenCodeAdapter(
         // the remaining cleanups.
         yield* Effect.forEach(
           contexts,
-          (context) => Effect.ignoreCause(stopOpenCodeContext(context)),
+          (context) =>
+            Effect.ignoreCause(
+              settleOpenCodeChildTasksForTeardown(context).pipe(
+                Effect.andThen(stopOpenCodeContext(context)),
+              ),
+            ),
           { concurrency: "unbounded", discard: true },
         );
         // Close the logger AFTER session teardown so any final lifecycle
@@ -1904,6 +1909,7 @@ export function makeOpenCodeAdapter(
           exitKind: "error",
         },
       }).pipe(Effect.ignore);
+      yield* settleOpenCodeChildTasksForTeardown(context);
       // Inline the teardown that `stopOpenCodeContext` would do; we can't
       // delegate to it because our `getAndSet` above already flipped the
       // one-shot guard, so the call would no-op.
@@ -2169,6 +2175,39 @@ export function makeOpenCodeAdapter(
         },
       });
     });
+
+    // Settles every child task still open when the session is torn down. A
+    // background subagent outlives its parent turn, so a stop or server
+    // shutdown leaves no later provider event to close its Agents-surface
+    // row; without this the row reads "Working" forever after a restart.
+    // Mirrors the Claude adapter's live-task settle at stop; status "stopped"
+    // maps to "interrupted" in the client fold.
+    const settleOpenCodeChildTasksForTeardown = Effect.fn("settleOpenCodeChildTasksForTeardown")(
+      function* (context: OpenCodeSessionContext) {
+        for (const [childSessionId, child] of context.childTasks) {
+          if (child.taskCompleted) {
+            continue;
+          }
+          child.taskCompleted = true;
+          yield* emit({
+            ...(yield* buildEventBase({
+              threadId: context.session.threadId,
+              ...(context.activeTurnId ? { turnId: context.activeTurnId } : {}),
+            })),
+            type: "task.completed",
+            payload: {
+              taskId: RuntimeTaskId.make(childSessionId),
+              status: "stopped",
+              taskType: "local_agent",
+              ...(child.role ? { role: child.role } : {}),
+              ...(child.title ? { title: child.title } : {}),
+              toolUseId: child.parentCallId,
+              timelineBypass: true,
+            },
+          });
+        }
+      },
+    );
 
     // Routes events from a known child session into Agents-surface runtime
     // events: the child's items become `parentItemId`-tagged `item.updated`
@@ -3532,6 +3571,7 @@ export function makeOpenCodeAdapter(
           if (existing.session.status === "connecting" && !(yield* Ref.get(existing.stopped))) {
             return (yield* awaitOpenCodeContextReady(existing)).session;
           }
+          yield* settleOpenCodeChildTasksForTeardown(existing);
           yield* stopOpenCodeContext(existing);
           deleteContextIfCurrent(existing);
         }
@@ -4592,6 +4632,7 @@ export function makeOpenCodeAdapter(
             threadId,
           });
         }
+        yield* settleOpenCodeChildTasksForTeardown(context);
         const stopped = yield* stopOpenCodeContext(context);
         deleteContextIfCurrent(context);
         if (!stopped) {
@@ -4751,7 +4792,12 @@ export function makeOpenCodeAdapter(
         // interrupt the sibling fibers. Same pattern as the layer finalizer.
         yield* Effect.forEach(
           contexts,
-          (context) => Effect.ignoreCause(stopOpenCodeContext(context)),
+          (context) =>
+            Effect.ignoreCause(
+              settleOpenCodeChildTasksForTeardown(context).pipe(
+                Effect.andThen(stopOpenCodeContext(context)),
+              ),
+            ),
           { concurrency: "unbounded", discard: true },
         );
       });

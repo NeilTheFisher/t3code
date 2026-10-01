@@ -39,6 +39,7 @@ import * as ExternalLauncher from "./process/externalLauncher.ts";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as OrchestrationReactor from "./orchestration/Services/OrchestrationReactor.ts";
+import { settleOrphanedBackgroundTasks } from "./orchestration/settleOrphanedTasks.ts";
 import { settleOrphanedRunningTurns } from "./orchestration/settleOrphanedTurns.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerSettings from "./serverSettings.ts";
@@ -954,6 +955,20 @@ export const make = (options?: StartupOptions) =>
               environmentVariable: error.environmentVariable,
               cause: error.cause,
             }),
+          ),
+        ),
+      );
+
+      // Settle background tasks orphaned with the previous process before any
+      // session reconciliation can resume work, so a live task row cannot be
+      // mistaken for stale.
+      yield* Effect.logDebug("startup phase: settling orphaned background tasks");
+      yield* runStartupPhase(
+        "orphaned-tasks.settle",
+        settleOrphanedBackgroundTasks.pipe(
+          Effect.provideService(Crypto.Crypto, crypto),
+          Effect.catchCause((cause) =>
+            Effect.logWarning("failed to settle orphaned background tasks", { cause }),
           ),
         ),
       );
