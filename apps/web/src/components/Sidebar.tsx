@@ -1015,6 +1015,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   onUnsnooze: (threadRef: ScopedThreadRef) => void;
   onUnpin: (threadRef: ScopedThreadRef) => void;
   onAcknowledgeWoke: (threadRef: ScopedThreadRef, visitedAt: string) => void;
+  onMarkUnread: (
+    threadRef: ScopedThreadRef,
+    latestTurnCompletedAt: string | null | undefined,
+  ) => void;
   /**
    * External files dropped onto this row. The row highlights while the drag
    * is over it; the callback opens the thread and hands the files to its
@@ -1028,6 +1032,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     onCommitRename,
     onContextMenu,
     onAcknowledgeWoke,
+    onMarkUnread,
     onFileDropThreads,
     onRenameTitleChange,
     onSettle,
@@ -1245,6 +1250,24 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       onContextMenu(threadRef, { x: event.clientX, y: event.clientY });
     },
     [onContextMenu, threadRef],
+  );
+  // Middle click is the row's mark-unread gesture, so it never opens a
+  // background tab and never starts the browser's middle-click autoscroll.
+  const handleMouseDown = useCallback((event: ReactMouseEvent) => {
+    if (event.button !== 1) return;
+    event.preventDefault();
+  }, []);
+  const handleAuxClick = useCallback(
+    (event: ReactMouseEvent) => {
+      if (event.button !== 1) return;
+      // A middle click on a nested link is still a request to open it in a
+      // background tab, so only the row's own chrome is a mark-unread gesture.
+      if (isSidebarNestedLinkClick(event.target)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      onMarkUnread(threadRef, thread.latestTurn?.completedAt);
+    },
+    [onMarkUnread, thread.latestTurn?.completedAt, threadRef],
   );
   const handleKeyDown = useCallback(
     (event: ReactKeyboardEvent) => {
@@ -1617,6 +1640,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 onDoubleClick={handleDoubleClick}
                 onKeyDown={handleKeyDown}
                 onContextMenu={handleContextMenu}
+                onMouseDown={handleMouseDown}
+                onAuxClick={handleAuxClick}
               />
             }
           >
@@ -1773,6 +1798,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               onDoubleClick={handleDoubleClick}
               onKeyDown={handleKeyDown}
               onContextMenu={handleContextMenu}
+              onMouseDown={handleMouseDown}
+              onAuxClick={handleAuxClick}
             />
           }
         >
@@ -3055,6 +3082,13 @@ export default function Sidebar() {
       navigateToThread(threadRef);
     },
     [navigateToThread, rangeSelectTo, toggleThreadSelection],
+  );
+
+  const markThreadUnreadByRef = useCallback(
+    (threadRef: ScopedThreadRef, latestTurnCompletedAt: string | null | undefined) => {
+      markThreadUnread(scopedThreadKey(threadRef), latestTurnCompletedAt);
+    },
+    [markThreadUnread],
   );
 
   // A settle per thread at a time: double clicks and repeated menu picks
@@ -4814,6 +4848,7 @@ export default function Sidebar() {
                             onUnsnooze={attemptUnsnooze}
                             onUnpin={attemptUnpin}
                             onAcknowledgeWoke={acknowledgeWoke}
+                            onMarkUnread={markThreadUnreadByRef}
                             onFileDropThreads={handleThreadFileDrop}
                           />
                         );
