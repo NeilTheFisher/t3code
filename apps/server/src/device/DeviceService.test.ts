@@ -5,6 +5,7 @@ import {
   DeviceOperationError,
   LOCAL_DEVICE_HOST_ID,
   ThreadId,
+  type DevicePlatform,
   type DeviceServiceState,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -34,6 +35,35 @@ const baseState: DeviceServiceState = {
   agentAccessEnabled: false,
   hubBasePath: "/api/device-hub",
   revision: 0,
+};
+
+/** A local host backed by a hub whose responses each test stubs per path. */
+const stubDeviceHost = (
+  platforms: ReadonlyArray<DevicePlatform> = ["android"],
+): DeviceHost.DeviceHost["Service"] => {
+  const ready: DeviceHost.DeviceHostReady = {
+    nodePath: process.execPath,
+    hub: { origin: "http://device.test" },
+    helpers: { serveSimAxSettings: null, serveSimCli: null },
+    run: () => Effect.succeed({ code: 0, stdout: "", stderr: "" }),
+  };
+  return {
+    id: LOCAL_DEVICE_HOST_ID,
+    summary: Effect.succeed({
+      id: LOCAL_DEVICE_HOST_ID,
+      kind: "local",
+      label: "Device host",
+      platforms: platforms.map((platform) => ({ platform, available: true })),
+      hubInstalled: true,
+      agentDeviceInstalled: false,
+    }),
+    platformAvailability: (platform) => Effect.succeed({ platform, available: true }),
+    ensureReady: () => Effect.succeed(ready),
+    ensureAgentReady: () => Effect.die("Agent access is not used in this test"),
+    current: Effect.succeed(ready),
+    stopAgent: Effect.void,
+    stop: Effect.void,
+  };
 };
 
 describe("DeviceService.stateStream", () => {
@@ -589,6 +619,228 @@ it.effect.each([
       Effect.provide(ServerSettingsService.layerTest({ enableDeviceSupport: true })),
       Effect.scoped,
     ),
+);
+
+it.effect.each([
+  { hubState: "off", outcome: "succeeds" },
+  { hubState: "booted", outcome: "fails" },
+  { hubState: "gone", outcome: "succeeds" },
+] as const)(
+  "Android shutdown $outcome when the hub rejects it and the device is $hubState",
+  ({ hubState, outcome }) =>
+    Effect.gen(function* () {
+      const deviceId = DeviceId.make("192.168.0.19:5555");
+      const paths: string[] = [];
+      // The device list is stale until shutdown re-reads it from the hub.
+      let listed: "booted" | "off" | "gone" = "booted";
+      const host = stubDeviceHost();
+
+      const http = HttpClient.make((request) =>
+        Effect.sync(() => {
+          const path = new URL(request.url).pathname;
+          paths.push(path);
+          if (path === "/api/devices") {
+            return HttpClientResponse.fromWeb(
+              request,
+              Response.json({
+                simulators: [],
+                emulators:
+                  listed === "gone"
+                    ? []
+                    : [
+                        {
+                          id: deviceId,
+                          name: "realme RMX2202",
+                          platform: "android",
+                          version: "14",
+                          physical: true,
+                          booted: listed === "booted",
+                        },
+                      ],
+              }),
+            );
+          }
+          if (path === "/api/devices/shutdown") {
+            // A device that is already off or unplugged cannot be shut down.
+            listed = hubState;
+            return HttpClientResponse.fromWeb(
+              request,
+              Response.json({ ok: false, error: "device is not connected" }),
+            );
+          }
+          throw new Error(`Unexpected hub path: ${path}`);
+        }),
+      );
+      const service = yield* makeWithHosts(new Map([[host.id, host]])).pipe(
+        Effect.provideService(HttpClient.HttpClient, http),
+      );
+      yield* service.list;
+      const exit = yield* Effect.exit(service.shutdown({ deviceId, platform: "android" }));
+      expect(paths.filter((path) => path.endsWith("shutdown"))).toEqual(["/api/devices/shutdown"]);
+      if (outcome === "succeeds") {
+        expect(Exit.isSuccess(exit)).toBe(true);
+        expect(
+          (yield* service.state).devices.find((device) => device.id === deviceId)?.booted ?? false,
+        ).toBe(false);
+      } else {
+        expect(Exit.isFailure(exit)).toBe(true);
+        expect(
+          (yield* service.state).devices.find((device) => device.id === deviceId)?.booted,
+        ).toBe(true);
+      }
+    }).pipe(
+      Effect.provide(ServerSettingsService.layerTest({ enableDeviceSupport: true })),
+      Effect.scoped,
+    ),
+);
+
+it.effect("Android shutdown fails when the re-listing reported a failure", () =>
+  Effect.gen(function* () {
+    const deviceId = DeviceId.make("192.168.0.19:5555");
+    const host = stubDeviceHost();
+    const http = HttpClient.make((request) =>
+      Effect.sync(() => {
+        const path = new URL(request.url).pathname;
+        if (path === "/api/devices") {
+          // A partial listing: the device is missing but the hub said why, so
+          // its absence cannot be read as "gone".
+          return HttpClientResponse.fromWeb(
+            request,
+            Response.json({
+              simulators: [],
+              emulators: [],
+              errors: [{ message: "[android-utils] Failed to list devices" }],
+            }),
+          );
+        }
+        if (path === "/api/devices/shutdown") {
+          return HttpClientResponse.fromWeb(
+            request,
+            Response.json({ ok: false, error: "device is not connected" }),
+          );
+        }
+        throw new Error(`Unexpected hub path: ${path}`);
+      }),
+    );
+    const service = yield* makeWithHosts(new Map([[host.id, host]])).pipe(
+      Effect.provideService(HttpClient.HttpClient, http),
+    );
+    const exit = yield* Effect.exit(service.shutdown({ deviceId, platform: "android" }));
+    expect(Exit.isFailure(exit)).toBe(true);
+  }).pipe(
+    Effect.provide(ServerSettingsService.layerTest({ enableDeviceSupport: true })),
+    Effect.scoped,
+  ),
+);
+
+it.effect("refresh drops sessions for a device that disconnected", () =>
+  Effect.gen(function* () {
+    const deviceId = DeviceId.make("192.168.0.19:5555");
+    const threadId = ThreadId.make("device-refresh-prune");
+    let present = true;
+    const host = stubDeviceHost();
+    const http = HttpClient.make((request) =>
+      Effect.sync(() => {
+        const path = new URL(request.url).pathname;
+        if (path === "/api/devices") {
+          return HttpClientResponse.fromWeb(
+            request,
+            Response.json({
+              simulators: [],
+              emulators: present
+                ? [
+                    {
+                      id: deviceId,
+                      name: "realme RMX2202",
+                      platform: "android",
+                      version: "14",
+                      physical: true,
+                      booted: true,
+                    },
+                  ]
+                : [],
+            }),
+          );
+        }
+        throw new Error(`Unexpected hub path: ${path}`);
+      }),
+    );
+    const service = yield* makeWithHosts(new Map([[host.id, host]])).pipe(
+      Effect.provideService(HttpClient.HttpClient, http),
+    );
+    yield* service.list;
+    yield* service.open({
+      threadId,
+      hostId: LOCAL_DEVICE_HOST_ID,
+      deviceId,
+      platform: "android",
+    });
+    expect((yield* service.state).sessions.map((session) => session.deviceId)).toEqual([deviceId]);
+    present = false;
+    yield* service.list;
+    expect((yield* service.state).sessions).toEqual([]);
+  }).pipe(
+    Effect.provide(ServerSettingsService.layerTest({ enableDeviceSupport: true })),
+    Effect.scoped,
+  ),
+);
+
+it.effect("refresh keeps sessions when the device listing reported a failure", () =>
+  Effect.gen(function* () {
+    const deviceId = DeviceId.make("192.168.0.19:5555");
+    const threadId = ThreadId.make("device-refresh-partial");
+    let partial = false;
+    const host = stubDeviceHost();
+    const http = HttpClient.make((request) =>
+      Effect.sync(() => {
+        const path = new URL(request.url).pathname;
+        if (path === "/api/devices") {
+          return HttpClientResponse.fromWeb(
+            request,
+            Response.json(
+              partial
+                ? {
+                    simulators: [],
+                    emulators: [],
+                    errors: [{ message: "[android-utils] Failed to list devices" }],
+                  }
+                : {
+                    simulators: [],
+                    emulators: [
+                      {
+                        id: deviceId,
+                        name: "realme RMX2202",
+                        platform: "android",
+                        version: "14",
+                        physical: true,
+                        booted: true,
+                      },
+                    ],
+                  },
+            ),
+          );
+        }
+        throw new Error(`Unexpected hub path: ${path}`);
+      }),
+    );
+    const service = yield* makeWithHosts(new Map([[host.id, host]])).pipe(
+      Effect.provideService(HttpClient.HttpClient, http),
+    );
+    yield* service.list;
+    yield* service.open({
+      threadId,
+      hostId: LOCAL_DEVICE_HOST_ID,
+      deviceId,
+      platform: "android",
+    });
+    expect((yield* service.state).sessions.map((session) => session.deviceId)).toEqual([deviceId]);
+    partial = true;
+    yield* service.list;
+    expect((yield* service.state).sessions.map((session) => session.deviceId)).toEqual([deviceId]);
+  }).pipe(
+    Effect.provide(ServerSettingsService.layerTest({ enableDeviceSupport: true })),
+    Effect.scoped,
+  ),
 );
 
 it.effect("retry keeps device and agent consent unchanged", () =>
