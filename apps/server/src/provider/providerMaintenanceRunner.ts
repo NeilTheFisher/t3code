@@ -70,7 +70,7 @@ export interface ProviderMaintenanceRunnerShape {
 export class ProviderMaintenanceRunner extends Context.Service<
   ProviderMaintenanceRunner,
   ProviderMaintenanceRunnerShape
->()("t3/provider/providerMaintenanceRunner") {}
+>()("@neilthefisher/t3/provider/providerMaintenanceRunner") {}
 
 class ProviderMaintenanceCommandError extends Schema.TaggedError<ProviderMaintenanceCommandError>()(
   "ProviderMaintenanceCommandError",
@@ -661,8 +661,7 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
       },
     );
 
-    // Installers cannot be safely killed mid-install, so the update outlives a disconnecting caller.
-    const updateFiber = yield* commandCoordinator
+    return yield* commandCoordinator
       .withCommandLock({
         targetKey,
         lockKey: update.lockKey,

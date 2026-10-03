@@ -34,6 +34,7 @@ import * as GitManager from "../git/GitManager.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import { hasProviderCliUnavailableCause } from "../sourceControl/providerErrors.ts";
 import { forkParked } from "../serverActivation.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
@@ -438,10 +439,15 @@ export const make = Effect.gen(function* () {
           Effect.catchCauseIf(
             (cause) => !Cause.hasInterruptsOnly(cause),
             (cause) =>
-              Effect.logWarning("automatic thread settlement skipped", {
-                threadId: thread.id,
-                cause: Cause.pretty(cause),
-              }).pipe(Effect.as(null)),
+              (hasProviderCliUnavailableCause(cause)
+                ? Effect.logDebug("automatic thread settlement skipped: provider CLI unavailable", {
+                    threadId: thread.id,
+                  })
+                : Effect.logWarning("automatic thread settlement skipped", {
+                    threadId: thread.id,
+                    cause: Cause.pretty(cause),
+                  })
+              ).pipe(Effect.as(null)),
           ),
         ),
     );
@@ -728,10 +734,16 @@ export const make = Effect.gen(function* () {
           Effect.catchCauseIf(
             (cause) => !Cause.hasInterruptsOnly(cause),
             (cause) =>
-              Effect.logWarning("automatic thread settlement skipped", {
-                threadIds: group.map((thread) => thread.id),
-                cause: Cause.pretty(cause),
-              }).pipe(Effect.andThen(settleDeferred(group))),
+              (hasProviderCliUnavailableCause(cause)
+                ? Effect.logDebug(
+                    "automatic thread settlement skipped: provider CLI unavailable",
+                    { threadIds: group.map((thread) => thread.id) },
+                  )
+                : Effect.logWarning("automatic thread settlement skipped", {
+                    threadIds: group.map((thread) => thread.id),
+                    cause: Cause.pretty(cause),
+                  })
+              ).pipe(Effect.andThen(settleDeferred(group))),
           ),
         ),
       { concurrency: 8, discard: true },
