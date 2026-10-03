@@ -6,15 +6,16 @@ import * as Migrator from "effect/sql/Migrator";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import { migrationManifest, runMigrations } from "./Migrations.ts";
-import PullRequestFilesViewed from "./Migrations/053_PullRequestFilesViewed.ts";
-import RemoveRedundantProjectionIndexes from "./Migrations/056_RemoveRedundantProjectionIndexes.ts";
-import OrchestrationV2 from "./Migrations/055_OrchestrationV2.ts";
+import PullRequestFilesViewed from "./Migrations/055_PullRequestFilesViewed.ts";
+import RemoveRedundantProjectionIndexes from "./Migrations/058_RemoveRedundantProjectionIndexes.ts";
+import OrchestrationV2 from "./Migrations/057_OrchestrationV2.ts";
 
+// The V2 schema is unchanged from the published September 15–16 previews.
 const seedPreview = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
-  yield* runMigrations({ toMigrationInclusive: 52 });
+  yield* runMigrations({ toMigrationInclusive: 54 });
   yield* Migrator.make({})({
-    loader: Migrator.fromRecord({ "53_OrchestrationV2": OrchestrationV2 }),
+    loader: Migrator.fromRecord({ "55_OrchestrationV2": OrchestrationV2 }),
   });
   yield* sql`
     INSERT INTO orchestration_v2_legacy_imports
@@ -22,7 +23,7 @@ const seedPreview = Effect.gen(function* () {
     VALUES ('preview-thread', '2026-09-15', '2026-09-15', '2026-09-16', 42)
   `;
   yield* sql`
-    UPDATE effect_sql_migrations SET created_at = '2026-09-15 00:00:00' WHERE migration_id = 53
+    UPDATE effect_sql_migrations SET created_at = '2026-09-15 00:00:00' WHERE migration_id = 55
   `;
 });
 
@@ -33,72 +34,72 @@ describe("V2 preview upgrade", () => {
       yield* seedPreview;
       const imports = yield* sql`SELECT * FROM orchestration_v2_legacy_imports`;
       assert.deepStrictEqual(yield* runMigrations(), [
-        [53, "PullRequestFilesViewed"],
-        [54, "ProjectionThreadsAutoSettleDisabledAt"],
-        [56, "RemoveRedundantProjectionIndexes"],
-        [57, "ScheduledTaskWebhooks"],
-        [58, "WebhookRelayDeliveries"],
-        [59, "McpAppModelContext"],
-        [60, "ThreadSnapshotWindowIndexes"],
-        [61, "PullRequestReviewGuides"],
-        [62, "ThreadFailureLookupIndex"],
-        [63, "DropUnusedV1Projections"],
-        [64, "CanonicalizeThreadPullRequestLinks"],
-        [65, "CodexUsageNativeTurnIndex"],
-        [66, "RepairClientSettlementTimestamps"],
-        [67, "WebhookDedupe"],
-        [68, "ShellStopRequestIndex"],
-        [69, "ThreadMessageSearch"],
-        [70, "PeerLinks"],
-        [71, "PeerLinkFence"],
-        [72, "WaitingLinkRequestIndex"],
-        [73, "ActiveTurnItemIndexes"],
-        [74, "ExcludeAttachmentPlaceholdersFromSearch"],
-        [75, "SubagentDeliveryState"],
-        [76, "ProjectionProjectsPinArchive"],
-        [77, "RepairBooleanSettledOverride"],
-        [78, "DropOrchestrationEventCorrelationIndex"],
-        [79, "DelegatedRecoveryIndexes"],
-        [80, "ScheduledTaskThreadMode"],
-        [81, "ProjectionMessageSearchText"],
-        [82, "TurnItemConversationIndex"],
-        [83, "CommandReadIndexes"],
-        [84, "LastExecutedRunIndex"],
-        [85, "TurnItemCounts"],
-        [86, "QueuedTurnInputIndex"],
-        [87, "ProjectionProjectsCustomTitle"],
-        [88, "TurnItemTypeStatusIndex"],
-        [89, "ShellThreadReadIndexes"],
-        [90, "AuthConnectDevices"],
-        [91, "AuthConnectDeniedRequests"],
-        [92, "QueuedTurnInputIndexJsonValid"],
-        [93, "ProviderTurnAttemptIndex"],
-        [94, "TurnItemMessageOrdinalIndex"],
-        [95, "TurnItemInlineWorkOutput"],
-        [96, "RepairStaleTitleRegeneration"],
-        [97, "IssueTrackerBindings"],
-        [98, "ActiveShellIndexIndexes"],
-        [99, "BackgroundRecoveryIndexes"],
-        [100, "TurnStartReadIndexes"],
-        [101, "DelegatedTaskReadIndexes"],
-        [102, "ThreadItemCounts"],
-        [103, "IssueTrackerAdditionalScopes"],
-        [104, "ProjectionProjectsTrackedFolders"],
-        [105, "TaskFolders"],
-        [106, "WorktreePathKeyIndex"],
-        [107, "DeferredSlashCommandIndex"],
-        [108, "AgentFeedback"],
-        [109, "IssueTrackerAccounts"],
-        [110, "Workflows"],
-        [111, "SupersededRunAttemptIndex"],
-        [112, "LayoutCommandApprovals"],
-        [113, "WorkflowSkippedRuns"],
-        [114, "WorkflowRunIndexes"],
-        [115, "WorkflowRunTags"],
-        [116, "ForkHistoryMembership"],
-        [117, "WorkflowMailSender"],
-        [118, "WorkflowPools"],
-        [119, "WorkflowRunSubject"],
+        [55, "PullRequestFilesViewed"],
+        [56, "ProjectionThreadsAutoSettleDisabledAt"],
+        [58, "RemoveRedundantProjectionIndexes"],
+        [59, "ScheduledTaskWebhooks"],
+        [60, "WebhookRelayDeliveries"],
+        [61, "McpAppModelContext"],
+        [62, "ThreadSnapshotWindowIndexes"],
+        [63, "PullRequestReviewGuides"],
+        [64, "ThreadFailureLookupIndex"],
+        [65, "DropUnusedV1Projections"],
+        [66, "CanonicalizeThreadPullRequestLinks"],
+        [67, "CodexUsageNativeTurnIndex"],
+        [68, "RepairClientSettlementTimestamps"],
+        [69, "WebhookDedupe"],
+        [70, "ShellStopRequestIndex"],
+        [71, "ThreadMessageSearch"],
+        [72, "PeerLinks"],
+        [73, "PeerLinkFence"],
+        [74, "WaitingLinkRequestIndex"],
+        [75, "ActiveTurnItemIndexes"],
+        [76, "ExcludeAttachmentPlaceholdersFromSearch"],
+        [77, "SubagentDeliveryState"],
+        [78, "ProjectionProjectsPinArchive"],
+        [79, "RepairBooleanSettledOverride"],
+        [80, "DropOrchestrationEventCorrelationIndex"],
+        [81, "DelegatedRecoveryIndexes"],
+        [82, "ScheduledTaskThreadMode"],
+        [83, "ProjectionMessageSearchText"],
+        [84, "TurnItemConversationIndex"],
+        [85, "CommandReadIndexes"],
+        [86, "LastExecutedRunIndex"],
+        [87, "TurnItemCounts"],
+        [88, "QueuedTurnInputIndex"],
+        [89, "ProjectionProjectsCustomTitle"],
+        [90, "TurnItemTypeStatusIndex"],
+        [91, "ShellThreadReadIndexes"],
+        [92, "AuthConnectDevices"],
+        [93, "AuthConnectDeniedRequests"],
+        [94, "QueuedTurnInputIndexJsonValid"],
+        [95, "ProviderTurnAttemptIndex"],
+        [96, "TurnItemMessageOrdinalIndex"],
+        [97, "TurnItemInlineWorkOutput"],
+        [98, "RepairStaleTitleRegeneration"],
+        [99, "IssueTrackerBindings"],
+        [100, "ActiveShellIndexIndexes"],
+        [101, "BackgroundRecoveryIndexes"],
+        [102, "TurnStartReadIndexes"],
+        [103, "DelegatedTaskReadIndexes"],
+        [104, "IssueTrackerAdditionalScopes"],
+        [105, "ProjectionProjectsTrackedFolders"],
+        [106, "TaskFolders"],
+        [107, "WorktreePathKeyIndex"],
+        [108, "DeferredSlashCommandIndex"],
+        [109, "AgentFeedback"],
+        [110, "IssueTrackerAccounts"],
+        [111, "Workflows"],
+        [112, "SupersededRunAttemptIndex"],
+        [113, "ThreadItemCounts"],
+        [114, "LayoutCommandApprovals"],
+        [115, "WorkflowSkippedRuns"],
+        [116, "WorkflowRunIndexes"],
+        [117, "WorkflowRunTags"],
+        [118, "ForkHistoryMembership"],
+        [119, "WorkflowMailSender"],
+        [120, "WorkflowPools"],
+        [121, "WorkflowRunSubject"],
       ]);
       assert.deepStrictEqual(yield* runMigrations(), []);
       assert.deepStrictEqual(yield* sql`SELECT * FROM orchestration_v2_legacy_imports`, imports);
@@ -110,7 +111,7 @@ describe("V2 preview upgrade", () => {
         migrationManifest,
       );
       assert.deepStrictEqual(
-        yield* sql`SELECT created_at FROM effect_sql_migrations WHERE migration_id = 55`,
+        yield* sql`SELECT created_at FROM effect_sql_migrations WHERE migration_id = 57`,
         [{ created_at: "2026-09-15 00:00:00" }],
       );
       yield* sql`
@@ -127,13 +128,13 @@ describe("V2 preview upgrade", () => {
     (withIndexes) =>
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
-        yield* runMigrations({ toMigrationInclusive: 52 });
+        yield* runMigrations({ toMigrationInclusive: 54 });
         yield* Migrator.make({})({
           loader: Migrator.fromRecord({
-            "53_PullRequestFilesViewed": PullRequestFilesViewed,
-            "54_OrchestrationV2": OrchestrationV2,
+            "55_PullRequestFilesViewed": PullRequestFilesViewed,
+            "56_OrchestrationV2": OrchestrationV2,
             ...(withIndexes
-              ? { "55_RemoveRedundantProjectionIndexes": RemoveRedundantProjectionIndexes }
+              ? { "57_RemoveRedundantProjectionIndexes": RemoveRedundantProjectionIndexes }
               : {}),
           }),
         });
@@ -165,8 +166,8 @@ describe("V2 preview upgrade", () => {
       `;
       assert.ok(Exit.isFailure(yield* Effect.exit(runMigrations())));
       assert.deepStrictEqual(
-        yield* sql`SELECT migration_id, name FROM effect_sql_migrations WHERE migration_id >= 53`,
-        [{ migration_id: 53, name: "OrchestrationV2" }],
+        yield* sql`SELECT migration_id, name FROM effect_sql_migrations WHERE migration_id >= 55`,
+        [{ migration_id: 55, name: "OrchestrationV2" }],
       );
       assert.deepStrictEqual(
         yield* sql`SELECT name FROM sqlite_master WHERE name = 'pull_request_files_viewed'`,
@@ -175,72 +176,72 @@ describe("V2 preview upgrade", () => {
       assert.strictEqual((yield* sql`SELECT * FROM orchestration_v2_legacy_imports`).length, 1);
       yield* sql`DROP TRIGGER fail_preview_upgrade`;
       assert.deepStrictEqual(yield* runMigrations(), [
-        [53, "PullRequestFilesViewed"],
-        [54, "ProjectionThreadsAutoSettleDisabledAt"],
-        [56, "RemoveRedundantProjectionIndexes"],
-        [57, "ScheduledTaskWebhooks"],
-        [58, "WebhookRelayDeliveries"],
-        [59, "McpAppModelContext"],
-        [60, "ThreadSnapshotWindowIndexes"],
-        [61, "PullRequestReviewGuides"],
-        [62, "ThreadFailureLookupIndex"],
-        [63, "DropUnusedV1Projections"],
-        [64, "CanonicalizeThreadPullRequestLinks"],
-        [65, "CodexUsageNativeTurnIndex"],
-        [66, "RepairClientSettlementTimestamps"],
-        [67, "WebhookDedupe"],
-        [68, "ShellStopRequestIndex"],
-        [69, "ThreadMessageSearch"],
-        [70, "PeerLinks"],
-        [71, "PeerLinkFence"],
-        [72, "WaitingLinkRequestIndex"],
-        [73, "ActiveTurnItemIndexes"],
-        [74, "ExcludeAttachmentPlaceholdersFromSearch"],
-        [75, "SubagentDeliveryState"],
-        [76, "ProjectionProjectsPinArchive"],
-        [77, "RepairBooleanSettledOverride"],
-        [78, "DropOrchestrationEventCorrelationIndex"],
-        [79, "DelegatedRecoveryIndexes"],
-        [80, "ScheduledTaskThreadMode"],
-        [81, "ProjectionMessageSearchText"],
-        [82, "TurnItemConversationIndex"],
-        [83, "CommandReadIndexes"],
-        [84, "LastExecutedRunIndex"],
-        [85, "TurnItemCounts"],
-        [86, "QueuedTurnInputIndex"],
-        [87, "ProjectionProjectsCustomTitle"],
-        [88, "TurnItemTypeStatusIndex"],
-        [89, "ShellThreadReadIndexes"],
-        [90, "AuthConnectDevices"],
-        [91, "AuthConnectDeniedRequests"],
-        [92, "QueuedTurnInputIndexJsonValid"],
-        [93, "ProviderTurnAttemptIndex"],
-        [94, "TurnItemMessageOrdinalIndex"],
-        [95, "TurnItemInlineWorkOutput"],
-        [96, "RepairStaleTitleRegeneration"],
-        [97, "IssueTrackerBindings"],
-        [98, "ActiveShellIndexIndexes"],
-        [99, "BackgroundRecoveryIndexes"],
-        [100, "TurnStartReadIndexes"],
-        [101, "DelegatedTaskReadIndexes"],
-        [102, "ThreadItemCounts"],
-        [103, "IssueTrackerAdditionalScopes"],
-        [104, "ProjectionProjectsTrackedFolders"],
-        [105, "TaskFolders"],
-        [106, "WorktreePathKeyIndex"],
-        [107, "DeferredSlashCommandIndex"],
-        [108, "AgentFeedback"],
-        [109, "IssueTrackerAccounts"],
-        [110, "Workflows"],
-        [111, "SupersededRunAttemptIndex"],
-        [112, "LayoutCommandApprovals"],
-        [113, "WorkflowSkippedRuns"],
-        [114, "WorkflowRunIndexes"],
-        [115, "WorkflowRunTags"],
-        [116, "ForkHistoryMembership"],
-        [117, "WorkflowMailSender"],
-        [118, "WorkflowPools"],
-        [119, "WorkflowRunSubject"],
+        [55, "PullRequestFilesViewed"],
+        [56, "ProjectionThreadsAutoSettleDisabledAt"],
+        [58, "RemoveRedundantProjectionIndexes"],
+        [59, "ScheduledTaskWebhooks"],
+        [60, "WebhookRelayDeliveries"],
+        [61, "McpAppModelContext"],
+        [62, "ThreadSnapshotWindowIndexes"],
+        [63, "PullRequestReviewGuides"],
+        [64, "ThreadFailureLookupIndex"],
+        [65, "DropUnusedV1Projections"],
+        [66, "CanonicalizeThreadPullRequestLinks"],
+        [67, "CodexUsageNativeTurnIndex"],
+        [68, "RepairClientSettlementTimestamps"],
+        [69, "WebhookDedupe"],
+        [70, "ShellStopRequestIndex"],
+        [71, "ThreadMessageSearch"],
+        [72, "PeerLinks"],
+        [73, "PeerLinkFence"],
+        [74, "WaitingLinkRequestIndex"],
+        [75, "ActiveTurnItemIndexes"],
+        [76, "ExcludeAttachmentPlaceholdersFromSearch"],
+        [77, "SubagentDeliveryState"],
+        [78, "ProjectionProjectsPinArchive"],
+        [79, "RepairBooleanSettledOverride"],
+        [80, "DropOrchestrationEventCorrelationIndex"],
+        [81, "DelegatedRecoveryIndexes"],
+        [82, "ScheduledTaskThreadMode"],
+        [83, "ProjectionMessageSearchText"],
+        [84, "TurnItemConversationIndex"],
+        [85, "CommandReadIndexes"],
+        [86, "LastExecutedRunIndex"],
+        [87, "TurnItemCounts"],
+        [88, "QueuedTurnInputIndex"],
+        [89, "ProjectionProjectsCustomTitle"],
+        [90, "TurnItemTypeStatusIndex"],
+        [91, "ShellThreadReadIndexes"],
+        [92, "AuthConnectDevices"],
+        [93, "AuthConnectDeniedRequests"],
+        [94, "QueuedTurnInputIndexJsonValid"],
+        [95, "ProviderTurnAttemptIndex"],
+        [96, "TurnItemMessageOrdinalIndex"],
+        [97, "TurnItemInlineWorkOutput"],
+        [98, "RepairStaleTitleRegeneration"],
+        [99, "IssueTrackerBindings"],
+        [100, "ActiveShellIndexIndexes"],
+        [101, "BackgroundRecoveryIndexes"],
+        [102, "TurnStartReadIndexes"],
+        [103, "DelegatedTaskReadIndexes"],
+        [104, "IssueTrackerAdditionalScopes"],
+        [105, "ProjectionProjectsTrackedFolders"],
+        [106, "TaskFolders"],
+        [107, "WorktreePathKeyIndex"],
+        [108, "DeferredSlashCommandIndex"],
+        [109, "AgentFeedback"],
+        [110, "IssueTrackerAccounts"],
+        [111, "Workflows"],
+        [112, "SupersededRunAttemptIndex"],
+        [113, "ThreadItemCounts"],
+        [114, "LayoutCommandApprovals"],
+        [115, "WorkflowSkippedRuns"],
+        [116, "WorkflowRunIndexes"],
+        [117, "WorkflowRunTags"],
+        [118, "ForkHistoryMembership"],
+        [119, "WorkflowMailSender"],
+        [120, "WorkflowPools"],
+        [121, "WorkflowRunSubject"],
       ]);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
@@ -249,7 +250,7 @@ describe("V2 preview upgrade", () => {
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       yield* seedPreview;
-      yield* sql`INSERT INTO effect_sql_migrations (migration_id, name) VALUES (54, 'UnknownFork')`;
+      yield* sql`INSERT INTO effect_sql_migrations (migration_id, name) VALUES (56, 'UnknownFork')`;
       const history = yield* sql`SELECT * FROM effect_sql_migrations ORDER BY migration_id`;
       assert.ok(Exit.isFailure(yield* Effect.exit(runMigrations())));
       assert.deepStrictEqual(

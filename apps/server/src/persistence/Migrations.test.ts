@@ -19,7 +19,7 @@ import * as DatabaseMigrationProgress from "./DatabaseMigrationProgress.ts";
 
 import { migrationManifest, runMigrations } from "./Migrations.ts";
 
-const v2Migrations = migrationManifest.filter(([id]) => id >= 55);
+const v2Migrations = migrationManifest.filter(([id]) => id >= 57);
 const newerMigrationId = Math.max(...migrationManifest.map(([id]) => id)) + 1;
 
 const history = Effect.gen(function* () {
@@ -42,17 +42,17 @@ describe("runMigrations", () => {
   it.effect("refuses to start when another migration took a V2 id", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
-      yield* runMigrations({ toMigrationInclusive: 54 });
+      yield* runMigrations({ toMigrationInclusive: 56 });
       yield* sql`
-        INSERT INTO effect_sql_migrations (migration_id, name) VALUES (55, 'FutureMainMigration')
+        INSERT INTO effect_sql_migrations (migration_id, name) VALUES (57, 'FutureMainMigration')
       `;
       const before = yield* history;
 
-      assert.deepStrictEqual(yield* runMigrations({ toMigrationInclusive: 54 }), []);
+      assert.deepStrictEqual(yield* runMigrations({ toMigrationInclusive: 56 }), []);
       const exit = yield* Effect.exit(runMigrations());
 
       assert.isTrue(Exit.isFailure(exit));
-      assert.include(String(exit), "55_OrchestrationV2 (recorded: FutureMainMigration)");
+      assert.include(String(exit), "57_OrchestrationV2 (recorded: FutureMainMigration)");
       assert.deepStrictEqual(yield* history, before);
       assert.strictEqual(yield* v2TableCount, 0);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
@@ -61,7 +61,7 @@ describe("runMigrations", () => {
   it.effect("refuses to start when a later id would skip V2 migrations", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
-      yield* runMigrations({ toMigrationInclusive: 54 });
+      yield* runMigrations({ toMigrationInclusive: 56 });
       yield* sql`
         INSERT INTO effect_sql_migrations (migration_id, name)
         VALUES (${newerMigrationId}, 'FutureMainMigration')
@@ -79,10 +79,10 @@ describe("runMigrations", () => {
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 
-  it.effect("upgrades a database at exactly 54, then rechecks it without a write lock", () =>
+  it.effect("upgrades a database at exactly 56, then rechecks it without a write lock", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
-      yield* runMigrations({ toMigrationInclusive: 54 });
+      yield* runMigrations({ toMigrationInclusive: 56 });
       const current = yield* Ref.make<Progress | null>(null);
       const steps: Array<Progress | null> = [];
       const loggedSteps: Array<Progress | null> = [];
@@ -134,7 +134,7 @@ describe("runMigrations", () => {
   it.effect("drops the unused correlation index and keeps correlation values", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
-      yield* runMigrations({ toMigrationInclusive: 54 });
+      yield* runMigrations({ toMigrationInclusive: 56 });
       yield* sql`
         INSERT INTO orchestration_events (
           event_id, aggregate_kind, stream_id, stream_version, event_type, occurred_at,
@@ -169,10 +169,10 @@ describe("runMigrations", () => {
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 
-  it.effect.each([30, 54])("still starts with a site-local migration at id %s", (id) =>
+  it.effect.each([30, 56])("still starts with a site-local migration at id %s", (id) =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
-      yield* runMigrations({ toMigrationInclusive: 54 });
+      yield* runMigrations({ toMigrationInclusive: 56 });
       yield* sql`
         UPDATE effect_sql_migrations SET name = 'SiteLocalMigration' WHERE migration_id = ${id}
       `;
@@ -185,21 +185,21 @@ describe("runMigrations", () => {
   it.effect("only checks V2 migrations within the requested limit", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
-      yield* runMigrations({ toMigrationInclusive: 55 });
+      yield* runMigrations({ toMigrationInclusive: 57 });
       yield* sql`
         INSERT INTO effect_sql_migrations (migration_id, name)
-        VALUES (56, 'SiteLocalMigration'), (${newerMigrationId}, 'NewerV2Migration')
+        VALUES (58, 'SiteLocalMigration'), (${newerMigrationId}, 'NewerV2Migration')
       `;
       const before = yield* history;
 
-      assert.deepStrictEqual(yield* runMigrations({ toMigrationInclusive: 55 }), []);
-      const exit = yield* Effect.exit(runMigrations({ toMigrationInclusive: 56 }));
+      assert.deepStrictEqual(yield* runMigrations({ toMigrationInclusive: 57 }), []);
+      const exit = yield* Effect.exit(runMigrations({ toMigrationInclusive: 58 }));
       assert.isTrue(Exit.isFailure(exit));
       assert.include(
         String(exit),
-        "56_RemoveRedundantProjectionIndexes (recorded: SiteLocalMigration)",
+        "58_RemoveRedundantProjectionIndexes (recorded: SiteLocalMigration)",
       );
-      assert.notInclude(String(exit), "57_ScheduledTaskWebhooks");
+      assert.notInclude(String(exit), "59_ScheduledTaskWebhooks");
       assert.deepStrictEqual(yield* history, before);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
@@ -221,7 +221,7 @@ describe("runMigrations", () => {
       assert.isNull(yield* Ref.get(current));
       assert.deepStrictEqual(
         yield* history,
-        migrationManifest.filter(([id]) => id <= 84),
+        migrationManifest.filter(([id]) => id <= 86),
       );
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
@@ -229,12 +229,12 @@ describe("runMigrations", () => {
   it.effect("reapplies peer link migrations whose ledger rows are missing", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
-      yield* runMigrations({ toMigrationInclusive: 72 });
-      yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id BETWEEN 70 AND 72`;
+      yield* runMigrations({ toMigrationInclusive: 74 });
+      yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id BETWEEN 72 AND 74`;
 
       assert.deepStrictEqual(
         yield* runMigrations(),
-        migrationManifest.filter(([id]) => id >= 70),
+        migrationManifest.filter(([id]) => id >= 72),
       );
       assert.deepStrictEqual(yield* history, migrationManifest);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
@@ -265,8 +265,12 @@ it.effect("registers every migration file", () =>
       return match ? [[Number(match[1]), match[2]] as const] : [];
     });
     assert.deepStrictEqual(
+    // The fork keeps two ids (36, 37) as already-applied no-ops with no file, so
+    // only ids that do have a migration file can be compared against the files.
+    const fileIds = new Set(files.map(([id]) => id));
+    assert.deepStrictEqual(
       files.toSorted(([a], [b]) => a - b),
-      migrationManifest,
+      migrationManifest.filter(([id]) => fileIds.has(id)),
     );
   }).pipe(Effect.provide(NodeServices.layer)),
 );
