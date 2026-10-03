@@ -626,6 +626,16 @@ function surfaceTitle(
         surface,
         resolve(msg("Thread on {label}", { label: surface.label })),
       );
+    case "side-chat":
+      return resolve(msg("Side chat"));
+    case "webpage": {
+      if (!surface.url) return resolve(msg("Browser"));
+      try {
+        return new URL(surface.url).host || resolve(msg("Browser"));
+      } catch {
+        return resolve(msg("Browser"));
+      }
+    }
     case "preview": {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null;
       if (!snapshot || snapshot.navStatus._tag === "Idle") return resolve(msg("Browser"));
@@ -728,6 +738,8 @@ function SurfaceIcon({
       ) : (
         <Smartphone className="size-3 shrink-0" />
       );
+    case "webpage":
+      return <PreviewFavicon capturedUrl={null} url={surface.url} />;
   }
 }
 
