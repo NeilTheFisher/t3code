@@ -106,14 +106,15 @@ export type RightPanelSurface =
       key: string;
       url?: string;
     }
-<<<<<<< HEAD
   /**
    * A thread of the panel's environment shown beside it: a side chat or a subagent. Which one is
    * the thread's own lineage, so the surface only names it.
    */
   | ThreadSurface
   /** A linked environment's thread, read through `viaEnvironmentId`; it has no thread here. */
-  | LinkedThreadSurface;
+  | LinkedThreadSurface
+  | { id: `side-chat:${string}`; kind: "side-chat"; threadId: ThreadId }
+  | { id: "webpage"; kind: "webpage"; url: string | null };
 
 export type ThreadSurface = { id: `thread:${string}`; kind: "thread"; threadId: ThreadId };
 
@@ -135,19 +136,6 @@ export function decodeThreadSurface(surface: object): ThreadSurface | null {
 
 const RIGHT_PANEL_STORAGE_KEY = "t3code:right-panel-state:v2";
 const RIGHT_PANEL_STORAGE_VERSION = 16;
-=======
-  | { id: `side-chat:${string}`; kind: "side-chat"; threadId: ThreadId }
-  | { id: "webpage"; kind: "webpage"; url: string | null };
-
-const RIGHT_PANEL_STORAGE_KEY = "t3code:right-panel-state:v2";
-// v9 removed the "plan" surface kind (plans render inline in the transcript).
-// v10 keys pull-request surfaces by reference instead of a singleton tab.
-// v11 stops persisting the pull-request list's shared panel, so a restart opens the page fresh.
-// v12 adds the device surface.
-// v14 removes the agents surface; lineage lives in the thread title bar.
-// v15 adds the webpage and issue surfaces.
-const RIGHT_PANEL_STORAGE_VERSION = 15;
->>>>>>> b3bbcbbdd9 (feat(fork): iframe-browser)
 
 export const PULL_REQUESTS_PANEL_REF = scopeThreadRef(
   EnvironmentId.make("pull-requests-panel"),
