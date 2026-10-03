@@ -620,7 +620,10 @@ function listKey(prefix: ListLinePrefix): string {
 }
 
 type InlineJson = Record<string, unknown>;
-type AtomJson = { type: string; attrs: Record<string, unknown> };
+type AtomJson =
+  | { type: string; attrs: Record<string, unknown> }
+  // A shield character with no chip behind it stays literal text.
+  | { type: "text"; text: string };
 
 interface DocLine {
   list: ListLinePrefix | null;
@@ -661,6 +664,23 @@ function atomJsonForSegment(
     return {
       type: "composer-citation",
       attrs: { citation: segment.citation, source: segment.source, citeKey: randomNodeKey() },
+    };
+  }
+  if (segment.type === "terminal-context") {
+    if (!segment.context) {
+      // A placeholder with no matching draft (e.g. a literal paste) stays a
+      // literal character so the document round-trips byte-for-byte.
+      return { type: "text", text: INLINE_TERMINAL_CONTEXT_PLACEHOLDER };
+    }
+    const reference = terminalContextReference(segment.context);
+    return {
+      type: "composer-context-reference",
+      attrs: {
+        kind: reference.kind,
+        contextId: reference.contextId,
+        label: reference.label,
+        source: formatInlineContextReference(reference),
+      },
     };
   }
   return {
@@ -1600,8 +1620,9 @@ export function skillChipReplacements(
     end += segment.type === "text" ? segment.text.length : segment.source.length;
     if (segment.type !== "skill" && segment.type !== "model") continue;
     const atom = atomJsonForSegment(segment, chips);
-    const type = atom && schema.nodes[atom.type];
-    if (!atom || !type) continue;
+    if (!atom || !("attrs" in atom)) continue;
+    const type = schema.nodes[atom.type];
+    if (!type) continue;
     // Only text needs converting; an existing chip is a token run.
     const run = map.runs.find(
       (candidate) =>

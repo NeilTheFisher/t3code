@@ -334,11 +334,14 @@ export const layer = HttpApiBuilder.group(
                 ).pipe(Effect.catch(() => failEnvironmentInternal("browser_session_cookie_failed")))
               : selectedCookie;
 
-            yield* HttpEffect.appendPreResponseHandler((_request, response) =>
-              Effect.succeed(HttpServerResponse.mergeCookies(response, sessionCookies)),
+            // Attach the cookie to a concrete response: the previous
+            // appendPreResponseHandler → mergeCookies path was dropped inside
+            // HttpApiBuilder, so the browser never stored the session.
+            const jsonResponse = yield* HttpServerResponse.json(result.response).pipe(
+              Effect.catch(() => failEnvironmentInternal("browser_session_issuance_failed")),
             );
-            yield* appendCredentialResponseHeaders;
-            return result.response;
+            const withCookies = HttpServerResponse.mergeCookies(jsonResponse, sessionCookies);
+            return HttpServerResponse.setHeaders(withCookies, CREDENTIAL_RESPONSE_HEADERS);
           },
           Effect.catchIf(EnvironmentAuth.isServerAuthCredentialError, (error) =>
             failEnvironmentAuthInvalid(
