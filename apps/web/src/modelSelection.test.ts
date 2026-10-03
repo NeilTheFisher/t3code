@@ -69,6 +69,68 @@ function settingsWithProviderInstances(): UnifiedSettings {
 }
 
 describe("instance-scoped model selection", () => {
+  it("preserves server-provided legacy model metadata", () => {
+    const baseProvider = provider({
+      instanceId: "claudeAgent",
+      models: ["claude-opus-4-8"],
+    });
+    const providers = [
+      {
+        ...baseProvider,
+        models: [{ ...baseProvider.models[0]!, isLegacy: true }],
+      },
+    ];
+    const stock = deriveProviderInstanceEntries(providers)[0]!;
+
+    expect(getAppModelOptionsForInstance(settingsWithProviderInstances(), stock)[0]?.isLegacy).toBe(
+      true,
+    );
+  });
+
+  it("preserves server-provided context window metadata", () => {
+    const baseProvider = provider({
+      instanceId: "opencode",
+      provider: ProviderDriverKind.make("opencode"),
+      models: ["opencode/deepseek-v4-flash-free"],
+    });
+    const providers = [
+      {
+        ...baseProvider,
+        models: [{ ...baseProvider.models[0]!, contextWindowTokens: 200_000 }],
+      },
+    ];
+    const entry = deriveProviderInstanceEntries(providers)[0]!;
+
+    expect(
+      getAppModelOptionsForInstance(DEFAULT_UNIFIED_SETTINGS, entry)[0]?.contextWindowTokens,
+    ).toBe(200_000);
+  });
+
+  it("preserves server-provided model capabilities", () => {
+    const baseProvider = provider({
+      instanceId: "opencode",
+      provider: ProviderDriverKind.make("opencode"),
+      models: ["opencode-go/qwen3.7-plus"],
+    });
+    const capabilities = {
+      inputModalities: ["text", "image", "video"] as const,
+      supportsReasoning: true,
+      supportsToolCalls: true,
+      supportsAttachments: true,
+    };
+    const providers = [
+      {
+        ...baseProvider,
+        models: [{ ...baseProvider.models[0]!, capabilities }],
+      },
+    ];
+    const entry = deriveProviderInstanceEntries(providers)[0]!;
+
+    expect(getAppModelOptionsForInstance(DEFAULT_UNIFIED_SETTINGS, entry)[0]?.capabilities).toEqual(
+      capabilities,
+    );
+  });
+
   it("keeps custom models on the provider instance that declared them", () => {
     const providers = [
       provider({
