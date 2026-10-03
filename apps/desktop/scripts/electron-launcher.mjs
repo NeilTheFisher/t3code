@@ -280,6 +280,16 @@ function patchMainBundleInfoPlist(appBundlePath, iconPath, executableName) {
   }
   // macOS 26 offers Messages/Mail codes in every text field unless opted out.
   setPlistJson(infoPlistPath, "NSAutoFillRequiresTextContentTypeForOneTimeCodeOnMac", true);
+  setPlistString(infoPlistPath, "CFBundleDisplayName", APP_DISPLAY_NAME);
+  setPlistString(infoPlistPath, "CFBundleName", APP_DISPLAY_NAME);
+  setPlistString(infoPlistPath, "CFBundleIdentifier", APP_BUNDLE_ID);
+  setPlistString(infoPlistPath, "CFBundleExecutable", executableName);
+  setPlistString(infoPlistPath, "CFBundleIconFile", "icon.icns");
+  setPlistString(
+    infoPlistPath,
+    "NSMicrophoneUsageDescription",
+    "T3 Code uses the microphone for user-initiated OpenAI voice conversations.",
+  );
   setPlistJson(infoPlistPath, "CFBundleURLTypes", [
     {
       CFBundleURLName: APP_BUNDLE_ID,

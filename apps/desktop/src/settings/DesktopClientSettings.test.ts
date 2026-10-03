@@ -37,6 +37,7 @@ const clientSettings: ClientSettings = {
   diffFilesCollapsed: true,
   diffIgnoreWhitespace: true,
   diffLayout: "stacked",
+  enableExternalFilePreview: false,
   environmentIdentificationMode: "artwork",
   favorites: [],
   fontFamilyCode: "",
@@ -55,6 +56,9 @@ const clientSettings: ClientSettings = {
   showSkillsInSlashMenu: false,
   persistComposerContextStrip: true,
   providerModelPreferences: {},
+  showProviderUsageInContextPopover: false,
+  sidebarAutoSettleAfterDays: 3,
+  sidebarAutoSettleOnMerge: true,
   sidebarProjectGroupingMode: "repository_path",
   sidebarProjectGroupingOverrides: {
     "environment-1:/tmp/project-a": "separate",
@@ -70,6 +74,11 @@ const clientSettings: ClientSettings = {
   loadBalancingWeights: { "environment-1": 75, "environment-2": 0 },
   pullRequestMergeMethodOverrides: {},
   timestampFormat: "24-hour",
+  tts: {
+    enabled: true,
+    serverUrl: "http://127.0.0.1:8880",
+    voice: "af_heart",
+  },
   wordWrap: true,
 };
 
