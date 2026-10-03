@@ -21,7 +21,7 @@ export const reconcileV2PreviewMigration = Effect.fn("reconcileV2PreviewMigratio
       `;
       if (tables.length === 0) return [];
       const history = yield* sql<{ readonly migration_id: number; readonly name: string }>`
-        SELECT migration_id, name FROM effect_sql_migrations WHERE migration_id >= 55
+        SELECT migration_id, name FROM effect_sql_migrations WHERE migration_id >= 57
       `;
       const legacy = history.find(
         (row) =>
