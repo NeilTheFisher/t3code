@@ -42,6 +42,37 @@ export function resolveStorage(storage: Partial<StateStorage> | null | undefined
   return isStateStorage(storage) ? storage : createMemoryStorage();
 }
 
+export interface DebouncedStorage<R = unknown> extends StateStorage<R> {
+  flush: () => void;
+}
+
+export function createDebouncedStorage(
+  baseStorage: Partial<StateStorage> | null | undefined,
+  debounceMs: number = 300,
+): DebouncedStorage {
+  const resolvedStorage = resolveStorage(baseStorage);
+  const debouncedSetItem = new Debouncer(
+    (name: string, value: string) => {
+      resolvedStorage.setItem(name, value);
+    },
+    { wait: debounceMs },
+  );
+
+  return {
+    getItem: (name) => resolvedStorage.getItem(name),
+    setItem: (name, value) => {
+      debouncedSetItem.maybeExecute(name, value);
+    },
+    removeItem: (name) => {
+      debouncedSetItem.cancel();
+      resolvedStorage.removeItem(name);
+    },
+    flush: () => {
+      debouncedSetItem.flush();
+    },
+  };
+}
+
 /** Keep the latest value and serialize it when the debounce fires or `flush` runs. */
 export function createDeferredStorage<TValue>(
   baseStorage: Partial<StateStorage> | null | undefined,

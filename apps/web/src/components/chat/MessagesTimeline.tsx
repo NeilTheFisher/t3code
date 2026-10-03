@@ -170,6 +170,7 @@ import {
 import { ProposedPlanCard } from "./ProposedPlanCard";
 import { HtmlRenderFrame } from "./HtmlRenderFrame";
 import { ChangedFilesCard } from "./ChangedFilesTree";
+import { shouldAutoExpandChangedFiles } from "./changedFilesPresentation";
 import { useFileContextMenuHandler } from "../../fileContextMenu";
 import { useProject, useThreadShell } from "../../state/entities";
 import {
@@ -3831,12 +3832,16 @@ function AssistantChangedFilesSectionInner({
   displayThreadKey?: string;
   onOpenTurnDiff: (runId: RunId, filePath?: string) => void;
 }) {
+  const activity = use(TimelineRowActivityCtx);
   const ctx = use(TimelineRowCtx);
+  const isLatestRun = activity.latestRunId === turnSummary.runId;
   const persistedExpanded = useUiStateStore(
     (store) => store.threadChangedFilesExpandedById[routeThreadKey]?.[turnSummary.runId],
   );
   const setExpanded = useUiStateStore((store) => store.setThreadChangedFilesExpanded);
-  const allDirectoriesExpanded = persistedExpanded ?? false;
+  const [autoExpanded] = useState(() => shouldAutoExpandChangedFiles(checkpointFiles, isLatestRun));
+  const [allDirectoriesExpanded, setAllDirectoriesExpanded] = useState(autoExpanded);
+  const expanded = persistedExpanded ?? (isLatestRun && autoExpanded);
 
   const thread = useThreadShell(ctx.threadRef);
   const activeProject = useProject(
@@ -3850,11 +3855,14 @@ function AssistantChangedFilesSectionInner({
     <ChangedFilesCard
       runId={turnSummary.runId}
       files={checkpointFiles}
+      expanded={expanded}
+      showCompactPreview={isLatestRun}
       allDirectoriesExpanded={allDirectoriesExpanded}
       resolvedTheme={resolvedTheme}
-      onToggleAllDirectories={() =>
-        setExpanded(routeThreadKey, turnSummary.runId, !allDirectoriesExpanded)
+      onExpandedChange={(nextExpanded) =>
+        setExpanded(routeThreadKey, turnSummary.runId, nextExpanded)
       }
+      onToggleAllDirectories={() => setAllDirectoriesExpanded((current) => !current)}
       onOpenTurnDiff={onOpenTurnDiff}
       onFileContextMenu={(filePath, event) =>
         onFileContextMenu(
