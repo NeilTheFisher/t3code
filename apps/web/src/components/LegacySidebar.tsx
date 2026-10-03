@@ -360,6 +360,7 @@ interface SidebarThreadRowProps {
     threadRef?: ScopedThreadRef,
   ) => boolean;
   onFileDropThreads: (threadRef: ScopedThreadRef, files: File[]) => void;
+  markThreadUnread: (threadKey: string, latestTurnCompletedAt: string | null | undefined) => void;
 }
 
 function checkTaskPermission(environmentId: EnvironmentId): boolean {
@@ -400,6 +401,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     attemptArchiveThread,
     openPrLink,
     onFileDropThreads,
+    markThreadUnread,
     thread,
   } = props;
   const canOperateThread = useEnvironmentScope(thread.environmentId, AuthOrchestrationOperateScope);
@@ -502,11 +504,93 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   };
   const handleMouseLeave = () => {
     clearConfirmingArchive();
-  };
-  const handleBlurCapture = (event: React.FocusEvent<HTMLLIElement>) => {
-    const currentTarget = event.currentTarget;
-    requestAnimationFrame(() => {
-      if (currentTarget.contains(document.activeElement)) {
+  }, [clearConfirmingArchive]);
+  const handleBlurCapture = useCallback(
+    (event: React.FocusEvent<HTMLLIElement>) => {
+      const currentTarget = event.currentTarget;
+      requestAnimationFrame(() => {
+        if (currentTarget.contains(document.activeElement)) {
+          return;
+        }
+        clearConfirmingArchive();
+      });
+    },
+    [clearConfirmingArchive],
+  );
+  const handleRowClick = useCallback(
+    (event: React.MouseEvent) => {
+      handleThreadClick(event, threadRef, orderedProjectThreadKeys);
+    },
+    [handleThreadClick, orderedProjectThreadKeys, threadRef],
+  );
+  const handleRowDoubleClick = useCallback(
+    (event: React.MouseEvent) => {
+      if (!readEnvironmentScope(thread.environmentId, AuthOrchestrationOperateScope)) return;
+      // Already renaming this row: a double-click on the row chrome (outside the
+      // input) must not restart and discard the in-progress edit.
+      if (renamingThreadKey === threadKey) return;
+      // On mobile the first tap navigates and closes the sidebar sheet, so the
+      // inline rename can't be shown. Renaming there stays on the context menu.
+      if (isMobile) return;
+      // cmd/ctrl/shift double-clicks are multi-select intent, not rename.
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      // Ignore double-clicks bubbling from nested controls (PR status, port,
+      // archive buttons) — only the row body should enter inline rename.
+      if ((event.target as HTMLElement).closest("button, a")) return;
+      event.preventDefault();
+      startThreadRename(threadKey, thread.title);
+    },
+    [isMobile, renamingThreadKey, startThreadRename, threadKey, thread.environmentId, thread.title],
+  );
+  // Middle click is the row's mark-unread gesture, so it never opens a
+  // background tab and never starts the browser's middle-click autoscroll.
+  const handleRowMouseDown = useCallback((event: React.MouseEvent) => {
+    if (event.button !== 1) return;
+    event.preventDefault();
+  }, []);
+  const handleRowAuxClick = useCallback(
+    (event: React.MouseEvent) => {
+      if (event.button !== 1) return;
+      // A middle click on a nested link is still a request to open it in a
+      // background tab, so only the row's own chrome is a mark-unread gesture.
+      if (isSidebarNestedLinkClick(event.target)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      markThreadUnread(threadKey, thread.latestRun?.completedAt);
+    },
+    [markThreadUnread, thread.latestRun?.completedAt, threadKey],
+  );
+  const handleRowKeyDown = useCallback(
+    (event: React.KeyboardEvent) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      navigateToThread(threadRef);
+    },
+    [navigateToThread, threadRef],
+  );
+  const handleRowContextMenu = useCallback(
+    (event: React.MouseEvent) => {
+      event.preventDefault();
+      const hasSelection = useThreadSelectionStore.getState().hasSelection();
+      if (hasSelection && isSelected) {
+        void (async () => {
+          const result = await settlePromise(() =>
+            handleMultiSelectContextMenu({
+              x: event.clientX,
+              y: event.clientY,
+            }),
+          );
+          if (result._tag === "Failure") {
+            const error = squashAtomCommandFailure(result);
+            toastManager.add(
+              stackedThreadToast({
+                type: "error",
+                title: "Thread action failed",
+                description: error instanceof Error ? error.message : "An error occurred.",
+              }),
+            );
+          }
+        })();
         return;
       }
       clearConfirmingArchive();
@@ -683,6 +767,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
         onDoubleClick={handleRowDoubleClick}
         onKeyDown={handleRowKeyDown}
         onContextMenu={handleRowContextMenu}
+        onMouseDown={handleRowMouseDown}
+        onAuxClick={handleRowAuxClick}
       >
         <div className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
           {prStatus && pr && (
@@ -982,8 +1068,9 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
     expandThreadListForProject,
     collapseThreadListForProject,
   } = props;
-  const showMoreButtonRender = <button type="button" />;
-  const showLessButtonRender = <button type="button" />;
+  const markThreadUnread = useUiStateStore((state) => state.markThreadUnread);
+  const showMoreButtonRender = useMemo(() => <button type="button" />, []);
+  const showLessButtonRender = useMemo(() => <button type="button" />, []);
 
   return (
     <SidebarMenuSub
@@ -1031,6 +1118,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
               cancelRename={cancelRename}
               attemptArchiveThread={attemptArchiveThread}
               openPrLink={openPrLink}
+              markThreadUnread={markThreadUnread}
             />
           );
         })}
