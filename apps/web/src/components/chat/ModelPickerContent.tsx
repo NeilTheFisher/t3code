@@ -5,6 +5,7 @@ import {
   type ProviderDriverKind,
   type ResolvedKeybindingsConfig,
   MODEL_PICKER_JUMP_KEYBINDING_COMMANDS,
+  type ServerProviderModel,
 } from "@t3tools/contracts";
 import { resolveSelectableModel } from "@t3tools/shared/model";
 import { useAtomValue } from "@effect/atom-react";
@@ -78,6 +79,8 @@ type ModelPickerItem = {
   continuationGroupKey?: string | undefined;
   isLegacy?: boolean | undefined;
   isUnavailable?: boolean | undefined;
+  contextWindowTokens?: number | undefined;
+  capabilities?: ServerProviderModel["capabilities"];
 };
 
 export function resolveModelPickerSelectedModel(input: {
@@ -568,6 +571,10 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           ...(model.subProvider ? { subProvider: model.subProvider } : {}),
           ...(model.badge ? { badge: model.badge } : {}),
           ...(model.isLegacy ? { isLegacy: true } : {}),
+          ...(model.contextWindowTokens !== undefined
+            ? { contextWindowTokens: model.contextWindowTokens }
+            : {}),
+          ...(model.capabilities !== undefined ? { capabilities: model.capabilities } : {}),
           ...(model.isUnavailable ? { isUnavailable: true } : {}),
           instanceId,
           driverKind: entry.driverKind,

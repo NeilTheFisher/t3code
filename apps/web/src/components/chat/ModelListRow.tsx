@@ -14,6 +14,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
 import { modelPickerModelKey } from "./modelPickerKeys";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
+import { formatModelContextWindowTokens, getModelCapabilityLabels } from "../modelMetadata";
 
 // Rows take the model's fields rather than the picker's item object, and one shared toggle
 // handler, because the picker rebuilds its items on every search keystroke; that keeps memo
@@ -50,6 +51,52 @@ export const ModelListRow = memo(function ModelListRow(props: {
   };
   const providerLabel = getProviderRowLabel(props.providerDisplayName, props.subProvider);
 
+  const modelLabel = (
+    <>
+      <div className="flex min-w-0 items-center gap-2">
+        <div className="min-w-0 truncate text-xs font-medium leading-snug">
+          {props.useTriggerLabel
+            ? getTriggerDisplayModelLabel(props.model)
+            : getDisplayModelName(
+                props.model,
+                props.preferShortName ? { preferShortName: true } : undefined,
+              )}
+        </div>
+        {props.showNewBadge ? (
+          <span
+            className="shrink-0 rounded border border-update/35 bg-update/15 px-0.5 py-px text-3xs font-bold uppercase leading-none tracking-wide text-update-foreground"
+            aria-label="New model"
+          >
+            New
+          </span>
+        ) : null}
+        {props.unavailable ? (
+          <Badge variant="outline" size="sm">
+            Unavailable
+          </Badge>
+        ) : null}
+      </div>
+      {props.showProvider && (
+        <div className="mt-1 flex items-center gap-1.5">
+          <ProviderInstanceIcon
+            driverKind={props.driverKind}
+            displayName={props.providerDisplayName}
+            acpRegistryAgentId={props.acpRegistryAgentId}
+            acpRegistryIconUrl={props.acpRegistryIconUrl}
+            className="size-3"
+            iconClassName="size-3"
+          />
+          <span className="truncate text-xs font-normal leading-snug text-muted-foreground/70">
+            {providerLabel}
+          </span>
+        </div>
+      )}
+    </>
+  );
+
+  const contextWindowTokens = props.model.contextWindowTokens;
+  const capabilityLabels = getModelCapabilityLabels(props.model.capabilities ?? null);
+  const hasMetadata = contextWindowTokens !== undefined || capabilityLabels.length > 0;
   const row = (
     <ComboboxItem
       hideIndicator
