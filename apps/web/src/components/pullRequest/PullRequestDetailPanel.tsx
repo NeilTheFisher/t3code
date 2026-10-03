@@ -869,6 +869,40 @@ export function PullRequestDetailPanel({
     if (guideWriter.data?.guide == null) selectTab("guide");
   };
 
+  const writeTaskToComposer = (target: ScopedThreadRef | DraftId, task: ThreadTask) => {
+    const store = useComposerDraftStore.getState();
+    const draft = store.getComposerDraft(target);
+    const key = composerTargetKey(target);
+    const previousCommentIds = new Set((draft?.reviewComments ?? []).map((comment) => comment.id));
+    const repeatedCommentIds = new Set(
+      (task.reviewComments ?? [])
+        .filter((comment) => previousCommentIds.has(comment.id))
+        .map((comment) => comment.id),
+    );
+    const promptWithoutPreviousHandoff = stripPullRequestHandoffReferences(
+      draft?.prompt ?? "",
+      draft?.reviewComments ?? [],
+      repeatedCommentIds,
+    );
+    const prompt = handoffPrompt(
+      {
+        prompt: promptWithoutPreviousHandoff,
+        lastHandoffPrompt: lastHandoffPromptByDraft.get(key),
+      },
+      task.prompt,
+    );
+    lastHandoffPromptByDraft.set(key, task.prompt);
+    store.setPrompt(target, prompt);
+    store.setReviewComments(
+      target,
+      handoffReviewComments(draft?.reviewComments ?? [], task.reviewComments ?? []),
+    );
+    for (const comment of task.reviewComments ?? []) {
+      if (!repeatedCommentIds.has(comment.id)) continue;
+      store.addReviewComment(target, comment);
+    }
+  };
+
   const openThreadWithTask = async (
     projectRef: ReturnType<typeof scopeProjectRef>,
     task: ThreadTask | null,
