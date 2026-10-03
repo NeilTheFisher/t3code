@@ -1,6 +1,8 @@
 import type { AssetResource } from "@t3tools/contracts";
 import {
   AssetAttachmentNotFoundError,
+  AssetExternalFileInspectionError,
+  AssetExternalFileNotFoundError,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
   AssetGitHubMediaUrlValidationError,
   AssetPreviewTypeValidationError,
@@ -149,6 +151,12 @@ const AssetClaimsSchema = Schema.Union([
     threadId: ThreadId,
     itemId: TurnItemId,
     index: Schema.Number,
+    expiresAt: Schema.Number,
+  }),
+  Schema.Struct({
+    version: Schema.Literal(1),
+    kind: Schema.Literal("external-file"),
+    absolutePath: Schema.String,
     expiresAt: Schema.Number,
   }),
   Schema.Struct({
@@ -743,6 +751,45 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
       fileName = "native-app-icon.png";
       break;
     }
+    case "external-file": {
+      const absolutePath = input.resource.path;
+      const info = yield* optionOnNotFound(fileSystem.stat(absolutePath)).pipe(
+        Effect.tapError((cause) =>
+          Effect.logError("Failed to inspect external file.", {
+            path: absolutePath,
+            cause,
+          }),
+        ),
+        Effect.orElseSucceed(() => Option.none()),
+      );
+      if (Option.isNone(info)) {
+        return yield* new AssetExternalFileNotFoundError({
+          resource: input.resource,
+        });
+      }
+      if (info.value.type !== "File") {
+        return yield* new AssetExternalFileNotFoundError({
+          resource: input.resource,
+        });
+      }
+      const canonicalFile = yield* fileSystem.realPath(absolutePath).pipe(
+        Effect.mapError(
+          (cause) =>
+            new AssetExternalFileInspectionError({
+              resource: input.resource,
+              cause,
+            }),
+        ),
+      );
+      claims = {
+        version: 1,
+        kind: "external-file",
+        absolutePath: canonicalFile,
+        expiresAt,
+      };
+      fileName = path.basename(absolutePath);
+      break;
+    }
     case "github-media": {
       const fetchUrl = githubMediaFetchUrl(input.resource.url);
       if (fetchUrl === null) {
@@ -885,6 +932,22 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
     const nativeAppIconResolver = yield* NativeAppIconResolver.NativeAppIconResolver;
     const iconPath = yield* nativeAppIconResolver.resolve(claims.app);
     return iconPath ? ({ kind: "file", path: iconPath } satisfies ResolvedAsset) : null;
+  }
+
+  if (claims.kind === "external-file") {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const info = yield* optionOnNotFound(fileSystem.stat(claims.absolutePath)).pipe(
+      Effect.tapError((cause) =>
+        Effect.logError("Failed to inspect external file asset.", {
+          path: claims.absolutePath,
+          cause,
+        }),
+      ),
+      Effect.orElseSucceed(() => Option.none()),
+    );
+    return Option.isSome(info) && info.value.type === "File"
+      ? ({ kind: "file", path: claims.absolutePath } satisfies ResolvedAsset)
+      : null;
   }
 
   const decodedPath = decodeRelativePath(relativePath);
