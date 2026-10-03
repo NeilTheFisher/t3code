@@ -3637,6 +3637,11 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               type: "file_change",
               fileName: firstChange.path,
               diffStr: firstChange.diff,
+              changes: item.changes.map((change) => ({
+                operation: change.kind.type,
+                path: change.path,
+                ...(change.diff.length > 0 ? { patch: change.diff } : {}),
+              })),
             };
             return { node, turnItem };
           },

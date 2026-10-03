@@ -182,8 +182,13 @@ import * as RunFinalizationService from "./orchestration-v2/RunFinalizationServi
 import * as EventStoreV2 from "./orchestration-v2/EventStore.ts";
 import * as ProjectionMaintenance from "./orchestration-v2/ProjectionMaintenance.ts";
 import * as ProjectionStoreV2 from "./orchestration-v2/ProjectionStore.ts";
-import { makePersistedServerRuntimeState } from "./serverRuntimeState.ts";
 import { loopbackUrlHostForAddress } from "./startupAccess.ts";
+import * as VoiceSessionService from "./voice/VoiceSessionService.ts";
+import {
+  clearPersistedServerRuntimeState,
+  makePersistedServerRuntimeState,
+  persistServerRuntimeState,
+} from "./serverRuntimeState.ts";
 import * as OrchestrationHttp from "./orchestration-v2/http.ts";
 import * as ProjectHttp from "./project/http.ts";
 import * as NetService from "@t3tools/shared/Net";
@@ -656,6 +661,7 @@ const layerRuntimeCoreDependencies = layerRuntimeCoreDependenciesBase.pipe(
   Layer.provideMerge(layerServerEnvironment),
   Layer.provideMerge(layerAuth),
   Layer.provideMerge(ServerSecretStore.layer),
+  Layer.provideMerge(VoiceSessionService.layer.pipe(Layer.provide(ServerSecretStore.layer))),
   Layer.provideMerge(
     Layer.mergeAll(
       CloudCliTokenManager.layer.pipe(

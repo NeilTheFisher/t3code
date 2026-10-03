@@ -52,13 +52,36 @@ export const OpenCodeSettings = makeProviderSettingsSchema(
         },
       }),
     ),
+    goWorkspaceId: TrimmedString.pipe(
+      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.annotateKey({
+        title: "Go workspace ID",
+        description: "Workspace ID from the OpenCode Go dashboard URL.",
+        providerSettingsForm: {
+          placeholder: "wrk_…",
+          clearWhenEmpty: "omit",
+        },
+      }),
+    ),
+    goAuthCookie: TrimmedString.pipe(
+      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.annotateKey({
+        title: "Go dashboard auth cookie",
+        description: "The auth cookie from opencode.ai. Stored in plain text on disk.",
+        providerSettingsForm: {
+          control: "password",
+          placeholder: "Optional",
+          clearWhenEmpty: "omit",
+        },
+      }),
+    ),
     customModels: Schema.Array(CustomModelSetting).pipe(
       Schema.withDecodingDefault(Effect.succeed([])),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
   },
   {
-    order: ["binaryPath", "serverUrl", "serverPassword"],
+    order: ["binaryPath", "serverUrl", "serverPassword", "goWorkspaceId", "goAuthCookie"],
   },
 );
 export type OpenCodeSettings = typeof OpenCodeSettings.Type;

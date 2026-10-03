@@ -26,7 +26,9 @@ export type SettingsPath =
   | "/settings/source-control"
   | "/settings/storage"
   | "/settings/connections"
-  | "/settings/archived";
+  | "/settings/archived"
+  | "/settings/userscripts"
+  | "/settings/voice";
 
 export type SettingsSearchScope =
   | "environment"
@@ -85,6 +87,8 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/storage": "Storage",
   "/settings/connections": "Connections",
   "/settings/archived": "Archive",
+  "/settings/userscripts": "Userscripts",
+  "/settings/voice": "Voice",
 };
 
 export function keybindingSearchAnchorId<Command extends KeybindingCommand>(command: Command) {
@@ -1020,6 +1024,8 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/connections": "connections",
   "/settings/scheduled-tasks": null,
   "/settings/archived": "project-defaults",
+  "/settings/userscripts": null,
+  "/settings/voice": null,
 };
 
 export function getSettingsSearchTargetScope(targetId: string) {

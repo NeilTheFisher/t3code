@@ -366,9 +366,8 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
 
   const [previewFile, setPreviewFile] = useState<FilePreviewSource | null>(null);
   const [previewVideo, setPreviewVideo] = useState<VideoPreviewSource | null>(null);
-  const composerOwnerKey = scopedThreadKey(props.environmentId, props.selectedThread.id);
-  const composerDraftKey = props.draftKey ?? composerOwnerKey;
-  const { text: draftMessage, attachments: draftAttachments } = useComposerDraft(composerDraftKey);
+  const [sendEpoch, setSendEpoch] = useState(0);
+  const composerDocumentKey = `${scopedThreadKey(props.environmentId, props.selectedThread.id)}:${sendEpoch}`;
   const queuedEdit = props.queuedEdit ?? null;
   const hasContent =
     draftMessage.trim().length > 0 ||
@@ -557,38 +556,66 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
     onEditorFocusChange?.(true);
   };
 
-  const handleBlur = () => {
+  const handleBlur = useCallback(() => {
     setIsFocused(false);
     if (!settingsSheetPresentation.keepsComposerExpanded) {
       onExpandedChange?.(false);
     }
     onEditorFocusChange?.(false);
-  };
-  const handleSend = async (followUp?: ActiveTurnComposerAction) => {
-    if (voiceInput.blocksSubmission || pendingPastedTextAttachmentCountRef.current > 0) return;
-    if (usageLimitsOffered && isUsageLimitsCommand(draftMessage) && draftAttachments.length === 0) {
-      if (openUsageLimits()) onChangeDraftMessage("");
-      return;
-    }
-    const threadKey = scopedThreadKey(props.environmentId, props.selectedThread.id);
-    if (inFlightThreadIdsRef.current.has(threadKey)) return;
-    inFlightThreadIdsRef.current.add(threadKey);
-    const sent = await settlePromise(() => onSendMessage(followUp));
-    inFlightThreadIdsRef.current.delete(threadKey);
-    if (AsyncResult.isFailure(sent)) {
-      // The composer state already surfaces send errors; only the lock needed releasing.
-      console.error("[composer] send failed", squashAtomCommandFailure(sent));
-      return;
-    }
-    if (sent.value === null) return;
-    // Armed after the send so its preference read and native Activity start don't contend
-    // with the queued-message feedback on the tap frame.
-    armAgentAwarenessLiveActivityForLocalWork({
-      environmentId: props.environmentId,
-      threadTitle: props.selectedThread.title,
-      projectTitle: props.environmentLabel ?? "T3 Code",
-    });
-  };
+  }, [onEditorFocusChange, onExpandedChange, settingsSheetPresentation.keepsComposerExpanded]);
+  const handleSend = useCallback(
+    async (followUp?: ActiveTurnComposerAction) => {
+      if (voiceInput.blocksSubmission || pendingPastedTextAttachmentCountRef.current > 0) return;
+      // Typed out in full rather than picked from the menu. Attachments mean the
+      // user is sending a prompt, so those go through as usual.
+      if (
+        usageLimitsOffered &&
+        isUsageLimitsCommand(props.draftMessage) &&
+        props.draftAttachments.length === 0
+      ) {
+        if (openUsageLimits()) onChangeDraftMessage("");
+        return;
+      }
+      const threadKey = scopedThreadKey(props.environmentId, props.selectedThread.id);
+      if (inFlightThreadIdsRef.current.has(threadKey)) return;
+      inFlightThreadIdsRef.current.add(threadKey);
+      // Sending replaces the controlled document (the draft clears). Bump the
+      // document identity before the cleared draft can render, so the editor
+      // applies the empty document instead of stamping it behind a stale
+      // revision and rejecting it.
+      setSendEpoch((epoch) => epoch + 1);
+      try {
+        const messageId = await onSendMessage(followUp);
+        if (messageId === null) {
+          return;
+        }
+        // Sending a prompt starts agent work: arm the lock-screen card while the
+        // app is foregrounded and the activity token can be registered. Armed
+        // after the send so its preference read and native Activity start don't
+        // contend with the queued-message feedback on the tap frame.
+        armAgentAwarenessLiveActivityForLocalWork({
+          environmentId: props.environmentId,
+          threadTitle: props.selectedThread.title,
+          projectTitle: props.environmentLabel ?? "T3 Code",
+        });
+      } finally {
+        inFlightThreadIdsRef.current.delete(threadKey);
+      }
+    },
+    [
+      props.draftMessage,
+      props.draftAttachments.length,
+      onChangeDraftMessage,
+      openUsageLimits,
+      usageLimitsOffered,
+      onSendMessage,
+      props.environmentId,
+      props.environmentLabel,
+      props.selectedThread.id,
+      props.selectedThread.title,
+      voiceInput.blocksSubmission,
+    ],
+  );
 
   const lockedProviderInstanceId = props.canSwitchProvider
     ? undefined
@@ -820,7 +847,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
               layout={COMPOSER_LAYOUT_TRANSITION}
             >
               <ComposerEditor
-                hidden={props.hidden}
+                key={composerDocumentKey}
                 draftKey={composerDraftKey}
                 environmentId={props.environmentId}
                 onOpenMention={(path) => {
