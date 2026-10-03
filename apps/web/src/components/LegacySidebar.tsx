@@ -363,6 +363,7 @@ interface SidebarThreadRowProps {
     threadRef?: ScopedThreadRef,
   ) => boolean;
   onFileDropThreads: (threadRef: ScopedThreadRef, files: File[]) => void;
+  markThreadUnread: (threadKey: string, latestTurnCompletedAt: string | null | undefined) => void;
 }
 
 function checkTaskPermission(environmentId: EnvironmentId): boolean {
@@ -403,6 +404,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     attemptArchiveThread,
     openPrLink,
     onFileDropThreads,
+    markThreadUnread,
     thread,
   } = props;
   const canOperateThread = useEnvironmentScope(thread.environmentId, AuthOrchestrationOperateScope);
@@ -556,6 +558,24 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       startThreadRename(threadKey, thread.title);
     },
     [isMobile, renamingThreadKey, startThreadRename, threadKey, thread.environmentId, thread.title],
+  );
+  // Middle click is the row's mark-unread gesture, so it never opens a
+  // background tab and never starts the browser's middle-click autoscroll.
+  const handleRowMouseDown = useCallback((event: React.MouseEvent) => {
+    if (event.button !== 1) return;
+    event.preventDefault();
+  }, []);
+  const handleRowAuxClick = useCallback(
+    (event: React.MouseEvent) => {
+      if (event.button !== 1) return;
+      // A middle click on a nested link is still a request to open it in a
+      // background tab, so only the row's own chrome is a mark-unread gesture.
+      if (isSidebarNestedLinkClick(event.target)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      markThreadUnread(threadKey, thread.latestRun?.completedAt);
+    },
+    [markThreadUnread, thread.latestRun?.completedAt, threadKey],
   );
   const handleRowKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
@@ -758,6 +778,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
         onDoubleClick={handleRowDoubleClick}
         onKeyDown={handleRowKeyDown}
         onContextMenu={handleRowContextMenu}
+        onMouseDown={handleRowMouseDown}
+        onAuxClick={handleRowAuxClick}
       >
         <div className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
           {prStatus && pr && (
@@ -1071,6 +1093,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
     expandThreadListForProject,
     collapseThreadListForProject,
   } = props;
+  const markThreadUnread = useUiStateStore((state) => state.markThreadUnread);
   const showMoreButtonRender = useMemo(() => <button type="button" />, []);
   const showLessButtonRender = useMemo(() => <button type="button" />, []);
 
@@ -1120,6 +1143,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
               cancelRename={cancelRename}
               attemptArchiveThread={attemptArchiveThread}
               openPrLink={openPrLink}
+              markThreadUnread={markThreadUnread}
             />
           );
         })}
