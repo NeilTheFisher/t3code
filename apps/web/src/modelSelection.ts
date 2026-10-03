@@ -1,4 +1,6 @@
 import {
+  ANTIGRAVITY_DEFAULT_MODEL,
+  type ServerProviderModel,
   DEFAULT_TEXT_GENERATION_MODEL,
   DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER,
   defaultInstanceIdForDriver,
@@ -72,6 +74,8 @@ export interface AppModelOption {
   isDefault?: boolean;
   isLegacy?: boolean;
   isUnavailable?: boolean;
+  contextWindowTokens?: number;
+  capabilities?: ServerProviderModel["capabilities"];
 }
 
 function appendUnavailableDynamicModelSelection(
@@ -109,6 +113,10 @@ function toAppModelOption(
   if (model.badge) option.badge = model.badge;
   if (model.isDefault) option.isDefault = true;
   if (model.isLegacy) option.isLegacy = true;
+  if (model.contextWindowTokens !== undefined) {
+    option.contextWindowTokens = model.contextWindowTokens;
+  }
+  option.capabilities = model.capabilities;
   return option;
 }
 
