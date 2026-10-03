@@ -239,7 +239,19 @@ const make = Effect.fn("NodePtyAdapter.make")(function* () {
         architecture,
         cause,
       }),
-  }).pipe(Effect.orDie);
+  }).pipe(Effect.orElseSucceed(() => undefined));
+
+  if (nodePty === undefined) {
+    return PtyAdapter.PtyAdapter.of({
+      spawn: () =>
+        Effect.fail(
+          new PtyAdapter.PtySpawnError({
+            adapter: "node-pty",
+            shell: "(unavailable)",
+          }),
+        ),
+    });
+  }
 
   const ensureSpawnHelperExecutable = ensureNodePtySpawnHelperExecutable().pipe(
     Effect.provideService(FileSystem.FileSystem, fs),
