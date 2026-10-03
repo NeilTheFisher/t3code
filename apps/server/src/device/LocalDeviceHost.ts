@@ -118,8 +118,8 @@ const platformReason = Effect.fn("LocalDeviceHost.platformReason")(function* (
     return "Android SDK was not found. Install it with Android Studio or set ANDROID_HOME to your SDK directory.";
   if (!sdk.adb)
     return `Android SDK Platform-Tools are missing from ${sdk.root}. Install them in Android Studio's SDK Manager.`;
-  if (!sdk.emulator)
-    return `Android Emulator is missing from ${sdk.root}. Install it in Android Studio's SDK Manager.`;
+  // The emulator binary is only needed to boot AVDs; a physical device over adb
+  // streams without it, so its absence does not make Android unavailable.
   if (!sdk.avdmanager) {
     if (sdk.legacyAvdmanager)
       return `The Android SDK command-line tools in ${sdk.root} appear to be an older, unsupported version. Install Android SDK Command-line Tools (latest) in Android Studio's SDK Manager under SDK Tools.`;
@@ -398,6 +398,10 @@ export const make = Effect.fn("LocalDeviceHost.make")(function* () {
               "127.0.0.1",
               "--hide-sidebar",
               "--hide-boot-device",
+              // The hub's default Android capture source (grpc-screenshot) only
+              // works on emulators; scrcpy also streams physical devices over adb.
+              "--stream-source",
+              "scrcpy",
             ],
             {
               detached: false,

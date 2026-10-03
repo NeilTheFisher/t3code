@@ -156,7 +156,7 @@ export class DeviceService extends Context.Service<
     readonly currentReadiness: (hostId?: DeviceHostId) => Effect.Effect<DeviceReadiness | null>;
     readonly sessionsForThread: (threadId: ThreadId) => Effect.Effect<ReadonlyArray<DeviceSession>>;
   }
->()("t3/device/DeviceService") {}
+>()("@neilthefisher/t3/device/DeviceService") {}
 
 interface ServiceState {
   readonly state: DeviceServiceState;
@@ -397,19 +397,19 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
     const devices = [...list.simulators, ...list.emulators].map(toSummary);
     const host = yield* resolveHost(ready.hostId);
     if ((yield* host.platformAvailability("android")).available) {
+      // The emulator binary is optional: the hub already lists AVDs through
+      // `avdmanager` and physical devices need no emulator. Only add any extra
+      // AVD names when an emulator is installed and answers; a missing binary
+      // reports exit code 127 and is ignored rather than failing the refresh.
       const avds = yield* ready.run("emulator", ["-list-avds"]);
-      if (avds.code !== 0) {
-        return yield* new DeviceOperationError({
-          operation: "list",
-          reason: "command_failed",
-          exitCode: avds.code,
-          cause: avds,
-        });
-      }
-      for (const name of avds.stdout
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter(Boolean)) {
+      const avdNames =
+        avds.code === 0
+          ? avds.stdout
+              .split(/\r?\n/)
+              .map((line) => line.trim())
+              .filter(Boolean)
+          : [];
+      for (const name of avdNames) {
         if (!devices.some((device) => device.platform === "android" && device.name === name)) {
           devices.push({
             hostId: ready.hostId,
@@ -423,17 +423,38 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
         }
       }
     }
-    return { devices, detail: list.errors?.map((error) => error.message).join("\n") || undefined };
+    return {
+      devices,
+      detail: list.errors?.map((error) => error.message).join("\n") || undefined,
+      errors: list.errors ?? [],
+    };
   });
+
+  /**
+   * Whether the hub reported no listing failure for this platform. The hub
+   * always reports the iOS probe on non-macOS hosts, so errors are matched to
+   * the platform they came from rather than treated as a whole.
+   */
+  const listingIsClean = (
+    errors: ReadonlyArray<{ readonly message: string }>,
+    platform: DevicePlatform,
+  ) =>
+    !errors.some((error) =>
+      error.message.includes(platform === "ios" ? "apple-utils" : "android-utils"),
+    );
 
   const refresh = Effect.fn("DeviceService.refresh")(function* (ready: DeviceReadiness) {
     const host = hosts.get(ready.hostId);
-    const { devices, detail } = yield* fetchDevices(ready);
+    const { devices, detail, errors } = yield* fetchDevices(ready);
     const hostSummaries = yield* Effect.forEach(hosts.values(), (host) => host.summary);
     return yield* lifecycleLock.withPermit(
       Effect.gen(function* () {
         if (!(yield* readDeviceSettings).enabled || !host || hosts.get(ready.hostId) !== host)
           return (yield* SynchronizedRef.get(stateRef)).state;
+        // Drop sessions for devices this host no longer reports, but only when
+        // its listing was clean, so a partial hub listing never removes a live
+        // session.
+        const hostDeviceIds = new Set(devices.map((device) => device.id));
         return yield* publish((state) => ({
           ...state,
           hosts: hostSummaries,
@@ -442,6 +463,12 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
             ...state.devices.filter((device) => device.hostId !== ready.hostId),
             ...devices,
           ],
+          sessions: state.sessions.filter(
+            (session) =>
+              session.hostId !== ready.hostId ||
+              hostDeviceIds.has(session.deviceId) ||
+              !listingIsClean(errors, session.platform),
+          ),
           hostStatuses: {
             ...state.hostStatuses,
             [ready.hostId]: { status: "ready", ...(detail ? { detail } : {}) },
@@ -779,7 +806,24 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
             ),
           ),
         )
-      : postShutdown("/api/devices/shutdown", { platform, id: deviceId });
+      : postShutdown("/api/devices/shutdown", { platform, id: deviceId }).pipe(
+          Effect.catch((cause) =>
+            fetchDevices(ready).pipe(
+              Effect.exit,
+              // A physically disconnected device cannot be shut down; clearing
+              // its stale sessions matters more than the failed remote call.
+              // Require a clean re-listing so a partial read cannot mask a real
+              // failure on a device that is still connected.
+              Effect.flatMap((relist) =>
+                Exit.isSuccess(relist) &&
+                listingIsClean(relist.value.errors, "android") &&
+                relist.value.devices.find((device) => device.id === deviceId)?.booted !== true
+                  ? Effect.logInfo("Android device was already gone or shut down", { deviceId })
+                  : Effect.fail(cause),
+              ),
+            ),
+          ),
+        );
     yield* publish((state) => ({
       ...state,
       devices: state.devices.map((device) =>

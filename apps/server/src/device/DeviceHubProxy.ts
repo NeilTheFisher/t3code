@@ -101,7 +101,7 @@ const proxyWebSocket = Effect.fn("DeviceHubProxy.proxyWebSocket")(function* (
       // Whichever side closes first ends the other via scope teardown: a close
       // fails the pull with a SocketError, which loses the race.
       return yield* Effect.raceFirst(
-        pumpFrames(upstream, writeToClient),
+        pumpFrames(upstream, writeToClient, makeVideoSessionEchoFilter()),
         pumpFrames(client, writeToUpstream),
       );
     }),
@@ -109,11 +109,53 @@ const proxyWebSocket = Effect.fn("DeviceHubProxy.proxyWebSocket")(function* (
   return HttpServerResponse.empty();
 });
 
-const pumpFrames = (source: Socket.Socket, sink: Socket.Writer) =>
+/**
+ * serve-emu rebroadcasts a `video-session` on every encoder restart, including
+ * the restart a client asks for with `reset-video`. Current clients ignore a
+ * same-size re-announcement, but already-installed mobile WebViews still treat
+ * any `video-session` as a rotation: they rebuild the decoder, request another
+ * keyframe, and loop without ever painting. Drop the same-size echo here so
+ * those clients converge; newer clients are unaffected.
+ */
+export const makeVideoSessionEchoFilter = () => {
+  let announced: string | null = null;
+  return (frame: Uint8Array | string): boolean => {
+    if (typeof frame !== "string" || !frame.includes("video-session")) return true;
+    let size: string | null = null;
+    try {
+      const message = JSON.parse(frame) as {
+        type?: unknown;
+        size?: { width?: unknown; height?: unknown };
+      };
+      if (message.type === "video-session") {
+        size = `${message.size?.width ?? "?"}x${message.size?.height ?? "?"}`;
+      }
+    } catch {
+      return true;
+    }
+    if (size === null) return true;
+    if (size === announced) return false;
+    announced = size;
+    return true;
+  };
+};
+
+const pumpFrames = (
+  source: Socket.Socket,
+  sink: Socket.Writer,
+  allow?: (frame: Uint8Array | string) => boolean,
+) =>
   Effect.gen(function* () {
     const { pull } = yield* source.reader;
     while (true) {
-      yield* sink.writeAll(yield* pull);
+      const batch = yield* pull;
+      if (allow === undefined) {
+        yield* sink.writeAll(batch);
+        continue;
+      }
+      for (const frame of batch) {
+        if (allow(frame)) yield* sink.write(frame);
+      }
     }
   });
 
