@@ -65,6 +65,9 @@ export const ReviewDiffPreviewSource = Schema.Struct({
   diffHash: TrimmedNonEmptyString,
   truncated: Schema.Boolean,
   patchesDeferred: Schema.optionalKey(Schema.Boolean),
+  /** Set when the underlying git command failed; the diff is empty, not clean. */
+  error: Schema.optional(TrimmedNonEmptyString),
+  /** Complete statistics, independent of patch limits. Absent on older servers. */
   files: Schema.optionalKey(Schema.Array(ReviewDiffFileStat)),
 });
 export type ReviewDiffPreviewSource = typeof ReviewDiffPreviewSource.Type;
