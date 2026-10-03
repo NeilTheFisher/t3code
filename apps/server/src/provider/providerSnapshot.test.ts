@@ -10,11 +10,35 @@ import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import {
+  buildServerProvider,
   isCommandMissingCause,
   parseGenericCliVersion,
   providerModelsFromSettings,
   spawnAndCollect,
 } from "./providerSnapshot.ts";
+
+describe("buildServerProvider", () => {
+  it("includes usage limits from the provider probe", () => {
+    const snapshot = buildServerProvider({
+      presentation: { displayName: "Codex" },
+      enabled: true,
+      checkedAt: "2026-07-22T12:00:00.000Z",
+      models: [],
+      probe: {
+        installed: true,
+        version: "1.0.0",
+        status: "ready",
+        auth: { status: "authenticated" },
+        usageLimits: {
+          checkedAt: "2026-07-22T12:00:00.000Z",
+          windows: [{ id: "session", kind: "session", label: "Session", usedPercent: 30 }],
+        },
+      },
+    });
+
+    expect(snapshot.usageLimits?.windows[0]?.usedPercent).toBe(30);
+  });
+});
 
 const OPENCODE_CUSTOM_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [
