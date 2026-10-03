@@ -88,6 +88,7 @@ export const ServerProviderModel = Schema.Struct({
   // False when the provider can run this model in sessions but not for
   // application text generation. Absent means supported.
   supportsTextGeneration: Schema.optional(Schema.Boolean),
+  contextWindowTokens: Schema.optional(PositiveInt),
   capabilities: Schema.NullOr(ModelCapabilities),
 });
 export type ServerProviderModel = typeof ServerProviderModel.Type;
