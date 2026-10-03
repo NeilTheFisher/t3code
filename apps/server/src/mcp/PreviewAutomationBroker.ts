@@ -28,6 +28,7 @@ import {
   type PreviewAutomationStreamEvent,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
+import * as Clock from "effect/Clock";
 import type * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
@@ -48,6 +49,12 @@ export interface PreviewAutomationInvokeInput {
   readonly input: unknown;
   readonly tabId?: PreviewTabId;
   readonly timeoutMs?: number;
+  /**
+   * How long to wait for a capable host to connect before failing with
+   * PreviewAutomationNoAvailableHostError. Lets a request survive a UI tab
+   * reload or a WebSocket reconnect instead of failing immediately.
+   */
+  readonly waitForHostMs?: number;
   /** Background metadata reads must not change the agent's current tab. */
   readonly updateCurrentTab?: boolean;
   /** Capture the routed tab before another request changes the current assignment. */
@@ -78,7 +85,7 @@ export class PreviewAutomationBroker extends Context.Service<
       request: PreviewAutomationInvokeInput,
     ) => Effect.Effect<A, PreviewAutomationError>;
   }
->()("t3/mcp/PreviewAutomationBroker") {}
+>()("@neilthefisher/t3/mcp/PreviewAutomationBroker") {}
 
 interface ClientConnection {
   readonly clientId: string;
@@ -98,14 +105,6 @@ interface PendingRequest {
   readonly context: PreviewAutomationRequestErrorContext;
 }
 
-/**
- * A lease pinning one provider session to one desktop runtime. It lives exactly
- * as long as the connection it names: `connectionId`/`queue` identity is what
- * makes a lease valid, so a disconnected or replaced host is dropped on the next
- * lookup. The lease deliberately has no clock of its own — it used to inherit
- * the MCP credential's expiry, which coupled host stickiness to an unrelated
- * auth deadline and could migrate a live session to another runtime mid-flow.
- */
 interface HostAssignment {
   readonly clientId: ClientConnection["clientId"];
   readonly connectionId: ClientConnection["connectionId"];
@@ -128,6 +127,17 @@ interface PreviewAutomationRequestErrorContext {
   readonly selectorKind?: "locator" | "selector";
   readonly selectorLength?: number;
 }
+
+type RouteResult =
+  | {
+      readonly availability: NonNullable<PreviewAutomationNoAvailableHostError["availability"]>;
+    }
+  | {
+      readonly connection: ClientConnection;
+      readonly requestId: string;
+      readonly requestContext: PreviewAutomationRequestErrorContext;
+      readonly requestSequence: number;
+    };
 
 interface BrokerState {
   readonly clients: ReadonlyMap<string, ClientConnection>;
@@ -507,107 +517,133 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
     input: Parameters<PreviewAutomationBroker["Service"]["invoke"]>[0],
   ): Effect.fn.Return<A, PreviewAutomationError> {
     const deferred = yield* Deferred.make<unknown, PreviewAutomationError>();
-    const route = yield* SynchronizedRef.modify(state, (current) => {
-      const assignments = new Map(
-        Array.from(current.assignments).filter(([, assignment]) => {
-          const connection = current.clients.get(assignment.clientId);
-          return (
-            connection?.connectionId === assignment.connectionId &&
-            connection.queue === assignment.queue
-          );
-        }),
-      );
-      const assignmentKey = hostAssignmentKey(input.scope);
-      const assigned = assignments.get(assignmentKey);
-      const assignedConnection = assigned ? current.clients.get(assigned.clientId) : undefined;
-      const hasLiveAssignment = assignedConnection?.environmentId === input.scope.environmentId;
-      // Keep one provider session on one physical desktop runtime so a
-      // multi-step browser interaction cannot jump between independent
-      // Electron cookie/DOM state. A live assignment that predates an
-      // operation is not silently moved to a newer client: the caller gets a
-      // capability failure and can deliberately start a fresh provider
-      // session. A dead lease is pruned above and may fail over.
-      const ownsTargetTab = (host: ClientConnection, visibleOnly = false) =>
-        host.liveTabs.some(
-          (tab) =>
-            tab.threadId === input.scope.thread.threadId &&
-            (!visibleOnly || tab.visible === true) &&
-            (input.tabId === undefined || tab.tabId === input.tabId),
+    const tryRoute = () =>
+      SynchronizedRef.modify(state, (current): readonly [RouteResult, BrokerState] => {
+        const assignments = new Map(
+          Array.from(current.assignments).filter(([, assignment]) => {
+            const connection = current.clients.get(assignment.clientId);
+            return (
+              connection?.connectionId === assignment.connectionId &&
+              connection.queue === assignment.queue
+            );
+          }),
         );
-      const connection =
-        hasLiveAssignment && supportsOperation(assignedConnection, input.operation)
-          ? assignedConnection
-          : hasLiveAssignment
-            ? undefined
-            : Array.from(current.clients.values())
-                .filter(
-                  (host) =>
-                    host.environmentId === input.scope.environmentId &&
-                    supportsOperation(host, input.operation),
-                )
-                .sort(
-                  (left, right) =>
-                    Number(input.tabId !== undefined && ownsTargetTab(right)) -
-                      Number(input.tabId !== undefined && ownsTargetTab(left)) ||
-                    Number(right.preferred) - Number(left.preferred) ||
-                    Number(ownsTargetTab(right, true)) - Number(ownsTargetTab(left, true)) ||
-                    Number(ownsTargetTab(right)) - Number(ownsTargetTab(left)) ||
-                    Number(right.focused) - Number(left.focused) ||
-                    right.focusOrder - left.focusOrder,
-                )[0];
-      if (!connection) {
-        if (!hasLiveAssignment) assignments.delete(assignmentKey);
-        return [undefined, { ...current, assignments }] as const;
-      }
-      // The environment host may install Chromium on its first open (up to
-      // ten minutes). Keep that request alive without replaying its effects.
-      const timeoutMs =
-        input.timeoutMs ?? (input.operation === "open" && connection.preferred ? 660_000 : 15_000);
-      const canReuseAssignedTab =
-        assigned !== undefined &&
-        assigned.connectionId === connection.connectionId &&
-        assigned.queue === connection.queue;
-      assignments.set(assignmentKey, {
-        clientId: connection.clientId,
-        connectionId: connection.connectionId,
-        queue: connection.queue,
-        ...(canReuseAssignedTab && assigned.tabId !== undefined ? { tabId: assigned.tabId } : {}),
-        ...(canReuseAssignedTab && assigned.tabSequence !== undefined
-          ? { tabSequence: assigned.tabSequence }
-          : {}),
-      });
+        const assignmentKey = hostAssignmentKey(input.scope);
+        const assigned = assignments.get(assignmentKey);
+        const assignedConnection = assigned ? current.clients.get(assigned.clientId) : undefined;
+        const hasLiveAssignment = assignedConnection?.environmentId === input.scope.environmentId;
+        // Keep one provider session on one physical desktop runtime so a
+        // multi-step browser interaction cannot jump between independent
+        // Electron cookie/DOM state. A live assignment that predates an
+        // operation is not silently moved to a newer client: the caller gets a
+        // capability failure and can deliberately start a fresh provider
+        // session. A dead lease is pruned above and may fail over.
+        const ownsTargetTab = (host: ClientConnection, visibleOnly = false) =>
+          host.liveTabs.some(
+            (tab) =>
+              tab.threadId === input.scope.thread.threadId &&
+              (!visibleOnly || tab.visible === true) &&
+              (input.tabId === undefined || tab.tabId === input.tabId),
+          );
+        const connection =
+          hasLiveAssignment && supportsOperation(assignedConnection, input.operation)
+            ? assignedConnection
+            : hasLiveAssignment
+              ? undefined
+              : Array.from(current.clients.values())
+                  .filter(
+                    (host) =>
+                      host.environmentId === input.scope.environmentId &&
+                      supportsOperation(host, input.operation),
+                  )
+                  .sort(
+                    (left, right) =>
+                      Number(input.tabId !== undefined && ownsTargetTab(right)) -
+                        Number(input.tabId !== undefined && ownsTargetTab(left)) ||
+                      Number(right.preferred) - Number(left.preferred) ||
+                      Number(ownsTargetTab(right, true)) - Number(ownsTargetTab(left, true)) ||
+                      Number(ownsTargetTab(right)) - Number(ownsTargetTab(left)) ||
+                      Number(right.focused) - Number(left.focused) ||
+                      right.supportedOperations.size - left.supportedOperations.size ||
+                      right.focusOrder - left.focusOrder,
+                  )[0];
+        if (!connection) {
+          if (!hasLiveAssignment) assignments.delete(assignmentKey);
+          const availability = hasLiveAssignment
+            ? ("assigned-host-unsupported" as const)
+            : current.clients.size === 0
+              ? ("no-host-connected" as const)
+              : Array.from(current.clients.values()).some(
+                    (host) => host.environmentId === input.scope.environmentId,
+                  )
+                ? ("operation-unsupported" as const)
+                : ("environment-mismatch" as const);
+          return [{ availability }, { ...current, assignments }] as const;
+        }
+        // The environment host may install Chromium on its first open (up to
+        // ten minutes). Keep that request alive without replaying its effects.
+        const timeoutMs =
+          input.timeoutMs ?? (input.operation === "open" && connection.preferred ? 660_000 : 15_000);
+        const canReuseAssignedTab =
+          assigned !== undefined &&
+          assigned.connectionId === connection.connectionId &&
+          assigned.queue === connection.queue;
+        assignments.set(assignmentKey, {
+          clientId: connection.clientId,
+          connectionId: connection.connectionId,
+          queue: connection.queue,
+          ...(canReuseAssignedTab && assigned.tabId !== undefined ? { tabId: assigned.tabId } : {}),
+          ...(canReuseAssignedTab && assigned.tabSequence !== undefined
+            ? { tabSequence: assigned.tabSequence }
+            : {}),
+        });
 
-      const requestSequence = current.requestSequence;
-      const requestId = `preview-${requestSequence}`;
-      const tabId = input.tabId ?? (canReuseAssignedTab ? assigned.tabId : undefined);
-      const selectorDiagnostics = selectorDiagnosticsFromInput(input.input);
-      const context: PreviewAutomationRequestErrorContext = {
-        operation: input.operation,
-        environmentId: input.scope.environmentId,
-        threadId: input.scope.thread.threadId,
-        providerSessionId: input.scope.thread.providerSessionId,
-        providerInstanceId: input.scope.thread.providerInstanceId,
-        clientId: connection.clientId,
-        connectionId: connection.connectionId,
-        requestId,
-        ...(tabId === undefined ? {} : { tabId }),
-        timeoutMs,
-        ...selectorDiagnostics,
-      };
-      const pending = new Map(current.pending);
-      pending.set(requestId, { queue: connection.queue, deferred, context });
-      return [
-        { connection, requestId, requestContext: context, requestSequence },
-        { ...current, assignments, pending, requestSequence: current.requestSequence + 1 },
-      ] as const;
-    });
-    if (!route) {
+
+        const requestSequence = current.requestSequence;
+        const requestId = `preview-${requestSequence}`;
+        const tabId = input.tabId ?? (canReuseAssignedTab ? assigned.tabId : undefined);
+        const selectorDiagnostics = selectorDiagnosticsFromInput(input.input);
+        const context: PreviewAutomationRequestErrorContext = {
+          operation: input.operation,
+          environmentId: input.scope.environmentId,
+          threadId: input.scope.thread.threadId,
+          providerSessionId: input.scope.thread.providerSessionId,
+          providerInstanceId: input.scope.thread.providerInstanceId,
+          clientId: connection.clientId,
+          connectionId: connection.connectionId,
+          requestId,
+          ...(tabId === undefined ? {} : { tabId }),
+          timeoutMs,
+          ...selectorDiagnostics,
+        };
+        const pending = new Map(current.pending);
+        pending.set(requestId, { queue: connection.queue, deferred, context });
+        return [
+          { connection, requestId, requestContext: context, requestSequence },
+          { ...current, assignments, pending, requestSequence: current.requestSequence + 1 },
+        ] as const;
+      });
+    let route = yield* tryRoute();
+    // Self-heal transient host gaps (UI tab reloads, WebSocket reconnects):
+    // keep re-checking for a capable host until the grace window elapses.
+    const waitForHostMs = Math.min(input.waitForHostMs ?? 0, input.timeoutMs ?? 15_000);
+    if (!("connection" in route) && waitForHostMs > 0) {
+      const deadline = (yield* Clock.currentTimeMillis) + waitForHostMs;
+      while (!("connection" in route)) {
+        const now = yield* Clock.currentTimeMillis;
+        if (now >= deadline) break;
+        yield* Effect.sleep(Math.min(250, deadline - now));
+        route = yield* tryRoute();
+      }
+    }
+    if (!("connection" in route)) {
       return yield* new PreviewAutomationNoAvailableHostError({
         operation: input.operation,
         environmentId: input.scope.environmentId,
         threadId: input.scope.thread.threadId,
         providerSessionId: input.scope.thread.providerSessionId,
         providerInstanceId: input.scope.thread.providerInstanceId,
+        availability: route.availability,
       });
     }
     const { connection, requestId, requestContext, requestSequence } = route;

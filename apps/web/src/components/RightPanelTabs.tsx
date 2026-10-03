@@ -604,6 +604,14 @@ function surfaceTitle(
       return "Pull requests";
     case "device":
       return surface.title ?? surface.target?.name ?? "Device";
+    case "webpage": {
+      if (!surface.url) return "Browser";
+      try {
+        return new URL(surface.url).host || "Browser";
+      } catch {
+        return "Browser";
+      }
+    }
     case "preview": {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null;
       if (!snapshot || snapshot.navStatus._tag === "Idle") return "Browser";
@@ -693,6 +701,8 @@ function SurfaceIcon({
       ) : (
         <Smartphone className="size-3 shrink-0" />
       );
+    case "webpage":
+      return <PreviewFavicon capturedUrl={null} url={surface.url} />;
   }
 }
 
