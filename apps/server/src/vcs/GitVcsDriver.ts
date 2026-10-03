@@ -413,7 +413,7 @@ export class GitVcsDriver extends Context.Service<
     readonly initRepo: (input: VcsInitInput) => Effect.Effect<void, GitCommandError>;
     readonly listLocalBranchNames: (cwd: string) => Effect.Effect<string[], GitCommandError>;
   }
->()("t3/vcs/GitVcsDriver") {}
+>()("@neilthefisher/t3/vcs/GitVcsDriver") {}
 
 const WORKSPACE_FILES_MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 const CHECKPOINT_RECOVERY_MAX_CANDIDATES = 64;
@@ -1189,7 +1189,14 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         cwd: input.cwd,
         args: [
           "diff",
-          ...(input.format === "numstat" ? ["--numstat", "-z"] : ["--patch"]),
+          ...(input.format === "numstat"
+            ? ["--numstat", "-z"]
+            : [
+                "--patch",
+                // Full context so the web diff viewer holds complete file contents
+                // and can expand unmodified regions (partial patches can't).
+                "--unified=999999",
+              ]),
           "--no-color",
           "--no-ext-diff",
           "--no-textconv",
