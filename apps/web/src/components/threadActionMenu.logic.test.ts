@@ -51,18 +51,15 @@ describe("buildThreadActionMenuItems", () => {
           titleRegeneration: false,
         },
       }),
-    ).toEqual(["rename", "mark-unread", "copy", "project-settings", "archive", "delete"]);
-  });
-
-  it("groups project settings with utility actions before archive", () => {
-    const items = buildThreadActionMenuItems(baseState);
-    const copyIndex = items.findIndex((item) => item.id === "copy");
-    expect(items[copyIndex + 1]).toMatchObject({
-      id: "project-settings",
-      label: "Project settings",
-      icon: "settings",
-    });
-    expect(items[copyIndex + 2]?.id).toBe("archive");
+    ).toEqual([
+      "rename",
+      "mark-unread",
+      "copy",
+      "project-settings",
+      "export-markdown",
+      "archive",
+      "delete",
+    ]);
   });
 
   it("offers project filtering only for surfaces with a scoped thread list", () => {
@@ -162,6 +159,10 @@ describe("buildThreadActionMenuItems", () => {
         },
       }),
     ).toContain("archive");
+  });
+
+  it("always offers the markdown export", () => {
+    expect(ids(baseState)).toContain("export-markdown");
   });
 
   it("disables archive while the thread is running", () => {
