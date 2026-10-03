@@ -65,6 +65,19 @@ const fixture = (
 };
 
 describe("device hub proxy", () => {
+  it("drops a repeated same-size video-session but keeps frames and size changes", () => {
+    const allow = DeviceHubProxy.makeVideoSessionEchoFilter();
+    const session = (width: number, height: number) =>
+      JSON.stringify({ type: "video-session", size: { width, height } });
+    expect(allow(session(576, 1280))).toBe(true); // first announcement
+    expect(allow(session(576, 1280))).toBe(false); // echo of our own reset-video
+    expect(allow(new Uint8Array([1, 2, 3]))).toBe(true); // a video frame
+    expect(allow(session(1080, 2400))).toBe(true); // rotation
+    expect(allow(session(576, 1280))).toBe(true); // back to the first size
+    expect(allow("not json")).toBe(true);
+    expect(allow(JSON.stringify({ type: "other" }))).toBe(true);
+  });
+
   it("releases the upstream response after forwarding its body and strips tickets", async () => {
     const { handler, requests, finalized } = fixture([AuthOrchestrationReadScope]);
     const response = await handler(

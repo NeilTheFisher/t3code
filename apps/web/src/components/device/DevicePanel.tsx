@@ -291,8 +291,8 @@ export function DevicePanel(props: {
               !state.devices.some((device) => device.platform === "android") &&
               !unavailablePlatforms.some((platform) => platform.platform === "android") ? (
                 <p className="max-w-sm text-xs">
-                  No Android virtual devices found. Create one in Android Studio's Device Manager,
-                  then refresh.
+                  No Android devices found. Start an emulator in Android Studio's Device Manager, or
+                  connect a phone over USB with USB debugging enabled, then refresh.
                 </p>
               ) : null}
               {loaded && !hostBusy ? (
