@@ -15,6 +15,7 @@ import {
 
 import { isWorkspaceImagePreviewPath } from "@t3tools/shared/filePreview";
 import { normalizeClaudeTurnTokenUsage } from "../../provider/ClaudeTurnTokenUsage.ts";
+import { extractClaudeFileChanges } from "../../provider/Layers/DiffUtils.ts";
 import {
   type CanUseTool,
   forkSession as forkClaudeSession,
@@ -2023,6 +2024,17 @@ function fileNameFromClaudeTool(toolName: string, input: ClaudeNativeToolInput):
     firstStringInputField(input, ["file_path", "path", "filename", "fileName"]) ??
     `${toolName} result`
   );
+}
+
+function claudeFileChangePatches(
+  toolName: string,
+  input: ClaudeNativeToolInput,
+): ReadonlyArray<{ path: string; patch: string }> | undefined {
+  if (input.type !== "record") return undefined;
+  return extractClaudeFileChanges(toolName, input.value)?.map((change) => ({
+    path: change.path,
+    patch: change.diff,
+  }));
 }
 
 type ClaudeNativeToolOutput =
@@ -4297,6 +4309,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             itemType === "command_execution"
               ? claudeCommandOutputText(input.output)
               : claudeNativeToolOutputText(input.output);
+          const fileChangePatches =
+            itemType === "file_change"
+              ? claudeFileChangePatches(input.toolName, input.toolInput)
+              : undefined;
           const turnItem: OrchestrationV2TurnItem =
             itemType === "command_execution"
               ? {
@@ -4311,6 +4327,15 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                     type: "file_change",
                     fileName: fileNameFromClaudeTool(input.toolName, input.toolInput),
                     ...(outputText.length === 0 ? {} : { diffStr: outputText }),
+                    ...(fileChangePatches === undefined || fileChangePatches.length === 0
+                      ? {}
+                      : {
+                          changes: fileChangePatches.map((change) => ({
+                            operation: "edit",
+                            path: change.path,
+                            ...(change.patch.length === 0 ? {} : { patch: change.patch }),
+                          })),
+                        }),
                   }
                 : itemType === "web_search"
                   ? {

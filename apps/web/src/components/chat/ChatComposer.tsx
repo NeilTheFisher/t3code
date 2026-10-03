@@ -272,7 +272,10 @@ import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
 import { ComposerImageThumbnail } from "./ComposerImageThumbnail";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
+import { ComposerPendingElementContexts } from "./ComposerPendingElementContexts";
+import { ComposerPendingReviewComments } from "./ComposerPendingReviewComments";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
+import { ComposerPreviewAnnotationCards } from "./ComposerPreviewAnnotationCards";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
 import {
   ComposerControl,
@@ -7130,6 +7133,49 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   />
                 </ComposerCommandMenuLayer>
               )}
+
+              {!isComposerCollapsedMobile &&
+                !isComposerApprovalState &&
+                pendingUserInputs.length === 0 &&
+                composerPreviewAnnotations.length > 0 && (
+                  <ComposerPreviewAnnotationCards
+                    annotations={composerPreviewAnnotations}
+                    images={composerImages}
+                    {...(supportsAttachmentUploads
+                      ? {
+                          uploadsByImageId,
+                          onRetryUpload: (image: ComposerImageAttachment) =>
+                            retryAttachmentUpload({
+                              environmentId,
+                              image,
+                              draftTarget: composerDraftTarget,
+                            }),
+                        }
+                      : {})}
+                    onRemove={(annotationId) => {
+                      releaseAttachmentUpload(annotationId);
+                      removeComposerDraftPreviewAnnotation(composerDraftTarget, annotationId);
+                    }}
+                    onExpandImage={(imageId) => {
+                      const preview = buildExpandedImagePreview(composerImages, imageId);
+                      if (preview) onExpandImage(preview);
+                    }}
+                    className="mb-3"
+                  />
+                )}
+
+              {!isComposerCollapsedMobile &&
+                !isComposerApprovalState &&
+                pendingUserInputs.length === 0 &&
+                composerReviewComments.length > 0 && (
+                  <ComposerPendingReviewComments
+                    comments={composerReviewComments}
+                    onRemove={(commentId) =>
+                      removeComposerDraftReviewComment(composerDraftTarget, commentId)
+                    }
+                    className="mb-3"
+                  />
+                )}
 
               {!isComposerCollapsedMobile &&
                 !isComposerApprovalState &&
