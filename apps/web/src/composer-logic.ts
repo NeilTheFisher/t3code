@@ -8,6 +8,7 @@ import {
   splitPromptIntoComposerSegments,
   type ComposerPromptSegment,
 } from "./composer-editor-mentions";
+import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "./lib/terminalContext";
 
 import { resolveShortcutCommand, type ShortcutEventLike } from "./keybindings";
 
@@ -78,7 +79,13 @@ function clampCursor(text: string, cursor: number): number {
 }
 
 function isWhitespace(char: string): boolean {
-  return char === " " || char === "\n" || char === "\t" || char === "\r";
+  return (
+    char === " " ||
+    char === "\n" ||
+    char === "\t" ||
+    char === "\r" ||
+    char === INLINE_TERMINAL_CONTEXT_PLACEHOLDER
+  );
 }
 
 function tokenStartForCursor(text: string, cursor: number): number {
@@ -120,6 +127,14 @@ export function expandCollapsedComposerCursor(text: string, cursorInput: number)
       }
       remaining -= 1;
       expandedCursor += expandedLength;
+      continue;
+    }
+    if (segment.type === "terminal-context") {
+      if (remaining <= 1) {
+        return expandedCursor + remaining;
+      }
+      remaining -= 1;
+      expandedCursor += 1;
       continue;
     }
 
@@ -198,6 +213,14 @@ export function collapseExpandedComposerCursor(text: string, cursorInput: number
         return collapsedCursor + 1;
       }
       remaining -= expandedLength;
+      collapsedCursor += 1;
+      continue;
+    }
+    if (segment.type === "terminal-context") {
+      if (remaining <= 1) {
+        return collapsedCursor + remaining;
+      }
+      remaining -= 1;
       collapsedCursor += 1;
       continue;
     }

@@ -31,9 +31,11 @@ import {
 const isServerProviderUpdateError = Schema.is(ServerProviderUpdateError);
 
 const CODEX_DRIVER = ProviderDriverKind.make("codex");
+const CURSOR_DRIVER = ProviderDriverKind.make("cursor");
 const NATIVE_CLI_DRIVER = ProviderDriverKind.make("nativeCli");
 const OPENCODE_DRIVER = ProviderDriverKind.make("opencode");
 const CODEX_INSTANCE_ID = ProviderInstanceId.make("codex");
+const CURSOR_INSTANCE_ID = ProviderInstanceId.make("cursor");
 const NATIVE_CLI_INSTANCE_ID = ProviderInstanceId.make("nativeCli");
 const OPENCODE_INSTANCE_ID = ProviderInstanceId.make("opencode");
 const encoder = new TextEncoder();
@@ -45,6 +47,15 @@ const encoder = new TextEncoder();
 const layerNonWindowsPlatform = Layer.succeed(HostProcessPlatform, "linux");
 
 function lifecycleFor(provider: ProviderDriverKind): ProviderMaintenanceCapabilities {
+  if (provider === CURSOR_DRIVER) {
+    return makeProviderMaintenanceCapabilities({
+      provider,
+      packageName: null,
+      updateExecutable: "cursor-agent",
+      updateArgs: ["update"],
+      updateLockKey: "cursor-agent",
+    });
+  }
   if (provider === NATIVE_CLI_DRIVER) {
     return makeProviderMaintenanceCapabilities({
       provider,
@@ -84,6 +95,12 @@ const baseNativeCliProvider: ServerProvider = {
   ...baseProvider,
   instanceId: NATIVE_CLI_INSTANCE_ID,
   driver: NATIVE_CLI_DRIVER,
+};
+
+const baseCursorProvider: ServerProvider = {
+  ...baseProvider,
+  instanceId: CURSOR_INSTANCE_ID,
+  driver: CURSOR_DRIVER,
 };
 
 const baseOpenCodeProvider: ServerProvider = {
@@ -653,6 +670,44 @@ describe("providerMaintenanceRunner", () => {
       ),
   );
 
+  it.effect("records a terminal update state when the update is interrupted mid-flight", () => {
+    const startedLatch: { resolve: () => void } = { resolve: () => {} };
+    const started = new Promise<void>((resolve) => {
+      startedLatch.resolve = resolve;
+    });
+    return Effect.gen(function* () {
+      const { registry } = yield* makeRegistry(baseCursorProvider);
+      const updater = yield* makeTestRunner(registry);
+
+      const fiber = yield* updater.updateProvider(CURSOR_DRIVER).pipe(Effect.forkScoped);
+      yield* Effect.promise(() => started);
+
+      const runningProviders = yield* registry.getProviders;
+      assert.strictEqual(runningProviders[0]?.updateState?.status, "running");
+
+      // A client disconnect interrupts the RPC fiber running the update; the
+      // provider must not stay pinned on "running" afterwards.
+      yield* Fiber.interrupt(fiber);
+
+      const providers = yield* registry.getProviders;
+      assert.strictEqual(providers[0]?.updateState?.status, "failed");
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          NonWindowsPlatform,
+          latestVersionHttpClient("0.0.0"),
+          mockSpawnerLayer(() => {
+            startedLatch.resolve();
+            return {
+              stdout: "",
+              exitCode: Effect.never as Effect.Effect<ChildProcessSpawner.ExitCode>,
+            };
+          }),
+        ),
+      ),
+    );
+  });
+
   it.effect("prevents concurrent updates for the same provider", () => {
     const startedLatch: { resolve: () => void } = { resolve: () => {} };
     const releaseLatch: { resolve: () => void } = { resolve: () => {} };
@@ -764,6 +819,92 @@ describe("providerMaintenanceRunner", () => {
           layerNonWindowsPlatform,
           layerLatestVersionHttpClient("2.0.0"),
           layerMockSpawner((_command, args) => {
+            calls.push(args.join(" "));
+            if (calls.length === 1) {
+              firstStartedLatch.resolve();
+              return {
+                stdout: "updated",
+                exitCode: Effect.promise(() => releaseFirst).pipe(
+                  Effect.as(ChildProcessSpawner.ExitCode(0)),
+                ),
+              };
+            }
+            return { stdout: "updated" };
+          }),
+        ),
+      ),
+    );
+  });
+
+  it.effect("records a terminal update state when a queued update is interrupted", () => {
+    const firstStartedLatch: { resolve: () => void } = { resolve: () => {} };
+    const releaseFirstLatch: { resolve: () => void } = { resolve: () => {} };
+    const firstStarted = new Promise<void>((resolve) => {
+      firstStartedLatch.resolve = resolve;
+    });
+    const releaseFirst = new Promise<void>((resolve) => {
+      releaseFirstLatch.resolve = resolve;
+    });
+    const calls: Array<string> = [];
+    return Effect.gen(function* () {
+      const { registry } = yield* makeRegistry([baseProvider, baseOpenCodeProvider]);
+      const updater = yield* makeTestRunner({
+        ...registry,
+        getProviderMaintenanceCapabilitiesForInstance: (_instanceId, provider) =>
+          Effect.succeed(
+            makeProviderMaintenanceCapabilities({
+              provider,
+              packageName: provider === OPENCODE_DRIVER ? "opencode-ai" : "@openai/codex",
+              updateExecutable: "npm",
+              updateArgs:
+                provider === OPENCODE_DRIVER
+                  ? ["install", "-g", "opencode-ai@latest"]
+                  : ["install", "-g", "@openai/codex@latest"],
+              updateLockKey: "npm-global",
+            }),
+          ),
+      });
+
+      const first = yield* updater.updateProvider(CODEX_DRIVER).pipe(Effect.forkScoped);
+      yield* Effect.promise(() => firstStarted);
+
+      const second = yield* updater.updateProvider(OPENCODE_DRIVER).pipe(Effect.forkScoped);
+      let providersWhileQueued: ReadonlyArray<ServerProvider> = [];
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        providersWhileQueued = yield* registry.getProviders;
+        const queuedStatus = providersWhileQueued.find(
+          (provider) => provider.instanceId === OPENCODE_INSTANCE_ID,
+        )?.updateState?.status;
+        if (queuedStatus === "queued") {
+          break;
+        }
+        yield* Effect.yieldNow;
+      }
+      assert.strictEqual(
+        providersWhileQueued.find((provider) => provider.instanceId === OPENCODE_INSTANCE_ID)
+          ?.updateState?.status,
+        "queued",
+      );
+
+      // Cancelling the queued update (client disconnect) must not leave the
+      // provider pinned on "queued".
+      yield* Fiber.interrupt(second);
+
+      const providersAfterInterrupt = yield* registry.getProviders;
+      assert.strictEqual(
+        providersAfterInterrupt.find((provider) => provider.instanceId === OPENCODE_INSTANCE_ID)
+          ?.updateState?.status,
+        "failed",
+      );
+
+      releaseFirstLatch.resolve();
+      yield* Fiber.join(first);
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          NonWindowsPlatform,
+          latestVersionHttpClient("0.0.0"),
+          mockSpawnerLayer((_command, args) => {
             calls.push(args.join(" "));
             if (calls.length === 1) {
               firstStartedLatch.resolve();
