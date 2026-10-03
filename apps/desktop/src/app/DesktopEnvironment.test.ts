@@ -8,6 +8,7 @@ import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopConfig from "./DesktopConfig.ts";
 
 const defaultInput = {
+  appName: "T3 Code (Alpha)",
   dirname: "/repo/apps/desktop/dist-electron",
   homeDirectory: "/Users/alice",
   platform: "darwin",
@@ -70,6 +71,61 @@ describe("DesktopEnvironment", () => {
 
       assert.equal(development.stateDir, "/Users/alice/.t3/dev");
       assert.equal(production.stateDir, "/Users/alice/.t3/userdata");
+    }),
+  );
+
+  it.effect("isolates the packaged voice variant from the installed desktop app", () =>
+    Effect.gen(function* () {
+      const environment = yield* makeEnvironment(
+        {
+          appName: "T3 Code Voice",
+          isPackaged: true,
+        },
+        { T3CODE_HOME: "/tmp/t3" },
+      );
+
+      assert.isTrue(environment.isVoiceVariant);
+      assert.equal(environment.displayName, "T3 Code Voice");
+      assert.equal(environment.branding.baseName, "T3 Code Voice");
+      assert.equal(environment.baseDir, "/tmp/t3/voice");
+      assert.equal(environment.stateDir, "/tmp/t3/voice/userdata");
+      assert.equal(environment.userDataDirName, "t3code-voice");
+      assert.equal(environment.legacyUserDataDirName, "t3code-voice");
+      assert.equal(environment.appUserModelId, "com.t3tools.t3code.voice");
+    }),
+  );
+
+  it.effect("uses a configured app user model id override", () =>
+    Effect.gen(function* () {
+      const environment = yield* makeEnvironment(
+        {},
+        {
+          T3CODE_DESKTOP_APP_USER_MODEL_ID: " com.t3tools.t3code.dev.local ",
+          VITE_DEV_SERVER_URL: "http://localhost:5173",
+        },
+      );
+
+      assert.equal(environment.appUserModelId, "com.t3tools.t3code.dev.local");
+    }),
+  );
+
+  it.effect("resolves picker defaults without nullish sentinels", () =>
+    Effect.gen(function* () {
+      const environment = yield* makeEnvironment();
+
+      assert.deepEqual(environment.resolvePickFolderDefaultPath(null), Option.none());
+      assert.deepEqual(
+        environment.resolvePickFolderDefaultPath({ initialPath: " " }),
+        Option.none(),
+      );
+      assert.deepEqual(
+        environment.resolvePickFolderDefaultPath({ initialPath: "~" }),
+        Option.some("/Users/alice"),
+      );
+      assert.deepEqual(
+        environment.resolvePickFolderDefaultPath({ initialPath: "~/project" }),
+        Option.some("/Users/alice/project"),
+      );
     }),
   );
 });
