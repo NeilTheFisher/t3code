@@ -38,43 +38,43 @@ import Migration0032 from "./Migrations/032_AuthPairingProofKeyThumbprint.ts";
 import Migration0033 from "./Migrations/033_ProjectionThreadsSettled.ts";
 import Migration0034 from "./Migrations/034_ProjectionThreadsSnoozed.ts";
 import Migration0035 from "./Migrations/035_ProjectionThreadTitleRegeneration.ts";
-import Migration0036 from "./Migrations/036_ProjectionThreadsPinned.ts";
-import Migration0037 from "./Migrations/037_ProjectionTurnsKeysetIndex.ts";
-import Migration0038 from "./Migrations/038_ProjectionThreadsPinOrderKey.ts";
-import Migration0039 from "./Migrations/039_ProjectionProjectsDefaultThreadEnvMode.ts";
-import Migration0040 from "./Migrations/040_ProjectionProjectFaviconPath.ts";
-import Migration0041 from "./Migrations/041_AuthSessionClientConnection.ts";
-import Migration0042 from "./Migrations/042_ProjectionThreadLinkedPullRequest.ts";
-import Migration0043 from "./Migrations/043_ProjectionThreadsUnsettledAt.ts";
-import Migration0044 from "./Migrations/044_ClearAutomaticProjectModelDefaults.ts";
-import Migration0045 from "./Migrations/045_ProjectionProjectsAutoPull.ts";
-import Migration0046 from "./Migrations/046_RepairAutomaticSettlementTimestamps.ts";
-import Migration0047 from "./Migrations/047_ProjectionProjectIcon.ts";
-import Migration0048 from "./Migrations/048_ProjectionThreadBranchPullRequest.ts";
-import Migration0049 from "./Migrations/049_ProjectionThreadsActiveOrderKey.ts";
-import Migration0050 from "./Migrations/050_ProjectionThreadPullRequests.ts";
-import Migration0051 from "./Migrations/051_ProjectionThreadMessageContext.ts";
-import Migration0052 from "./Migrations/052_ProjectionThreadTitleState.ts";
-import Migration0053 from "./Migrations/053_PullRequestFilesViewed.ts";
-import Migration0054 from "./Migrations/054_ProjectionThreadsAutoSettleDisabledAt.ts";
-import Migration0055 from "./Migrations/055_OrchestrationV2.ts";
-import Migration0056 from "./Migrations/056_RemoveRedundantProjectionIndexes.ts";
-import Migration0057 from "./Migrations/057_ScheduledTaskWebhooks.ts";
-import Migration0058 from "./Migrations/058_WebhookRelayDeliveries.ts";
-import Migration0059 from "./Migrations/059_McpAppModelContext.ts";
-import Migration0060 from "./Migrations/060_ThreadSnapshotWindowIndexes.ts";
-import Migration0061 from "./Migrations/061_PullRequestReviewGuides.ts";
-import Migration0062 from "./Migrations/062_ThreadFailureLookupIndex.ts";
-import Migration0063 from "./Migrations/063_DropUnusedV1Projections.ts";
-import Migration0064 from "./Migrations/064_CanonicalizeThreadPullRequestLinks.ts";
-import Migration0065 from "./Migrations/065_CodexUsageNativeTurnIndex.ts";
-import Migration0066 from "./Migrations/066_RepairClientSettlementTimestamps.ts";
-import Migration0067 from "./Migrations/067_WebhookDedupe.ts";
-import Migration0068 from "./Migrations/068_ShellStopRequestIndex.ts";
-import Migration0069 from "./Migrations/069_ThreadMessageSearch.ts";
-import Migration0070 from "./Migrations/070_PeerLinks.ts";
-import Migration0071 from "./Migrations/071_PeerLinkFence.ts";
-import Migration0072 from "./Migrations/072_WaitingLinkRequestIndex.ts";
+import Migration0038 from "./Migrations/038_ProjectionThreadsPinned.ts";
+import Migration0039 from "./Migrations/039_ProjectionTurnsKeysetIndex.ts";
+import Migration0040 from "./Migrations/040_ProjectionThreadsPinOrderKey.ts";
+import Migration0041 from "./Migrations/041_ProjectionProjectsDefaultThreadEnvMode.ts";
+import Migration0042 from "./Migrations/042_ProjectionProjectFaviconPath.ts";
+import Migration0043 from "./Migrations/043_AuthSessionClientConnection.ts";
+import Migration0044 from "./Migrations/044_ProjectionThreadLinkedPullRequest.ts";
+import Migration0045 from "./Migrations/045_ProjectionThreadsUnsettledAt.ts";
+import Migration0046 from "./Migrations/046_ClearAutomaticProjectModelDefaults.ts";
+import Migration0047 from "./Migrations/047_ProjectionProjectsAutoPull.ts";
+import Migration0048 from "./Migrations/048_RepairAutomaticSettlementTimestamps.ts";
+import Migration0049 from "./Migrations/049_ProjectionProjectIcon.ts";
+import Migration0050 from "./Migrations/050_ProjectionThreadBranchPullRequest.ts";
+import Migration0051 from "./Migrations/051_ProjectionThreadsActiveOrderKey.ts";
+import Migration0052 from "./Migrations/052_ProjectionThreadPullRequests.ts";
+import Migration0053 from "./Migrations/053_ProjectionThreadMessageContext.ts";
+import Migration0054 from "./Migrations/054_ProjectionThreadTitleState.ts";
+import Migration0055 from "./Migrations/055_PullRequestFilesViewed.ts";
+import Migration0056 from "./Migrations/056_ProjectionThreadsAutoSettleDisabledAt.ts";
+import Migration0057 from "./Migrations/057_OrchestrationV2.ts";
+import Migration0058 from "./Migrations/058_RemoveRedundantProjectionIndexes.ts";
+import Migration0059 from "./Migrations/059_ScheduledTaskWebhooks.ts";
+import Migration0060 from "./Migrations/060_WebhookRelayDeliveries.ts";
+import Migration0061 from "./Migrations/061_McpAppModelContext.ts";
+import Migration0062 from "./Migrations/062_ThreadSnapshotWindowIndexes.ts";
+import Migration0063 from "./Migrations/063_PullRequestReviewGuides.ts";
+import Migration0064 from "./Migrations/064_ThreadFailureLookupIndex.ts";
+import Migration0065 from "./Migrations/065_DropUnusedV1Projections.ts";
+import Migration0066 from "./Migrations/066_CanonicalizeThreadPullRequestLinks.ts";
+import Migration0067 from "./Migrations/067_CodexUsageNativeTurnIndex.ts";
+import Migration0068 from "./Migrations/068_RepairClientSettlementTimestamps.ts";
+import Migration0069 from "./Migrations/069_WebhookDedupe.ts";
+import Migration0070 from "./Migrations/070_ShellStopRequestIndex.ts";
+import Migration0071 from "./Migrations/071_ThreadMessageSearch.ts";
+import Migration0072 from "./Migrations/072_PeerLinks.ts";
+import Migration0073 from "./Migrations/073_PeerLinkFence.ts";
+import Migration0074 from "./Migrations/074_WaitingLinkRequestIndex.ts";
 
 const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
@@ -112,44 +112,49 @@ const migrationEntries = [
   [33, "ProjectionThreadsSettled", Migration0033],
   [34, "ProjectionThreadsSnoozed", Migration0034],
   [35, "ProjectionThreadTitleRegeneration", Migration0035],
-  [36, "ProjectionThreadsPinned", Migration0036],
-  [37, "ProjectionTurnsKeysetIndex", Migration0037],
-  [38, "ProjectionThreadsPinOrderKey", Migration0038],
-  [39, "ProjectionProjectsDefaultThreadEnvMode", Migration0039],
-  [40, "ProjectionProjectFaviconPath", Migration0040],
-  [41, "AuthSessionClientConnection", Migration0041],
-  [42, "ProjectionThreadLinkedPullRequest", Migration0042],
-  [43, "ProjectionThreadsUnsettledAt", Migration0043],
-  [44, "ClearAutomaticProjectModelDefaults", Migration0044],
-  [45, "ProjectionProjectsAutoPull", Migration0045],
-  [46, "RepairAutomaticSettlementTimestamps", Migration0046],
-  [47, "ProjectionProjectIcon", Migration0047],
-  [48, "ProjectionThreadBranchPullRequest", Migration0048],
-  [49, "ProjectionThreadsActiveOrderKey", Migration0049],
-  [50, "ProjectionThreadPullRequests", Migration0050],
-  [51, "ProjectionThreadMessageContext", Migration0051],
-  [52, "ProjectionThreadTitleState", Migration0052],
-  [53, "PullRequestFilesViewed", Migration0053],
-  [54, "ProjectionThreadsAutoSettleDisabledAt", Migration0054],
+  [36, "ProjectionThreadPendingBackgroundTasks", AlreadyApplied0036],
+  [37, "ProjectionThreadTasks", AlreadyApplied0037],
+  [38, "ProjectionThreadsPinned", Migration0038],
+  [39, "ProjectionTurnsKeysetIndex", Migration0039],
+  [40, "ProjectionThreadsPinOrderKey", Migration0040],
+  [41, "ProjectionProjectsDefaultThreadEnvMode", Migration0041],
+  [42, "ProjectionProjectFaviconPath", Migration0042],
+  [43, "AuthSessionClientConnection", Migration0043],
+  [44, "ProjectionThreadLinkedPullRequest", Migration0044],
+  [45, "ProjectionThreadsUnsettledAt", Migration0045],
+  [46, "ClearAutomaticProjectModelDefaults", Migration0046],
+  [47, "ProjectionProjectsAutoPull", Migration0047],
+  [48, "RepairAutomaticSettlementTimestamps", Migration0048],
+  [49, "ProjectionProjectIcon", Migration0049],
+  [50, "ProjectionThreadBranchPullRequest", Migration0050],
+  [51, "ProjectionThreadsActiveOrderKey", Migration0051],
+  [52, "ProjectionThreadPullRequests", Migration0052],
+  [53, "ProjectionThreadMessageContext", Migration0053],
+  [54, "ProjectionThreadTitleState", Migration0054],
+  [55, "PullRequestFilesViewed", Migration0055],
+  [56, "ProjectionThreadsAutoSettleDisabledAt", Migration0056],
+  // Released as 53 and 54 in V2 previews; reconcileV2PreviewMigration preserves their ledger.
   // Preserve this migration's schema. Future V2 schema changes need new migrations.
-  [55, "OrchestrationV2", Migration0055],
-  [56, "RemoveRedundantProjectionIndexes", Migration0056],
-  [57, "ScheduledTaskWebhooks", Migration0057],
-  [58, "WebhookRelayDeliveries", Migration0058],
-  [59, "McpAppModelContext", Migration0059],
-  [60, "ThreadSnapshotWindowIndexes", Migration0060],
-  [61, "PullRequestReviewGuides", Migration0061],
-  [62, "ThreadFailureLookupIndex", Migration0062],
-  [63, "DropUnusedV1Projections", Migration0063],
-  [64, "CanonicalizeThreadPullRequestLinks", Migration0064],
-  [65, "CodexUsageNativeTurnIndex", Migration0065],
-  [66, "RepairClientSettlementTimestamps", Migration0066],
-  [67, "WebhookDedupe", Migration0067],
-  [68, "ShellStopRequestIndex", Migration0068],
-  [69, "ThreadMessageSearch", Migration0069],
-  [70, "PeerLinks", Migration0070],
-  [71, "PeerLinkFence", Migration0071],
-  [72, "WaitingLinkRequestIndex", Migration0072],
+  [57, "OrchestrationV2", Migration0057],
+  [58, "RemoveRedundantProjectionIndexes", Migration0058],
+  [59, "ScheduledTaskWebhooks", Migration0059],
+  [60, "WebhookRelayDeliveries", Migration0060],
+  [61, "McpAppModelContext", Migration0061],
+  [62, "ThreadSnapshotWindowIndexes", Migration0062],
+  [63, "PullRequestReviewGuides", Migration0063],
+  [64, "ThreadFailureLookupIndex", Migration0064],
+  [65, "DropUnusedV1Projections", Migration0065],
+  [66, "CanonicalizeThreadPullRequestLinks", Migration0066],
+  [67, "CodexUsageNativeTurnIndex", Migration0067],
+  [68, "RepairClientSettlementTimestamps", Migration0068],
+  [69, "WebhookDedupe", Migration0069],
+  [70, "ShellStopRequestIndex", Migration0070],
+  [71, "ThreadMessageSearch", Migration0071],
+  // Upstream's 70-72, appended above the fork's id space rather than renumbering
+  // shipped migrations.
+  [72, "PeerLinks", Migration0072],
+  [73, "PeerLinkFence", Migration0073],
+  [74, "WaitingLinkRequestIndex", Migration0074],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
@@ -163,7 +168,9 @@ const makeMigrationLoader = (throughId?: number) =>
     ),
   );
 
-const FIRST_V2_MIGRATION_ID = 55;
+// V2's schema migrations start at 57 in the fork's id space (upstream's 36/37
+// were reclaimed by fork migrations, so every upstream id is shifted +2).
+const FIRST_V2_MIGRATION_ID = 57;
 
 // Migrators skip ids up to the highest recorded; reject collisions that would skip V2 schema.
 const assertV2MigrationsCanRun = Effect.fn("assertV2MigrationsCanRun")(function* (
