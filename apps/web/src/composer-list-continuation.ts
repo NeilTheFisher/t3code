@@ -1,4 +1,5 @@
 import { splitPromptIntoComposerSegments } from "./composer-editor-mentions";
+import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "./lib/terminalContext";
 
 /**
  * List continuation and indentation for the composer.
@@ -84,6 +85,7 @@ function segmentSource(
   segment: ReturnType<typeof splitPromptIntoComposerSegments>[number],
 ): string {
   if (segment.type === "text") return segment.text;
+  if (segment.type === "terminal-context") return INLINE_TERMINAL_CONTEXT_PLACEHOLDER;
   return segment.source;
 }
 

@@ -1097,10 +1097,7 @@ export function PullRequestDetailPanel({
     );
     for (const comment of task.reviewComments ?? []) {
       if (!repeatedCommentIds.has(comment.id)) continue;
-      store.addReviewComment(target, comment, {
-        allowDuplicateReference: true,
-        insertAtCaret: false,
-      });
+      store.addReviewComment(target, comment);
     }
   };
 
