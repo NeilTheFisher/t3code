@@ -25,6 +25,7 @@ import { titleRegenerationToast } from "../components/threadTitleRegenerationToa
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { copyThreadReference } from "../lib/copyThreadReference";
 import { threadChipCopyTarget } from "@t3tools/client-runtime/thread-reference";
+import { exportThreadAsMarkdown } from "../threadExport";
 import { threadEnvironment } from "../state/threads";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
 import { readEnvironmentScope } from "../state/session";
@@ -299,6 +300,11 @@ export function useThreadActionMenu(input: {
           return;
         case "copy-thread-id":
           copyThreadIdToClipboard(thread.id, { threadId: thread.id });
+          return;
+        case "export-markdown":
+          void exportThreadAsMarkdown(threadRef).catch((error) => {
+            failureToast("Failed to export thread", error);
+          });
           return;
         case "archive": {
           if (confirmThreadArchive) {
