@@ -36,6 +36,30 @@ import { nextOrderedMarkerText } from "~/composer-list-continuation";
 import { parseInlineMarkdown, RICH_TEXT_DELIMITERS, type RichTextMark } from "~/composer-rich-text";
 import { collectInlineContextIds } from "~/lib/composerContextReferences";
 import { markdownMathRanges } from "@t3tools/shared/markdownMath";
+import {
+  collectInlineContextIds,
+  formatInlineContextReference,
+} from "~/lib/composerContextReferences";
+import { terminalContextReference } from "~/lib/composerContextRecords";
+import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "~/lib/terminalContext";
+
+/**
+ * Pure document model for the rich text (Tiptap) composer.
+ *
+ * The stored prompt stays markdown (`**bold**`, `@file` chips as canonical
+ * links). The Tiptap document holds styled text plus inline atom chips, so
+ * this module translates both ways and maps cursor offsets between the three
+ * coordinate spaces the composer speaks:
+ *
+ * - flat document offsets (styled markers excluded, chips count 1),
+ * - collapsed cursor offsets (markers literal, chips count 1 — the coordinate
+ *   the draft store and mention detection use),
+ * - markdown offsets (markers literal, chips expand to their source).
+ *
+ * DOM-free on purpose: unit tests build a real ProseMirror document from the
+ * JSON this produces and assert the round trip without a browser.
+ */
+import { markdownMathRanges } from "@t3tools/shared/markdownMath";
 
 export type SkillMeta = { label: string; description: string | null };
 
@@ -480,6 +504,23 @@ function atomJsonForSegment(
     return {
       type: "composer-citation",
       attrs: { citation: segment.citation, source: segment.source, citeKey: randomNodeKey() },
+    };
+  }
+  if (segment.type === "terminal-context") {
+    if (!segment.context) {
+      // A placeholder with no matching draft (e.g. a literal paste) stays a
+      // literal character so the document round-trips byte-for-byte.
+      return { type: "text", text: INLINE_TERMINAL_CONTEXT_PLACEHOLDER };
+    }
+    const reference = terminalContextReference(segment.context);
+    return {
+      type: "composer-context-reference",
+      attrs: {
+        kind: reference.kind,
+        contextId: reference.contextId,
+        label: reference.label,
+        source: formatInlineContextReference(reference),
+      },
     };
   }
   return {

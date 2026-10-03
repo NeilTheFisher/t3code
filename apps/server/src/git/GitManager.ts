@@ -168,7 +168,7 @@ export class GitManager extends Context.Service<
       Scope.Scope
     >;
   }
->()("t3/git/GitManager") {}
+>()("@neilthefisher/t3/git/GitManager") {}
 
 const COMMIT_TIMEOUT_MS = 10 * 60_000;
 const MAX_PROGRESS_TEXT_LENGTH = 500;
@@ -1857,7 +1857,13 @@ export const make = Effect.gen(function* () {
       | "isCrossRepository"
     >,
   ) {
+    // A repository with no supported remote has no change requests to ask for;
+    // without this the registry's unknown provider fails every lookup and the
+    // reactors log a warning on each sweep.
     const provider = yield* sourceControlProvider(cwd);
+    if (provider.kind === "unknown") {
+      return null;
+    }
     const probe = headBranchProbe(provider, headContext.headSelectors, "open");
     for (const headSelector of probe.headSelectors) {
       const pullRequests = yield* provider.listChangeRequests({
@@ -1890,6 +1896,9 @@ export const make = Effect.gen(function* () {
     const parsedByNumber = new Map<number, PullRequestInfo>();
 
     const provider = yield* sourceControlProvider(cwd);
+    if (provider.kind === "unknown") {
+      return null;
+    }
     const probe = headBranchProbe(provider, headContext.headSelectors, "all");
     for (const headSelector of probe.headSelectors) {
       const pullRequests = yield* provider.listChangeRequests({

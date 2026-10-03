@@ -1,4 +1,5 @@
 import { splitPromptIntoComposerSegments } from "./composer-editor-mentions";
+import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "./lib/terminalContext";
 
 export interface ComposerListEdit {
   start: number;
@@ -75,6 +76,12 @@ function indentWidth(line: string): number {
     else break;
   }
   return width;
+function segmentSource(
+  segment: ReturnType<typeof splitPromptIntoComposerSegments>[number],
+): string {
+  if (segment.type === "text") return segment.text;
+  if (segment.type === "terminal-context") return INLINE_TERMINAL_CONTEXT_PLACEHOLDER;
+  return segment.source;
 }
 
 function renumberFollowingItems(

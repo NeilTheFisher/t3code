@@ -1,5 +1,13 @@
 import { type RunId } from "@t3tools/contracts";
-import { type MouseEvent, type ReactNode, memo, useLayoutEffect, useRef, useState } from "react";
+import {
+  type MouseEvent,
+  type ReactNode,
+  memo,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { type TurnDiffFileChange } from "../../types";
 import {
   buildTurnDiffTree,
@@ -16,6 +24,11 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { MiddleTruncate } from "../ui/middle-truncate";
 import { MorphIcon } from "~/components/MorphIcon";
 import { observeResize } from "~/lib/observeResize";
+import {
+  changedFileName,
+  selectChangedFilePreview,
+  summarizeChangedFileScopes,
+} from "./changedFilesPresentation";
 
 const EMPTY_DIRECTORY_OVERRIDES: Record<string, boolean> = {};
 const VIRTUALIZE_AFTER_ROWS = 250;
@@ -31,8 +44,11 @@ export type ChangedFileContextMenuHandler = (filePath: string, event: MouseEvent
 export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
   runId: RunId;
   files: ReadonlyArray<TurnDiffFileChange>;
+  expanded?: boolean;
+  showCompactPreview?: boolean;
   allDirectoriesExpanded: boolean;
   resolvedTheme: "light" | "dark";
+  onExpandedChange?: (expanded: boolean) => void;
   onToggleAllDirectories: () => void;
   onOpenTurnDiff: (runId: RunId, filePath?: string) => void;
   onFileContextMenu?: ChangedFileContextMenuHandler | undefined;
@@ -40,46 +56,77 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
   const {
     runId,
     files,
+    expanded = true,
+    showCompactPreview = false,
     allDirectoriesExpanded,
     resolvedTheme,
+    onExpandedChange = () => {},
     onToggleAllDirectories,
     onOpenTurnDiff,
     onFileContextMenu,
   } = props;
-  const summaryStat = summarizeTurnDiffStats(files);
-  const hasDirectories = files.some((file) => /[/\\]/.test(file.path));
+  const summaryStat = useMemo(() => summarizeTurnDiffStats(files), [files]);
+  const scopeSummary = useMemo(() => summarizeChangedFileScopes(files), [files]);
+  const previewFiles = useMemo(() => selectChangedFilePreview(files), [files]);
+  const compactPreviewVisible = showCompactPreview && !expanded;
 
   return (
     <div
-      className="@container/changed-files mt-4 rounded-lg bg-secondary dark:bg-input/20"
-      data-changed-files-state="tree"
+      className="@container/changed-files mt-4 rounded-2xl border border-border/70 bg-secondary p-2 dark:border-transparent dark:bg-input/32"
+      data-changed-files-state={
+        expanded ? "expanded" : compactPreviewVisible ? "preview" : "collapsed"
+      }
     >
       <div
         data-changed-files-header=""
-        className="sticky top-2 z-10 flex items-center justify-between gap-2 rounded-t-lg bg-secondary px-3 py-2 dark:bg-background dark:bg-linear-to-b dark:from-input/20 dark:to-input/20"
+        className={cn(
+          "flex items-center justify-between gap-2 rounded-xl",
+          expanded && "sticky top-2 z-10 mb-2 bg-secondary dark:bg-background",
+        )}
       >
-        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs font-medium text-foreground">
-          <span>
-            {files.length} changed file{files.length === 1 ? "" : "s"}
-          </span>
-          {hasNonZeroStat(summaryStat) && (
-            <DiffStatLabel
-              additions={summaryStat.additions}
-              deletions={summaryStat.deletions}
-              layout="inline"
-              className="text-xs leading-4"
+        <button
+          type="button"
+          aria-expanded={expanded}
+          data-scroll-anchor-ignore
+          className="group flex min-w-0 flex-1 items-center rounded-xl px-2 py-1.5 text-left transition-colors hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          onClick={() => onExpandedChange(!expanded)}
+        >
+          <span className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
+            <ChevronRightIcon
+              aria-hidden="true"
+              className={cn(
+                "size-3.5 shrink-0 text-muted-foreground transition-transform",
+                expanded && "rotate-90",
+              )}
             />
-          )}
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          {hasDirectories && (
+            <span className="flex shrink-0 items-center gap-1 whitespace-nowrap font-medium text-foreground text-xs leading-4">
+              <span>
+                {files.length} changed file{files.length === 1 ? "" : "s"}
+              </span>
+              {hasNonZeroStat(summaryStat) && (
+                <DiffStatLabel
+                  additions={summaryStat.additions}
+                  className="text-xs leading-4"
+                  deletions={summaryStat.deletions}
+                  layout="inline"
+                />
+              )}
+            </span>
+            <span className="ml-1 hidden min-w-0 flex-1 truncate text-2xs text-muted-foreground group-hover:text-foreground/80 @[24rem]/changed-files:inline">
+              {expanded ? "Hide files" : "Show files"}
+            </span>
+          </span>
+        </button>
+        <div className="flex shrink-0 items-center gap-1.5 pr-1">
+          {expanded ? (
             <Tooltip>
               <TooltipTrigger
                 render={
                   <Button
                     type="button"
                     size="icon-xs"
-                    variant="ghost-muted"
+                    variant="outline"
+                    className="!size-[22px]"
                     aria-label={
                       allDirectoriesExpanded ? "Collapse all folders" : "Expand all folders"
                     }
@@ -97,14 +144,14 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
                 {allDirectoriesExpanded ? "Collapse all folders" : "Expand all folders"}
               </TooltipPopup>
             </Tooltip>
-          )}
+          ) : null}
           <Tooltip>
             <TooltipTrigger
               render={
                 <Button
                   type="button"
                   size="xs"
-                  variant="ghost-muted"
+                  variant="outline"
                   aria-label="Open diff"
                   onClick={() => onOpenTurnDiff(runId, files[0]?.path)}
                 />
@@ -117,15 +164,62 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
           </Tooltip>
         </div>
       </div>
-      <ChangedFilesTree
-        key={`${runId}:${allDirectoriesExpanded}`}
-        runId={runId}
-        files={files}
-        allDirectoriesExpanded={allDirectoriesExpanded}
-        resolvedTheme={resolvedTheme}
-        onOpenTurnDiff={onOpenTurnDiff}
-        onFileContextMenu={onFileContextMenu}
-      />
+      {expanded ? (
+        <ChangedFilesTree
+          key={`${runId}:${allDirectoriesExpanded}`}
+          runId={runId}
+          files={files}
+          allDirectoriesExpanded={allDirectoriesExpanded}
+          resolvedTheme={resolvedTheme}
+          onOpenTurnDiff={onOpenTurnDiff}
+          onFileContextMenu={onFileContextMenu}
+        />
+      ) : compactPreviewVisible ? (
+        <div className="px-2 pb-1.5 pt-1">
+          <p className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-2xs text-muted-foreground">
+            {scopeSummary.map((scope, index) => (
+              <span key={scope.label} className="inline-flex items-center gap-1">
+                {index > 0 ? <span aria-hidden="true">·</span> : null}
+                <span className="font-mono text-foreground/75">{scope.label}</span>
+                <span>
+                  {scope.fileCount} file{scope.fileCount === 1 ? "" : "s"}
+                </span>
+              </span>
+            ))}
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            {previewFiles.map((file) => (
+              <Tooltip key={file.path}>
+                <TooltipTrigger
+                  render={
+                    <button
+                      type="button"
+                      className="inline-flex max-w-48 items-center gap-1 rounded-md border border-border/70 bg-background/45 px-1.5 py-1 font-mono text-3xs text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      onClick={() => onOpenTurnDiff(runId, file.path)}
+                    />
+                  }
+                >
+                  <PierreEntryIcon
+                    pathValue={file.path}
+                    kind="file"
+                    theme={resolvedTheme}
+                    className="size-3 shrink-0 text-muted-foreground/70"
+                  />
+                  <span className="truncate">{changedFileName(file.path)}</span>
+                </TooltipTrigger>
+                <TooltipPopup side="top">{file.path}</TooltipPopup>
+              </Tooltip>
+            ))}
+            <button
+              type="button"
+              className="rounded-md px-1.5 py-1 text-2xs font-medium text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              onClick={() => onExpandedChange(true)}
+            >
+              Show all {files.length} files
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 });

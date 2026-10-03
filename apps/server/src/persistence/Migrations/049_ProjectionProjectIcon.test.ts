@@ -8,7 +8,7 @@ import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 
 const layer = it.layer(Layer.mergeAll(NodeSqliteClient.layer({ filename: ":memory:" })));
 
-layer("047_ProjectionProjectIcon", (it) => {
+layer("049_ProjectionProjectIcon", (it) => {
   it.effect("adds the nullable project icon JSON to project projections", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
