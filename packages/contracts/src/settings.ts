@@ -39,6 +39,23 @@ import {
 } from "./providerInstance.ts";
 import { PullRequestMergeMethod } from "./pullRequest.ts";
 
+// ── Userscripts ──────────────────────────────────────────────
+
+export const UserscriptType = Schema.Literals(["css", "javascript"]);
+export type UserscriptType = typeof UserscriptType.Type;
+
+export const Userscript = Schema.Struct({
+  id: Schema.String,
+  name: TrimmedNonEmptyString,
+  code: Schema.String,
+  type: UserscriptType,
+  enabled: Schema.Boolean,
+  deviceId: Schema.String,
+});
+export type Userscript = typeof Userscript.Type;
+
+export const DEFAULT_USERSCRIPTS: Record<string, readonly Userscript[]> = {};
+
 // ── Client Settings (local-only) ───────────────────────────────
 
 export const TimestampFormat = Schema.Literals(["locale", "12-hour", "24-hour"]);
@@ -287,6 +304,15 @@ export const LoadBalancingWeights = Schema.Record(
 );
 
 export const DiffColorScheme = Schema.Literals(["red-green", "blue-orange"]);
+export const DEFAULT_TTS_SERVER_URL = "http://127.0.0.1:8880";
+export const DEFAULT_TTS_VOICE = "af_heart";
+
+export const TtsClientSettings = Schema.Struct({
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  serverUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_TTS_SERVER_URL))),
+  voice: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_TTS_VOICE))),
+});
+export type TtsClientSettings = typeof TtsClientSettings.Type;
 
 /** Maximum width of the chat timeline and composer on wide screens. */
 export const ChatWidth = Schema.Literals(["comfortable", "wide", "full"]);
@@ -498,7 +524,12 @@ export const ClientSettingsSchema = Schema.Struct({
   ),
   snapShotFlash: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   snapShotAnimations: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  showProviderUsageInContextPopover: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(Effect.succeed(false)),
+  ),
   wordWrap: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  enableExternalFilePreview: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  tts: TtsClientSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
 });
 export type ClientSettings = typeof ClientSettingsSchema.Type;
 
@@ -661,7 +692,10 @@ export const ClaudeSettings = makeProviderSettingsSchema(
         title: "CLAUDE_CONFIG_DIR path",
         description:
           "Custom Claude home and config directory. Keeps .claude.json and .claude separate.",
-        providerSettingsForm: { placeholder: "~/.claude", clearWhenEmpty: "omit" },
+        providerSettingsForm: {
+          placeholder: "~/.claude",
+          clearWhenEmpty: "omit",
+        },
       }),
     ),
     customModels: Schema.Array(CustomModelSetting).pipe(
@@ -974,13 +1008,36 @@ export const OpenCodeSettings = makeProviderSettingsSchema(
         },
       }),
     ),
+    goWorkspaceId: TrimmedString.pipe(
+      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.annotateKey({
+        title: "Go workspace ID",
+        description: "Workspace ID from the OpenCode Go dashboard URL.",
+        providerSettingsForm: {
+          placeholder: "wrk_…",
+          clearWhenEmpty: "omit",
+        },
+      }),
+    ),
+    goAuthCookie: TrimmedString.pipe(
+      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.annotateKey({
+        title: "Go dashboard auth cookie",
+        description: "The auth cookie from opencode.ai. Stored in plain text on disk.",
+        providerSettingsForm: {
+          control: "password",
+          placeholder: "Optional",
+          clearWhenEmpty: "omit",
+        },
+      }),
+    ),
     customModels: Schema.Array(CustomModelSetting).pipe(
       Schema.withDecodingDefault(Effect.succeed([])),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
   },
   {
-    order: ["binaryPath", "serverUrl", "serverPassword"],
+    order: ["binaryPath", "serverUrl", "serverPassword", "goWorkspaceId", "goAuthCookie"],
   },
 );
 export type OpenCodeSettings = typeof OpenCodeSettings.Type;
@@ -1443,6 +1500,9 @@ export const ServerSettings = Schema.Struct({
   usageModelAliases: Schema.Record(TrimmedNonEmptyString, TrimmedNonEmptyString).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
+  userscripts: Schema.Record(Schema.String, Schema.Array(Userscript)).pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
 });
 export type ServerSettings = typeof ServerSettings.Type;
 
@@ -1602,6 +1662,8 @@ const OpenCodeSettingsPatch = Schema.Struct({
   binaryPath: Schema.optionalKey(TrimmedString),
   serverUrl: Schema.optionalKey(TrimmedString),
   serverPassword: Schema.optionalKey(TrimmedString),
+  goWorkspaceId: Schema.optionalKey(TrimmedString),
+  goAuthCookie: Schema.optionalKey(TrimmedString),
   customModels: Schema.optionalKey(Schema.Array(CustomModelSetting)),
 });
 
@@ -1745,6 +1807,9 @@ export const ServerSettingsPatch = Schema.Struct({
   usageModelAliases: Schema.optionalKey(
     Schema.Record(TrimmedNonEmptyString, Schema.NullOr(TrimmedNonEmptyString)),
   ),
+  // Per-device userscripts. The client sends only its own device's entry;
+  // deepMerge preserves scripts from other devices.
+  userscripts: Schema.optionalKey(Schema.Record(Schema.String, Schema.Array(Userscript))),
 });
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
 
@@ -1836,6 +1901,9 @@ export const ClientSettingsPatch = Schema.Struct({
   snapShotSound: Schema.optionalKey(SnapShotSound),
   snapShotFlash: Schema.optionalKey(Schema.Boolean),
   snapShotAnimations: Schema.optionalKey(Schema.Boolean),
+  showProviderUsageInContextPopover: Schema.optionalKey(Schema.Boolean),
   wordWrap: Schema.optionalKey(Schema.Boolean),
+  enableExternalFilePreview: Schema.optionalKey(Schema.Boolean),
+  tts: Schema.optionalKey(TtsClientSettings),
 });
 export type ClientSettingsPatch = typeof ClientSettingsPatch.Type;

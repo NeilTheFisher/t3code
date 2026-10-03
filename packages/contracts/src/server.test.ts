@@ -114,7 +114,7 @@ describe("ServerProvider", () => {
     expect(parsed.continuation?.groupKey).toBe("codex:home:/Users/julius/.codex");
   });
 
-  it("decodes optional legacy model metadata", () => {
+  it("decodes optional model metadata", () => {
     const parsed = decodeServerProvider({
       instanceId: "codex",
       driver: "codex",
@@ -130,12 +130,50 @@ describe("ServerProvider", () => {
           name: "GPT-5.4",
           isCustom: false,
           isLegacy: true,
+          contextWindowTokens: 1_000_000,
           capabilities: null,
         },
       ],
     });
 
     expect(parsed.models[0]?.isLegacy).toBe(true);
+    expect(parsed.models[0]?.contextWindowTokens).toBe(1_000_000);
+  });
+
+  it("decodes dynamic provider usage windows", () => {
+    const parsed = decodeServerProvider({
+      instanceId: "claudeAgent",
+      driver: "claudeAgent",
+      enabled: true,
+      installed: true,
+      version: "2.1.218",
+      status: "ready",
+      auth: { status: "authenticated" },
+      checkedAt: "2026-07-22T12:00:00.000Z",
+      models: [],
+      usageLimits: {
+        source: "claudePrint",
+        checkedAt: "2026-07-22T12:00:00.000Z",
+        windows: [
+          {
+            id: "session",
+            kind: "session",
+            label: "Session",
+            usedPercent: 30,
+            windowDurationMins: 300,
+          },
+          {
+            id: "weekly_fable",
+            kind: "weekly",
+            label: "Weekly (Fable)",
+            usedPercent: 26,
+            windowDurationMins: 10_080,
+          },
+        ],
+      },
+    });
+
+    expect(parsed.usageLimits?.windows).toHaveLength(2);
   });
 });
 

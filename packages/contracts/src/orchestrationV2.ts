@@ -1252,6 +1252,11 @@ export const OrchestrationV2FileChangeDetail = Schema.Struct({
   oldPath: Schema.optional(TrimmedNonEmptyString),
   fileType: Schema.optional(TrimmedNonEmptyString),
   mimeType: Schema.optional(TrimmedNonEmptyString),
+  /**
+   * Unified diff text for this file, when the provider reported one (or the
+   * adapter could synthesize it). Optional so older persisted payloads decode.
+   */
+  patch: Schema.optional(Schema.String),
 });
 export type OrchestrationV2FileChangeDetail = typeof OrchestrationV2FileChangeDetail.Type;
 

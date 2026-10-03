@@ -95,3 +95,46 @@ export function extractToolFileChanges(
 
   return undefined;
 }
+
+/** Extract the target path from a unified diff hunk header, if one is present. */
+function patchPathFromHeaders(patch: string): string | undefined {
+  const plusMatch = patch.match(/^\+\+\+ [ab]\/(.+)$/m);
+  if (plusMatch?.[1]) return plusMatch[1];
+  const minusMatch = patch.match(/^--- [ab]\/(.+)$/m);
+  if (minusMatch?.[1]) return minusMatch[1];
+  const pathMatch = patch.match(/^(?:---|\+\+\+) ([^\s]+)/m);
+  const filePath = pathMatch?.[1];
+  return filePath && filePath !== "/dev/null" ? filePath : undefined;
+}
+
+/**
+ * Split a possibly multi-file `apply_patch` payload into one diff per file.
+ * Returns `undefined` when no file path can be resolved.
+ */
+export function splitUnifiedDiffByFile(
+  patch: string,
+): Array<{ path: string; diff: string }> | undefined {
+  const parts = patch.split(/(?=^diff --git )/m).filter((part) => part.trim().length > 0);
+  const results: Array<{ path: string; diff: string }> = [];
+  for (const part of parts.length > 0 ? parts : [patch]) {
+    const path = patchPathFromHeaders(part);
+    if (path !== undefined) results.push({ path, diff: part });
+  }
+  return results.length > 0 ? results : undefined;
+}
+
+/**
+ * File changes for a Claude tool call. `apply_patch` carries a raw patch that
+ * may touch several files, so it is split; every other file tool goes through
+ * the shared extractor.
+ */
+export function extractClaudeFileChanges(
+  toolName: string,
+  input: Record<string, unknown>,
+): Array<{ path: string; diff: string }> | undefined {
+  if (toolName.toLowerCase().includes("apply_patch")) {
+    const patch = typeof input.patch === "string" ? input.patch : undefined;
+    return patch && patch.length > 0 ? splitUnifiedDiffByFile(patch) : undefined;
+  }
+  return extractToolFileChanges(toolName, input);
+}
