@@ -122,8 +122,16 @@ function canonicalSelectionsToLegacyObject(
   return out;
 }
 
+export const ModelModality = Schema.Literals(["text", "audio", "image", "video", "pdf"]);
+export type ModelModality = typeof ModelModality.Type;
+
 export const ModelCapabilities = Schema.Struct({
   optionDescriptors: Schema.optional(Schema.Array(ProviderOptionDescriptor)),
+  inputModalities: Schema.optional(Schema.Array(ModelModality)),
+  outputModalities: Schema.optional(Schema.Array(ModelModality)),
+  supportsReasoning: Schema.optional(Schema.Boolean),
+  supportsToolCalls: Schema.optional(Schema.Boolean),
+  supportsAttachments: Schema.optional(Schema.Boolean),
 });
 export type ModelCapabilities = typeof ModelCapabilities.Type;
 
