@@ -25,6 +25,7 @@ const RIGHT_PANEL_KINDS = [
   "pull-requests",
   "issue",
   "side-chat",
+  "webpage",
 ] as const;
 export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
 
@@ -80,6 +81,7 @@ export type RightPanelSurface =
       revealUrl?: string;
       detailTab?: PullRequestDetailTab;
     }
+  /** The thread's linked pull requests, one singleton tab beside any number of `pull-request` tabs. */
   | { id: "pull-requests"; kind: "pull-requests" }
   /**
    * An issue opened in the issues list's shared panel, or beside a thread. Like `pull-request`,
@@ -96,9 +98,16 @@ export type RightPanelSurface =
       key: string;
       url?: string;
     }
-  | { id: `side-chat:${string}`; kind: "side-chat"; threadId: ThreadId };
+  | { id: `side-chat:${string}`; kind: "side-chat"; threadId: ThreadId }
+  | { id: "webpage"; kind: "webpage"; url: string | null };
 
 const RIGHT_PANEL_STORAGE_KEY = "t3code:right-panel-state:v2";
+// v9 removed the "plan" surface kind (plans render inline in the transcript).
+// v10 keys pull-request surfaces by reference instead of a singleton tab.
+// v11 stops persisting the pull-request list's shared panel, so a restart opens the page fresh.
+// v12 adds the device surface.
+// v14 removes the agents surface; lineage lives in the thread title bar.
+// v15 adds the webpage and issue surfaces.
 const RIGHT_PANEL_STORAGE_VERSION = 15;
 
 export const PULL_REQUESTS_PANEL_REF = scopeThreadRef(
@@ -160,6 +169,8 @@ interface RightPanelStoreState {
   openDevice: (ref: ScopedThreadRef, target: DeviceTabTarget, automatic?: boolean) => void;
   renameDevice: (ref: ScopedThreadRef, surfaceId: string, title: string) => void;
   openBrowser: (ref: ScopedThreadRef, tabId: string | null) => void;
+  openWebPage: (ref: ScopedThreadRef) => void;
+  setWebPageUrl: (ref: ScopedThreadRef, url: string | null) => void;
   openFile: (ref: ScopedThreadRef, relativePath: string, line?: number) => void;
   /** Moves in place; "" opens the root explorer. folderTrail keeps the return path; keepSource opens beside the source. */
   navigateFolder: (
@@ -246,7 +257,7 @@ const DEFAULT_THREAD_PANEL_VISIBILITY: ThreadPanelVisibility = {
 const singletonSurface = (
   kind: Exclude<
     RightPanelKind,
-    "file" | "preview" | "terminal" | "pull-request" | "issue" | "side-chat"
+    "file" | "preview" | "terminal" | "pull-request" | "issue" | "side-chat" | "webpage"
   >,
 ): RightPanelSurface => {
   switch (kind) {
@@ -265,6 +276,12 @@ const browserSurface = (tabId: string | null): RightPanelSurface =>
   tabId
     ? { id: `browser:${tabId}`, kind: "preview", resourceId: tabId }
     : { id: "browser:new", kind: "preview", resourceId: null };
+
+const webPageSurface = (url: string | null): RightPanelSurface => ({
+  id: "webpage",
+  kind: "webpage",
+  url,
+});
 
 const fileSurface = (
   relativePath: string,
@@ -296,6 +313,21 @@ const terminalSurface = (terminalId: string): RightPanelSurface => ({
 });
 
 export type PullRequestSurface = Extract<RightPanelSurface, { kind: "pull-request" }>;
+
+/**
+ * Update a pull-request tab status map, returning the same reference when
+ * nothing changed so callers can skip a re-render.
+ */
+export function updatePullRequestTabStatus<Status extends { state: unknown; isDraft: boolean }>(
+  statuses: Readonly<Record<string, Status>>,
+  surfaceId: string,
+  status: Status,
+): Readonly<Record<string, Status>> {
+  return statuses[surfaceId]?.state === status.state &&
+    statuses[surfaceId]?.isDraft === status.isDraft
+    ? statuses
+    : { ...statuses, [surfaceId]: status };
+}
 
 export function pullRequestSurfaceId(target: {
   environmentId?: string;
@@ -790,6 +822,10 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
               const existing = current.surfaces.find((surface) => surface.kind === "preview");
               return upsertSurface(current, existing ?? browserSurface(null));
             }
+            if (kind === "webpage") {
+              const existing = current.surfaces.find((surface) => surface.kind === "webpage");
+              return upsertSurface(current, existing ?? webPageSurface(null));
+            }
             return upsertSurface(current, singletonSurface(kind));
           }),
         ),
@@ -836,6 +872,22 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
                       m(msg("Device", { $context: "a simulator or emulator" })),
                   }
                 : surface,
+            ),
+          })),
+        ),
+      openWebPage: (ref) =>
+        set((state) =>
+          userAction(state, scopedThreadKey(ref), (current) => {
+            const existing = current.surfaces.find((surface) => surface.kind === "webpage");
+            return upsertSurface(current, existing ?? webPageSurface(null));
+          }),
+        ),
+      setWebPageUrl: (ref, url) =>
+        set((state) =>
+          userAction(state, scopedThreadKey(ref), (current) => ({
+            ...current,
+            surfaces: current.surfaces.map((surface) =>
+              surface.kind === "webpage" ? { ...surface, url } : surface,
             ),
           })),
         ),
@@ -1236,6 +1288,10 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             if (kind === "preview") {
               const existing = current.surfaces.find((surface) => surface.kind === "preview");
               return upsertSurface(current, existing ?? browserSurface(null));
+            }
+            if (kind === "webpage") {
+              const existing = current.surfaces.find((surface) => surface.kind === "webpage");
+              return upsertSurface(current, existing ?? webPageSurface(null));
             }
             return upsertSurface(current, singletonSurface(kind));
           }),
