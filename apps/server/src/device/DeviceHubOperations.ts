@@ -6,6 +6,7 @@ import {
 } from "@t3tools/contracts";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 
@@ -13,6 +14,19 @@ import type { DeviceHostReady, DeviceOperations, HostDevice } from "./DeviceHost
 
 const BOOT_TIMEOUT = Duration.minutes(3);
 const SCREENSHOT_TIMEOUT = Duration.seconds(20);
+
+/**
+ * Whether the hub reported no listing failure for this platform. The hub
+ * always reports the iOS probe on non-macOS hosts, so errors are matched to
+ * the platform they came from rather than treated as a whole.
+ */
+export const listingIsClean = (
+  errors: ReadonlyArray<{ readonly message: string }> | undefined,
+  platform: DevicePlatform,
+): boolean =>
+  !(errors ?? []).some((error) =>
+    error.message.includes(platform === "ios" ? "apple-utils" : "android-utils"),
+  );
 
 const HubDevice = Schema.Struct({
   id: Schema.String,
@@ -134,9 +148,17 @@ export const makeDeviceHubOperations = (options: {
       }
     }
     return {
-      devices,
+      devices: devices as ReadonlyArray<HostDevice>,
       detail: details.join("\n") || undefined,
       androidDiscoveryIncomplete,
+      ...(hubList.errors
+        ? {
+            errors: hubList.errors.map((error) => ({
+              message: error.message,
+              ...(error.error === undefined ? {} : { error: error.error }),
+            })),
+          }
+        : {}),
     };
   }).pipe(Effect.withSpan("DeviceHubOperations.list"));
 
@@ -215,7 +237,26 @@ export const makeDeviceHubOperations = (options: {
               ),
             ),
           )
-        : postShutdown("/api/devices/shutdown", { platform: device.platform, id: device.id });
+        : postShutdown("/api/devices/shutdown", { platform: device.platform, id: device.id }).pipe(
+            Effect.catch((cause) =>
+              list.pipe(
+                Effect.exit,
+                // A physically disconnected device cannot be shut down; clearing
+                // its stale sessions matters more than the failed remote call.
+                // Require a clean re-listing so a partial read cannot mask a real
+                // failure on a device that is still connected.
+                Effect.flatMap((relist) =>
+                  Exit.isSuccess(relist) &&
+                  listingIsClean(relist.value.errors, "android") &&
+                  relist.value.devices.find((device) => device.id === device.id)?.booted !== true
+                    ? Effect.logInfo("Android device was already gone or shut down", {
+                        deviceId: device.id,
+                      })
+                    : Effect.fail(cause),
+                ),
+              ),
+            ),
+          );
     },
   );
 

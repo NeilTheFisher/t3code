@@ -33,6 +33,7 @@ import * as FileSystem from "effect/FileSystem";
 import { resolveNodeExecutable, nodeRuntimeUnavailableMessage } from "@t3tools/shared/nodeRuntime";
 import * as Path from "effect/Path";
 import { ensureAgentDevice, ensureDeviceHub } from "./DeviceToolchain.ts";
+import { listingIsClean } from "./DeviceHubOperations.ts";
 import * as ServerConfig from "../config.ts";
 import {
   agentDeviceConfigPath,
@@ -384,11 +385,12 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
     );
 
   const fetchDevices = Effect.fn("DeviceService.fetchDevices")(function* (ready: DeviceReadiness) {
-    const { devices, detail, androidDiscoveryIncomplete } = yield* ready.devices.list;
+    const { devices, detail, androidDiscoveryIncomplete, errors } = yield* ready.devices.list;
     return {
       devices: devices.map((device): DeviceSummary => ({ ...device, hostId: ready.hostId })),
       detail,
       androidDiscoveryIncomplete,
+      errors,
     };
   });
 
@@ -399,12 +401,16 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
     const sessionKey = (session: DeviceSession) =>
       `${session.hostId}\u0000${session.deviceId}\u0000${session.threadId}\u0000${session.openedAt}`;
     const before = new Set((yield* SynchronizedRef.get(stateRef)).state.sessions.map(sessionKey));
-    const { devices, detail, androidDiscoveryIncomplete } = yield* fetchDevices(ready);
+    const { devices, detail, androidDiscoveryIncomplete, errors } = yield* fetchDevices(ready);
     const hostSummaries = yield* Effect.forEach(hosts.values(), (host) => host.summary);
     return yield* lifecycleLock.withPermit(
       Effect.gen(function* () {
         if (!(yield* readDeviceSettings).enabled || !host || hosts.get(ready.hostId) !== host)
           return (yield* SynchronizedRef.get(stateRef)).state;
+        // Drop sessions for devices this host no longer reports, but only when
+        // its listing was clean, so a partial hub listing never removes a live
+        // session.
+        const hostDeviceIds = new Set(devices.map((device) => device.id));
         return yield* publish((state) => ({
           ...state,
           hosts: hostSummaries,
@@ -415,7 +421,8 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
           ],
           // A host that ends devices itself (EAS stops sessions at their limits)
           // leaves sessions on devices it no longer lists with nothing to stream.
-          // Other hosts can miss a device for one listing, so theirs stay.
+          // Other hosts prune a session only when the listing was clean for its
+          // platform, so a partial hub listing never removes a live session.
           sessions: ready.devices.endsDevices
             ? state.sessions.filter(
                 (session) =>
@@ -423,7 +430,12 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
                   !before.has(sessionKey(session)) ||
                   devices.some((device) => device.id === session.deviceId),
               )
-            : state.sessions,
+            : state.sessions.filter(
+                (session) =>
+                  session.hostId !== ready.hostId ||
+                  hostDeviceIds.has(session.deviceId) ||
+                  !listingIsClean(errors, session.platform),
+              ),
           hostStatuses: {
             ...state.hostStatuses,
             [ready.hostId]: {
