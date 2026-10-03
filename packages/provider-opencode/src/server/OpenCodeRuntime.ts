@@ -725,6 +725,7 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
             baseUrl: url,
             directory: input.directory,
             ...(serverPassword !== undefined ? { serverPassword } : {}),
+
           }),
         )
     );
