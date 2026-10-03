@@ -38,6 +38,8 @@ import {
 const decodeOpenCodeSettings = Schema.decodeSync(OpenCodeSettings);
 
 const DEFAULT_VERSION_STDOUT = "opencode 1.14.19\n";
+const TEST_OPENCODE_HOME = "/__t3code_open_code_provider_test_home__";
+const testEnvironment = { ...process.env, OPENCODE_HOME: TEST_OPENCODE_HOME };
 
 it.effect("reads Go limits with the instance's XDG credentials and preserves reset times", () =>
   Effect.gen(function* () {
@@ -299,6 +301,7 @@ const runtimeMock = {
     connectionError: null as Error | null,
     inventoryCwd: null as string | null,
     startCalls: 0,
+    dashboardHtml: null as string | null,
     closeCalls: 0,
     sdkClientInputs: [] as Array<{
       baseUrl: string;
@@ -320,6 +323,7 @@ const runtimeMock = {
     this.state.connectionError = null;
     this.state.inventoryCwd = null;
     this.state.startCalls = 0;
+    this.state.dashboardHtml = null;
     this.state.closeCalls = 0;
     this.state.sdkClientInputs.length = 0;
     this.state.inventory = {
@@ -426,6 +430,20 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntime.OpenCodeRuntime["Service"] = {
   loadSkillsFromCli: () => Effect.succeed([]),
 };
 
+const TestHttpClientLive = Layer.succeed(
+  HttpClient.HttpClient,
+  HttpClient.make((request) =>
+    Effect.succeed(
+      HttpClientResponse.fromWeb(
+        request,
+        runtimeMock.state.dashboardHtml === null
+          ? new Response("Not found", { status: 404 })
+          : new Response(runtimeMock.state.dashboardHtml),
+      ),
+    ),
+  ),
+);
+
 beforeEach(() => {
   runtimeMock.reset();
 });
@@ -448,6 +466,7 @@ it("keeps native and MCP commands while preserving compaction and separate skill
 
 const layerTest = Layer.succeed(OpenCodeRuntime.OpenCodeRuntime, OpenCodeRuntimeTestDouble).pipe(
   Layer.provideMerge(NodeServices.layer),
+  Layer.provideMerge(TestHttpClientLive),
 );
 
 const makeOpenCodeSettings = (overrides?: Partial<OpenCodeSettings>): OpenCodeSettings =>
@@ -460,10 +479,10 @@ const makeOpenCodeSettings = (overrides?: Partial<OpenCodeSettings>): OpenCodeSe
     ...overrides,
   });
 
-const checkProvider = Effect.fn("checkProvider")(function* (
+const checkStatus = Effect.fn("checkStatus")(function* (
   settings: OpenCodeSettings,
   cwd = process.cwd(),
-  environment?: NodeJS.ProcessEnv,
+  environment: NodeJS.ProcessEnv = testEnvironment,
   server = replayOpenCodeServer(OPENCODE_1_RESPONSES, settings.serverPassword),
   openCode2Models: Effect.Effect<
     ReadonlyArray<OpenCode2Model>,
@@ -476,7 +495,7 @@ const checkProvider = Effect.fn("checkProvider")(function* (
         binaryPath: settings.binaryPath,
         directory: cwd,
         ...(settings.serverPassword ? { serverPassword: settings.serverPassword } : {}),
-        ...(environment ? { environment } : {}),
+        environment,
       });
       const probe = probeOpenCodeRuntime(settings, environment).pipe(
         Effect.provideService(HttpClient.HttpClient, server),
@@ -493,7 +512,7 @@ it.layer(layerTest)("checkOpenCodeProviderStatus", (it) => {
   it.effect("shows a codex-style missing binary message", () =>
     Effect.gen(function* () {
       runtimeMock.state.runVersionError = new Error("spawn opencode ENOENT");
-      const snapshot = yield* checkProvider(makeOpenCodeSettings());
+      const snapshot = yield* checkStatus(makeOpenCodeSettings());
 
       NodeAssert.equal(snapshot.status, "error");
       NodeAssert.equal(snapshot.installed, false);
@@ -507,7 +526,7 @@ it.layer(layerTest)("checkOpenCodeProviderStatus", (it) => {
   it.effect("hides generic Effect.tryPromise text for local CLI probe failures", () =>
     Effect.gen(function* () {
       runtimeMock.state.runVersionError = new Error("An error occurred in Effect.tryPromise");
-      const snapshot = yield* checkProvider(makeOpenCodeSettings());
+      const snapshot = yield* checkStatus(makeOpenCodeSettings());
 
       NodeAssert.equal(snapshot.status, "error");
       NodeAssert.equal(snapshot.installed, true);
@@ -518,7 +537,7 @@ it.layer(layerTest)("checkOpenCodeProviderStatus", (it) => {
   it.effect("times out a hanging local CLI version probe", () =>
     Effect.gen(function* () {
       runtimeMock.state.runVersionPending = true;
-      const probeFiber = yield* checkProvider(makeOpenCodeSettings()).pipe(Effect.forkChild);
+      const probeFiber = yield* checkStatus(makeOpenCodeSettings()).pipe(Effect.forkChild);
 
       yield* Effect.yieldNow;
       yield* TestClock.adjust("10 seconds");
@@ -536,7 +555,7 @@ it.layer(layerTest)("checkOpenCodeProviderStatus", (it) => {
   it.effect("waits for a slow but healthy local CLI version probe", () =>
     Effect.gen(function* () {
       runtimeMock.state.runVersionDelay = "6 seconds";
-      const probeFiber = yield* checkProvider(makeOpenCodeSettings()).pipe(Effect.forkChild);
+      const probeFiber = yield* checkStatus(makeOpenCodeSettings()).pipe(Effect.forkChild);
 
       yield* Effect.yieldNow;
       yield* TestClock.adjust("6 seconds");
@@ -561,12 +580,20 @@ it.layer(layerTest)("checkOpenCodeProviderStatus", (it) => {
                 "gpt-5.4": {
                   id: "gpt-5.4",
                   name: "GPT-5.4",
+                  limit: { context: 1_050_000, output: 128_000 },
                   variants: {
                     none: {},
                     low: {},
                     medium: {},
                     high: {},
                     xhigh: {},
+                  },
+                  capabilities: {
+                    reasoning: true,
+                    toolcall: true,
+                    attachment: true,
+                    input: { text: true, image: true, pdf: true },
+                    output: { text: true },
                   },
                 },
               },
@@ -580,10 +607,16 @@ it.layer(layerTest)("checkOpenCodeProviderStatus", (it) => {
         ],
       };
 
-      const snapshot = yield* checkProvider(makeOpenCodeSettings());
+      const snapshot = yield* checkStatus(makeOpenCodeSettings());
       const model = snapshot.models.find((entry) => entry.slug === "openai/gpt-5.4");
 
       NodeAssert.ok(model);
+      NodeAssert.equal(model.contextWindowTokens, 1_050_000);
+      NodeAssert.deepEqual(model.capabilities?.inputModalities, ["text", "image", "pdf"]);
+      NodeAssert.deepEqual(model.capabilities?.outputModalities, ["text"]);
+      NodeAssert.equal(model.capabilities?.supportsReasoning, true);
+      NodeAssert.equal(model.capabilities?.supportsToolCalls, true);
+      NodeAssert.equal(model.capabilities?.supportsAttachments, true);
       const variantDescriptor = model.capabilities?.optionDescriptors?.find(
         (descriptor) => descriptor.id === "variant" && descriptor.type === "select",
       );
@@ -643,7 +676,7 @@ it.layer(layerTest)("checkOpenCodeProviderStatus", (it) => {
         ],
       };
 
-      const snapshot = yield* checkProvider(makeOpenCodeSettings());
+      const snapshot = yield* checkStatus(makeOpenCodeSettings());
 
       NodeAssert.deepEqual(
         snapshot.skills.map((skill) => ({
@@ -672,7 +705,7 @@ it.layer(layerTest)("checkOpenCodeProviderStatus", (it) => {
 
   it.effect("loads local inventory from a scoped OpenCode server", () =>
     Effect.gen(function* () {
-      yield* checkProvider(makeOpenCodeSettings({ serverPassword: "secret-password" }));
+      yield* checkStatus(makeOpenCodeSettings({ serverPassword: "secret-password" }));
 
       NodeAssert.deepEqual(runtimeMock.state.sdkClientInputs, [
         {
@@ -723,7 +756,7 @@ it.layer(layerTest)("checkOpenCodeProviderStatus", (it) => {
   it.effect("lists a local OpenCode 2 binary's models in Full access only, never via 1.x", () =>
     Effect.gen(function* () {
       runtimeMock.state.versionStdout = "opencode v2.0.18\n";
-      const snapshot = yield* checkProvider(
+      const snapshot = yield* checkStatus(
         makeOpenCodeSettings(),
         process.cwd(),
         undefined,
@@ -770,7 +803,7 @@ it.layer(layerTest)("checkOpenCodeProviderStatus", (it) => {
   it.effect("reports a failed OpenCode 2 model list without the server's response", () =>
     Effect.gen(function* () {
       runtimeMock.state.versionStdout = "opencode v2.0.18\n";
-      const snapshot = yield* checkProvider(
+      const snapshot = yield* checkStatus(
         makeOpenCodeSettings(),
         process.cwd(),
         undefined,
@@ -794,7 +827,7 @@ it.layer(layerTest)("checkOpenCodeProviderStatus", (it) => {
 
   it.effect("uses an environment-only password for local inventory", () =>
     Effect.gen(function* () {
-      yield* checkProvider(makeOpenCodeSettings(), process.cwd(), {
+      yield* checkStatus(makeOpenCodeSettings(), process.cwd(), {
         OPENCODE_SERVER_PASSWORD: "environment-password",
       });
 
@@ -810,7 +843,7 @@ it.layer(layerTest)("checkOpenCodeProviderStatus", (it) => {
 
   it.effect("uses the settings password when local environment auth differs", () =>
     Effect.gen(function* () {
-      yield* checkProvider(
+      yield* checkStatus(
         makeOpenCodeSettings({ serverPassword: "settings-password" }),
         process.cwd(),
         { OPENCODE_SERVER_PASSWORD: "environment-password" },
@@ -820,11 +853,37 @@ it.layer(layerTest)("checkOpenCodeProviderStatus", (it) => {
     }),
   );
 
+  it.effect("attaches OpenCode Go dashboard usage when credentials are configured", () =>
+    Effect.gen(function* () {
+      runtimeMock.state.dashboardHtml =
+        '{"rollingUsage":{"usagePercent":10,"resetInSec":60},"weeklyUsage":{"usagePercent":20,"resetInSec":120},"monthlyUsage":{"usagePercent":30,"resetInSec":180}}';
+
+      const snapshot = yield* checkStatus(
+        makeOpenCodeSettings({
+          goWorkspaceId: "wrk_test",
+          goAuthCookie: "cookie-value",
+        }),
+      );
+
+      NodeAssert.deepEqual(
+        snapshot.usageLimits?.windows.map(({ label, usedPercent }) => ({
+          label,
+          usedPercent,
+        })),
+        [
+          { label: "Session", usedPercent: 10 },
+          { label: "Weekly", usedPercent: 20 },
+          { label: "Monthly", usedPercent: 30 },
+        ],
+      );
+    }),
+  );
+
   it.effect("reports local model inventory failures without treating them as empty", () =>
     Effect.gen(function* () {
       runtimeMock.state.versionStdout = "opencode 1.14.20\n";
       runtimeMock.state.inventoryError = new Error("opencode models failed");
-      const snapshot = yield* checkProvider(makeOpenCodeSettings());
+      const snapshot = yield* checkStatus(makeOpenCodeSettings());
 
       NodeAssert.equal(snapshot.status, "error");
       NodeAssert.equal(snapshot.installed, true);
@@ -843,7 +902,7 @@ it.layer(layerTest)("checkOpenCodeProviderStatus with configured server URL", (i
   it.effect("does not send a local environment password to a configured server", () =>
     Effect.gen(function* () {
       runtimeMock.state.versionStdout = "opencode 1.14.20\n";
-      const snapshot = yield* checkProvider(
+      const snapshot = yield* checkStatus(
         makeOpenCodeSettings({ serverUrl: "http://127.0.0.1:9999" }),
         process.cwd(),
         { OPENCODE_SERVER_PASSWORD: "local-secret" },
@@ -866,7 +925,7 @@ it.layer(layerTest)("checkOpenCodeProviderStatus with configured server URL", (i
         serverUrl: "http://127.0.0.1:9999",
         serverPassword: "secret-password",
       });
-      const snapshot = yield* checkProvider(
+      const snapshot = yield* checkStatus(
         settings,
         process.cwd(),
         undefined,
@@ -888,7 +947,7 @@ it.layer(layerTest)("checkOpenCodeProviderStatus with configured server URL", (i
 
   it.effect("labels each model with the sub-provider that listed it", () =>
     Effect.gen(function* () {
-      const snapshot = yield* checkProvider(
+      const snapshot = yield* checkStatus(
         makeOpenCodeSettings({
           serverUrl: "http://127.0.0.1:9999",
           serverPassword: "secret-password",
@@ -925,7 +984,7 @@ it.layer(layerTest)("checkOpenCodeProviderStatus with configured server URL", (i
 
   it.effect("reports a rejected OpenCode 2 password as an auth error, not a version", () =>
     Effect.gen(function* () {
-      const snapshot = yield* checkProvider(
+      const snapshot = yield* checkStatus(
         makeOpenCodeSettings({ serverUrl: "http://127.0.0.1:9999", serverPassword: "wrong" }),
         process.cwd(),
         undefined,
@@ -945,7 +1004,7 @@ it.layer(layerTest)("checkOpenCodeProviderStatus with configured server URL", (i
       runtimeMock.state.connectionError = new Error(
         "OpenCode v1.14.18 is too old. Upgrade to v1.14.19 or newer.",
       );
-      const snapshot = yield* checkProvider(
+      const snapshot = yield* checkStatus(
         makeOpenCodeSettings({ serverUrl: "http://127.0.0.1:9999" }),
       );
 
@@ -958,8 +1017,8 @@ it.layer(layerTest)("checkOpenCodeProviderStatus with configured server URL", (i
 
   it.effect("surfaces a friendly auth error for configured servers", () =>
     Effect.gen(function* () {
-      runtimeMock.state.connectionError = new Error("401 Unauthorized");
-      const snapshot = yield* checkProvider(
+      runtimeMock.state.inventoryError = new Error("401 Unauthorized");
+      const snapshot = yield* checkStatus(
         makeOpenCodeSettings({
           serverUrl: "http://127.0.0.1:9999",
           serverPassword: "secret-password",
@@ -980,7 +1039,7 @@ it.layer(layerTest)("checkOpenCodeProviderStatus with configured server URL", (i
       runtimeMock.state.connectionError = new Error(
         "fetch failed: connect ECONNREFUSED 127.0.0.1:9999",
       );
-      const snapshot = yield* checkProvider(
+      const snapshot = yield* checkStatus(
         makeOpenCodeSettings({
           serverUrl: "http://127.0.0.1:9999",
           serverPassword: "secret-password",

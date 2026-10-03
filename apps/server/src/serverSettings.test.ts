@@ -1779,8 +1779,16 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           [instanceId]: {
             driver: ProviderDriverKind.make("codex"),
             environment: [
-              { name: "OPENROUTER_API_KEY", value: "sk-or-secret", sensitive: true },
-              { name: "ANTHROPIC_BASE_URL", value: "https://openrouter.ai/api", sensitive: false },
+              {
+                name: "OPENROUTER_API_KEY",
+                value: "sk-or-secret",
+                sensitive: true,
+              },
+              {
+                name: "ANTHROPIC_BASE_URL",
+                value: "https://openrouter.ai/api",
+                sensitive: false,
+              },
             ],
             config: {},
           },
@@ -1794,7 +1802,11 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           sensitive: true,
           valueRedacted: true,
         },
-        { name: "ANTHROPIC_BASE_URL", value: "https://openrouter.ai/api", sensitive: false },
+        {
+          name: "ANTHROPIC_BASE_URL",
+          value: "https://openrouter.ai/api",
+          sensitive: false,
+        },
       ]);
 
       const raw = yield* fileSystem.readFileString(serverConfig.settingsPath);
@@ -1806,7 +1818,11 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           sensitive: true,
           valueRedacted: true,
         },
-        { name: "ANTHROPIC_BASE_URL", value: "https://openrouter.ai/api", sensitive: false },
+        {
+          name: "ANTHROPIC_BASE_URL",
+          value: "https://openrouter.ai/api",
+          sensitive: false,
+        },
       ]);
 
       const roundTripped = yield* serverSettings.updateSettings({
@@ -1815,8 +1831,17 @@ it.layer(NodeServices.layer)("server settings", (it) => {
             driver: ProviderDriverKind.make("codex"),
             displayName: "Codex Personal",
             environment: [
-              { name: "OPENROUTER_API_KEY", value: "", sensitive: true, valueRedacted: true },
-              { name: "ANTHROPIC_BASE_URL", value: "https://openrouter.ai/api", sensitive: false },
+              {
+                name: "OPENROUTER_API_KEY",
+                value: "",
+                sensitive: true,
+                valueRedacted: true,
+              },
+              {
+                name: "ANTHROPIC_BASE_URL",
+                value: "https://openrouter.ai/api",
+                sensitive: false,
+              },
             ],
             config: {},
           },

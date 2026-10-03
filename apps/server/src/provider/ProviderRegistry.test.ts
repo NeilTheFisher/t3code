@@ -74,6 +74,7 @@ import type {
   ProviderInstance,
   ProviderWorkspaceSnapshot,
 } from "@t3tools/provider-core/server/driver";
+import { resolveRetainedClaudeUsage } from "./Drivers/ClaudeDriver.ts";
 import * as ProviderInstanceRegistry from "./ProviderInstanceRegistry.ts";
 import * as ProviderRegistry from "./ProviderRegistry.ts";
 import { ProviderDriverError } from "./Errors.ts";
@@ -245,6 +246,7 @@ function recordingMockSpawnerLayer(
   const commands: Array<{
     readonly args: ReadonlyArray<string>;
     readonly env: NodeJS.ProcessEnv | undefined;
+    readonly cwd: string | undefined;
   }> = [];
   const layer = Layer.succeed(
     ChildProcessSpawner.ChildProcessSpawner,
@@ -253,9 +255,10 @@ function recordingMockSpawnerLayer(
         args: ReadonlyArray<string>;
         options?: {
           readonly env?: NodeJS.ProcessEnv;
+          readonly cwd?: string;
         };
       };
-      commands.push({ args: cmd.args, env: cmd.options?.env });
+      commands.push({ args: cmd.args, env: cmd.options?.env, cwd: cmd.options?.cwd });
       return Effect.succeed(mockHandle(handler(cmd.args)));
     }),
   );
@@ -481,6 +484,41 @@ it.layer(
             name: "feedback",
             description: "Send this thread and Codex logs to OpenAI",
             input: { hint: "Describe the issue (optional)" },
+          },
+        ]);
+      }),
+    );
+
+    it.effect("includes Codex subscription usage from the app-server snapshot", () =>
+      Effect.gen(function* () {
+        const status = yield* checkCodexProviderStatus(defaultCodexSettings, () =>
+          Effect.succeed(
+            makeCodexProbeSnapshot({
+              rateLimits: {
+                snapshot: {
+                  primary: { usedPercent: 20, windowDurationMins: 300 },
+                  secondary: { usedPercent: 40, windowDurationMins: 10_080 },
+                },
+                resetCredits: null,
+              },
+            }),
+          ),
+        );
+
+        assert.deepStrictEqual(status.usageLimits?.windows, [
+          {
+            id: "primary",
+            kind: "session",
+            label: "Session",
+            usedPercent: 20,
+            windowDurationMins: 300,
+          },
+          {
+            id: "secondary",
+            kind: "weekly",
+            label: "Weekly",
+            usedPercent: 40,
+            windowDurationMins: 10_080,
           },
         ]);
       }),
@@ -3548,8 +3586,11 @@ it.layer(
 
     it.effect("re-probes when settings change the codex binaryPath", () =>
       Effect.gen(function* () {
-        const firstMissing = `t3code_codex_first_`;
-        const secondMissing = `t3code_codex_second_`;
+        // Use explicit nonexistent paths so this regression test does not
+        // depend on the host PATH size or filesystem latency while the
+        // maintenance resolver searches for a deliberately missing command.
+        const firstMissing = `/t3code-tests/missing/codex-first`;
+        const secondMissing = `/t3code-tests/missing/codex-second`;
         const spawnedCommands: Array<string> = [];
         const secondProbeStarted = yield* Deferred.make<void>();
         const releaseSecondProbe = yield* Deferred.make<void>();
@@ -4648,6 +4689,38 @@ it.layer(
                 code: 0,
               };
             throw new Error(`Unexpected args: ${joined}`);
+          }),
+        ),
+      ),
+    );
+
+    it.effect("skips Claude subscription usage for API key auth", () =>
+      Effect.gen(function* () {
+        let usageProbeCalls = 0;
+        const status = yield* checkClaudeProviderStatus(
+          defaultClaudeSettings,
+          claudeCapabilities({ tokenSource: "ANTHROPIC_AUTH_TOKEN" }),
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          () => {
+            usageProbeCalls += 1;
+            return Effect.void.pipe(Effect.as(undefined as ServerProvider["usageLimits"]));
+          },
+        );
+
+        assert.strictEqual(status.auth.type, "apiKey");
+        assert.strictEqual(status.usageLimits, undefined);
+        assert.strictEqual(usageProbeCalls, 0);
+      }).pipe(
+        Effect.provide(
+          layerMockSpawner((args) => {
+            if (args.join(" ") === "--version") {
+              return { stdout: "2.1.218\n", stderr: "", code: 0 };
+            }
+            throw new Error(`Unexpected args: ${args.join(" ")}`);
           }),
         ),
       ),
