@@ -157,6 +157,130 @@ it.effect("reports an incompatible Windows readiness API instead of hanging", ()
   }).pipe(Effect.provide(layerTest)),
 );
 
+it.effect.each(["win32", "linux", "darwin"] as const)(
+  "terminates through node-pty using %s semantics",
+  (platform) =>
+    Effect.gen(function* () {
+      const adapter = yield* PtyAdapter.PtyAdapter;
+      const process = yield* adapter.spawn({
+        shell: "test-shell",
+        cwd: ".",
+        cols: 80,
+        rows: 24,
+        env: {},
+      });
+      const nativeProcess = spawn.mock.results.at(-1)!.value;
+      nativeProcess.kill.mockImplementation((signal?: string) => {
+        if (platform === "win32" && signal) {
+          throw new Error("Signals not supported on windows.");
+        }
+      });
+
+      process.kill("SIGTERM");
+      process.kill("SIGKILL");
+      process.kill();
+
+      assert.deepEqual(
+        nativeProcess.kill.mock.calls,
+        platform === "win32"
+          ? [[undefined], [undefined], [undefined]]
+          : [["SIGTERM"], ["SIGKILL"], [undefined]],
+      );
+    }).pipe(Effect.provide(layerTestFor(platform))),
+);
+
+it.effect("spawns through the public adapter with the provided host references", () =>
+  Effect.gen(function* () {
+    spawn.mockClear();
+    const adapter = yield* PtyAdapter.PtyAdapter;
+    const process = yield* adapter.spawn({
+      shell: "powershell.exe",
+      args: ["-NoLogo"],
+      cwd: "C:\\workspace",
+      cols: 120,
+      rows: 40,
+      env: {},
+    });
+
+    assert.equal(process.pid, 42);
+    assert.equal(spawn.mock.calls.length, 1);
+    assert.deepEqual(spawn.mock.calls[0], [
+      "powershell.exe",
+      ["-NoLogo"],
+      {
+        cwd: "C:\\workspace",
+        cols: 120,
+        rows: 40,
+        env: { TERM: "xterm-256color" },
+        name: "xterm-256color",
+      },
+    ]);
+  }).pipe(Effect.provide(layerTest)),
+);
+
+it.effect("preserves a caller-provided TERM in the spawn env on win32", () =>
+  Effect.gen(function* () {
+    spawn.mockClear();
+    const adapter = yield* PtyAdapter.PtyAdapter;
+    yield* adapter.spawn({
+      shell: "powershell.exe",
+      cwd: "C:\\workspace",
+      cols: 80,
+      rows: 24,
+      env: { TERM: "xterm-direct" },
+    });
+
+    assert.equal(spawn.mock.calls.length, 1);
+    assert.deepEqual(spawn.mock.calls[0], [
+      "powershell.exe",
+      [],
+      {
+        cwd: "C:\\workspace",
+        cols: 80,
+        rows: 24,
+        env: { TERM: "xterm-direct" },
+        name: "xterm-256color",
+      },
+    ]);
+  }).pipe(Effect.provide(layerTest)),
+);
+
+it.effect("falls back to an unavailable adapter when the native module cannot load", () =>
+  Effect.gen(function* () {
+    const cause = new Error("native binding could not be loaded");
+    const adapter = yield* NodePtyAdapter.make().pipe(
+      Effect.provideService(NodePtyAdapter.NodePtyModuleLoaderRef, () => Promise.reject(cause)),
+    );
+    const exit = yield* adapter
+      .spawn({
+        shell: "powershell.exe",
+        args: [],
+        cwd: "C:\\workspace",
+        cols: 120,
+        rows: 40,
+        env: {},
+      })
+      .pipe(Effect.exit);
+
+    assert.isTrue(Exit.isFailure(exit));
+    if (Exit.isFailure(exit)) {
+      assert.deepInclude(Cause.squash(exit.cause), {
+        _tag: "PtySpawnError",
+        adapter: "node-pty",
+        shell: "(unavailable)",
+      });
+    }
+  }).pipe(
+    Effect.provide(
+      Layer.mergeAll(
+        NodeServices.layer,
+        Layer.succeed(HostProcess.Platform, "win32"),
+        Layer.succeed(HostProcess.Architecture, "x64"),
+      ),
+    ),
+  ),
+);
+
 it.effect.each([2048, 8])(
   "preserves an exit during readiness handoff with scheduler budget %s",
   (budget) =>

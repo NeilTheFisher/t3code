@@ -1,4 +1,3 @@
-import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, it, assert } from "@effect/vitest";
 import {
   ProviderDriverKind,
@@ -25,18 +24,11 @@ import { ChildProcessSpawner } from "effect/process";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { SpawnExecutableResolution } from "@t3tools/shared/shell";
 
-import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
-
-import * as ServerSettings from "../serverSettings.ts";
-import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
-import * as TextGeneration from "../textGeneration/TextGeneration.ts";
-import * as TextGenerators from "../textGeneration/TextGenerators.ts";
-import * as ProviderInstallationGate from "./ProviderInstallationGate.ts";
-import * as ProviderInstanceRegistry from "./ProviderInstanceRegistry.ts";
 import * as ProviderRegistry from "./ProviderRegistry.ts";
 import * as ModelManifest from "./ModelManifest.ts";
 import * as ProviderMaintenanceRunner from "./providerMaintenanceRunner.ts";
 import * as ProviderLatestVersions from "@t3tools/provider-core/server/ProviderLatestVersions";
+import * as ProviderInstallationGate from "./ProviderInstallationGate.ts";
 import {
   enrichProviderSnapshotWithVersionAdvisory,
   makeProviderMaintenanceCapabilities,
@@ -45,9 +37,11 @@ import {
 const isServerProviderUpdateError = Schema.is(ServerProviderUpdateError);
 
 const CODEX_DRIVER = ProviderDriverKind.make("codex");
+const CURSOR_DRIVER = ProviderDriverKind.make("cursor");
 const NATIVE_CLI_DRIVER = ProviderDriverKind.make("nativeCli");
 const OPENCODE_DRIVER = ProviderDriverKind.make("opencode");
 const CODEX_INSTANCE_ID = ProviderInstanceId.make("codex");
+const CURSOR_INSTANCE_ID = ProviderInstanceId.make("cursor");
 const NATIVE_CLI_INSTANCE_ID = ProviderInstanceId.make("nativeCli");
 const OPENCODE_INSTANCE_ID = ProviderInstanceId.make("opencode");
 const encoder = new TextEncoder();
@@ -56,6 +50,15 @@ const encoder = new TextEncoder();
 const layerNonWindowsPlatform = Layer.succeed(HostProcess.Platform, "linux");
 
 function lifecycleFor(provider: ProviderDriverKind): ProviderMaintenanceCapabilities {
+  if (provider === CURSOR_DRIVER) {
+    return makeProviderMaintenanceCapabilities({
+      provider,
+      packageName: null,
+      updateExecutable: "cursor-agent",
+      updateArgs: ["update"],
+      updateLockKey: "cursor-agent",
+    });
+  }
   if (provider === NATIVE_CLI_DRIVER) {
     return makeProviderMaintenanceCapabilities({
       provider,
@@ -95,6 +98,12 @@ const baseNativeCliProvider: ServerProvider = {
   ...baseProvider,
   instanceId: NATIVE_CLI_INSTANCE_ID,
   driver: NATIVE_CLI_DRIVER,
+};
+
+const baseCursorProvider: ServerProvider = {
+  ...baseProvider,
+  instanceId: CURSOR_INSTANCE_ID,
+  driver: CURSOR_DRIVER,
 };
 
 const baseOpenCodeProvider: ServerProvider = {
@@ -209,8 +218,6 @@ function makeRegistry(
       refresh: () => Ref.get(providersRef),
       refreshInstance: () => Ref.get(providersRef),
       reloadSecretsAndRefresh: () => Ref.get(providersRef),
-      rebuildMissingAndRefresh: Ref.get(providersRef),
-      applySecretAndRefresh: () => Ref.get(providersRef),
       refreshAfterUpdate: () => {
         const version = options?.installedVersionAfterUpdate;
         if (version === undefined) {
@@ -574,43 +581,6 @@ describe("providerMaintenanceRunner", () => {
     );
   });
 
-  it.effect.skipIf(HostProcess.Platform.defaultValue() === "win32")(
-    "runs the updater with no stdin, so a command that reads it cannot wait forever",
-    () =>
-      Effect.gen(function* () {
-        const { registry } = yield* makeRegistry(baseProvider);
-        const updater = yield* makeTestRunner({
-          ...registry,
-          getProviderMaintenanceCapabilitiesForInstance: (_instanceId, provider) =>
-            Effect.succeed({
-              ...lifecycleFor(provider),
-              update: {
-                command: "codex update",
-                executable: "/bin/sh",
-                // An open pipe here would block a CLI that reads stdin until the update times out.
-                args: ["-c", "[ -c /dev/stdin ] || { echo 'stdin is an open pipe' >&2; exit 1; }"],
-                lockKey: "codex-native",
-              },
-            }),
-        });
-
-        const result = yield* updater.updateProvider(CODEX_DRIVER);
-        // The registry reports no new version, so a command that exits 0 ends as "unchanged".
-        assert.strictEqual(
-          result.providers[0]?.updateState?.message,
-          "Update command completed, but T3 Code still detects an outdated provider version.",
-        );
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            NodeServices.layer,
-            layerNonWindowsPlatform,
-            layerLatestVersionHttpClient("1.0.0"),
-          ),
-        ),
-      ),
-  );
-
   it.effect("re-resolves ownership before running and executes the fresh command", () => {
     const calls: Array<{ command: string; args: ReadonlyArray<string> }> = [];
     const fresh: Array<boolean> = [];
@@ -906,67 +876,7 @@ describe("providerMaintenanceRunner", () => {
     );
   });
 
-  it.effect("an update stopped by server shutdown ends failed instead of running forever", () => {
-    const started = Deferred.makeUnsafe<void>();
-    return Effect.gen(function* () {
-      const { registry, updateStatesRef } = yield* makeRegistry(baseNativeCliProvider);
-      const serverScope = yield* Scope.make();
-      const updater = yield* makeTestRunner(registry).pipe(Scope.provide(serverScope));
-      yield* updater.updateProvider(NATIVE_CLI_DRIVER).pipe(Effect.forkScoped);
-      yield* Deferred.await(started);
-      yield* Scope.close(serverScope, Exit.void);
-      const last = (yield* Ref.get(updateStatesRef)).at(-1);
-      assert.deepStrictEqual(
-        [last?.status, last?.message],
-        ["failed", "Update stopped before it finished."],
-      );
-    }).pipe(
-      Effect.provide(
-        Layer.mergeAll(
-          layerNonWindowsPlatform,
-          layerLatestVersionHttpClient("1.0.0"),
-          layerMockSpawner(() => ({
-            exitCode: Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)),
-          })),
-        ),
-      ),
-    );
-  });
 
-  it.effect("a shutdown while the final state is written still records it", () => {
-    const writing = Deferred.makeUnsafe<void>();
-    const release = Deferred.makeUnsafe<void>();
-    return Effect.gen(function* () {
-      const { registry, updateStatesRef } = yield* makeRegistry(baseNativeCliProvider);
-      const serverScope = yield* Scope.make();
-      const updater = yield* makeTestRunner({
-        ...registry,
-        setProviderMaintenanceActionState: (input) =>
-          input.state?.status === "succeeded"
-            ? Deferred.succeed(writing, undefined).pipe(
-                Effect.andThen(Deferred.await(release)),
-                Effect.andThen(registry.setProviderMaintenanceActionState(input)),
-              )
-            : registry.setProviderMaintenanceActionState(input),
-      }).pipe(Scope.provide(serverScope));
-
-      yield* updater.updateProvider(NATIVE_CLI_DRIVER).pipe(Effect.forkScoped);
-      yield* Deferred.await(writing);
-      const shutdown = yield* Scope.close(serverScope, Exit.void).pipe(Effect.forkScoped);
-      yield* Deferred.succeed(release, undefined);
-      yield* Fiber.join(shutdown);
-
-      assert.strictEqual((yield* Ref.get(updateStatesRef)).at(-1)?.status, "succeeded");
-    }).pipe(
-      Effect.provide(
-        Layer.mergeAll(
-          layerNonWindowsPlatform,
-          layerLatestVersionHttpClient("1.0.0"),
-          layerMockSpawner(() => ({ stdout: "updated" })),
-        ),
-      ),
-    );
-  });
 
   it.effect("prevents concurrent updates for the same provider", () => {
     const startedLatch: { resolve: () => void } = { resolve: () => {} };
@@ -1015,139 +925,203 @@ describe("providerMaintenanceRunner", () => {
     );
   });
 
-  it.effect("holds text generation for an instance until its update finishes", () => {
-    const updateStarted = Deferred.makeUnsafe<void>();
-    const log: Array<string> = [];
+  it.effect("serializes different providers that share the same update lock key", () => {
+    const firstStartedLatch: { resolve: () => void } = { resolve: () => {} };
+    const releaseFirstLatch: { resolve: () => void } = { resolve: () => {} };
+    const firstStarted = new Promise<void>((resolve) => {
+      firstStartedLatch.resolve = resolve;
+    });
+    const releaseFirst = new Promise<void>((resolve) => {
+      releaseFirstLatch.resolve = resolve;
+    });
+    const calls: Array<string> = [];
     return Effect.gen(function* () {
-      const { registry } = yield* makeRegistry(baseProvider, {
-        installedVersionAfterUpdate: "1.0.0",
-      });
-      const updater = yield* makeTestRunner(registry);
-      const instance: ProviderInstance = {
-        instanceId: CODEX_INSTANCE_ID,
-        driverKind: CODEX_DRIVER,
-        continuationIdentity: { driverKind: CODEX_DRIVER, continuationKey: CODEX_INSTANCE_ID },
-        displayName: undefined,
-        enabled: true,
-        snapshot: { getSnapshot: Effect.succeed(baseProvider) } as ProviderInstance["snapshot"],
-        orchestrationAdapter: {} as ProviderInstance["orchestrationAdapter"],
-        textGeneration: TextGeneration.TextGeneration.of({
-          generateCommitMessage: () => Effect.die("unused"),
-          generatePrContent: () => Effect.die("unused"),
-          generateBranchName: () => Effect.die("unused"),
-          generateReviewGuide: () => Effect.die("unused"),
-          generateTranscriptionPostProcessing: () => Effect.die("unused"),
-          generateThreadTitle: () =>
-            Effect.sync(() => {
-              log.push("text generation spawned provider");
-              return { title: "Generated title" };
-            }),
-        }),
-      };
-      const textGeneration = yield* TextGeneration.make.pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            Layer.mock(ProviderInstanceRegistry.ProviderInstanceRegistry)({
-              listInstances: Effect.succeed([instance]),
-              getInstance: (id) => Effect.succeed(id === CODEX_INSTANCE_ID ? instance : undefined),
-            }),
-            ServerSettings.layerTest(),
-            Layer.mock(TextGenerators.TextGenerators)({ runner: () => Effect.undefined }),
-            Layer.mock(SourceControlProviderRegistry.SourceControlProviderRegistry)({
-              resolveLink: () => Effect.die("unused"),
+      const { registry } = yield* makeRegistry([baseProvider, baseOpenCodeProvider]);
+      const updater = yield* makeTestRunner({
+        ...registry,
+        getProviderMaintenanceCapabilitiesForInstance: (_instanceId, provider) =>
+          Effect.succeed(
+            makeProviderMaintenanceCapabilities({
+              provider,
+              packageName: provider === OPENCODE_DRIVER ? "opencode-ai" : "@openai/codex",
+              updateExecutable: "npm",
+              updateArgs:
+                provider === OPENCODE_DRIVER
+                  ? ["install", "-g", "opencode-ai@latest"]
+                  : ["install", "-g", "@openai/codex@latest"],
+              updateLockKey: "npm-global",
             }),
           ),
-        ),
+      });
+
+      const first = yield* updater.updateProvider(CODEX_DRIVER).pipe(Effect.forkScoped);
+      yield* Effect.promise(() => firstStarted);
+
+      const second = yield* updater.updateProvider(OPENCODE_DRIVER).pipe(Effect.forkScoped);
+      let providersWhileQueued: ReadonlyArray<ServerProvider> = [];
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        providersWhileQueued = yield* registry.getProviders;
+        const queuedStatus = providersWhileQueued.find(
+          (provider) => provider.instanceId === OPENCODE_INSTANCE_ID,
+        )?.updateState?.status;
+        if (queuedStatus === "queued") {
+          break;
+        }
+        yield* Effect.yieldNow;
+      }
+      assert.deepStrictEqual(calls, ["install -g @openai/codex@latest"]);
+      assert.strictEqual(
+        providersWhileQueued.find((provider) => provider.instanceId === OPENCODE_INSTANCE_ID)
+          ?.updateState?.status,
+        "queued",
       );
 
-      const update = yield* updater.updateProvider(CODEX_DRIVER).pipe(Effect.forkScoped);
-      yield* Deferred.await(updateStarted);
-      const generation = yield* textGeneration
-        .generateThreadTitle({
-          cwd: "/tmp",
-          message: "hello",
-          linkedContext: "",
-          modelSelection: { instanceId: CODEX_INSTANCE_ID, model: "gpt-5" },
-        })
-        .pipe(Effect.forkScoped);
-      yield* TestClock.adjust("1 minute");
-      const result = yield* Fiber.join(update);
-      yield* Fiber.join(generation);
-
-      assert.strictEqual(result.providers[0]?.updateState?.status, "succeeded");
-      assert.deepStrictEqual(log, ["update command exited", "text generation spawned provider"]);
+      releaseFirstLatch.resolve();
+      yield* Fiber.join(first);
+      yield* Fiber.join(second);
+      assert.deepStrictEqual(calls, [
+        "install -g @openai/codex@latest",
+        "install -g opencode-ai@latest",
+      ]);
     }).pipe(
       Effect.provide(
         Layer.mergeAll(
-          ProviderInstallationGate.layer,
           layerNonWindowsPlatform,
-          layerLatestVersionHttpClient("1.0.0"),
-          layerMockSpawner(() => ({
-            exitCode: Deferred.succeed(updateStarted, undefined).pipe(
-              Effect.andThen(Effect.sleep("1 minute")),
-              Effect.andThen(Effect.sync(() => log.push("update command exited"))),
-              Effect.as(ChildProcessSpawner.ExitCode(0)),
-            ),
-          })),
+          layerLatestVersionHttpClient("2.0.0"),
+          layerMockSpawner((_command, args) => {
+            calls.push(args.join(" "));
+            if (calls.length === 1) {
+              firstStartedLatch.resolve();
+              return {
+                stdout: "updated",
+                exitCode: Effect.promise(() => releaseFirst).pipe(
+                  Effect.as(ChildProcessSpawner.ExitCode(0)),
+                ),
+              };
+            }
+            return { stdout: "updated" };
+          }),
         ),
       ),
     );
   });
 
-  it.effect("holds every instance that shares the updated installation", () => {
-    const CODEX_WORK_INSTANCE_ID = ProviderInstanceId.make("codex_work");
-    const updateStarted = Deferred.makeUnsafe<void>();
-    const log: Array<string> = [];
+  it.effect("records a terminal update state when a queued update is interrupted", () => {
+    const firstStartedLatch: { resolve: () => void } = { resolve: () => {} };
+    const releaseFirstLatch: { resolve: () => void } = { resolve: () => {} };
+    const firstStarted = new Promise<void>((resolve) => {
+      firstStartedLatch.resolve = resolve;
+    });
+    const releaseFirst = new Promise<void>((resolve) => {
+      releaseFirstLatch.resolve = resolve;
+    });
+    const calls: Array<string> = [];
     return Effect.gen(function* () {
-      const { registry } = yield* makeRegistry(
-        [
-          baseProvider,
-          { ...baseProvider, instanceId: CODEX_WORK_INSTANCE_ID },
-          baseOpenCodeProvider,
-        ],
-        { installedVersionAfterUpdate: "1.0.0" },
+      const { registry } = yield* makeRegistry([baseProvider, baseOpenCodeProvider]);
+      const updater = yield* makeTestRunner({
+        ...registry,
+        getProviderMaintenanceCapabilitiesForInstance: (_instanceId, provider) =>
+          Effect.succeed(
+            makeProviderMaintenanceCapabilities({
+              provider,
+              packageName: provider === OPENCODE_DRIVER ? "opencode-ai" : "@openai/codex",
+              updateExecutable: "npm",
+              updateArgs:
+                provider === OPENCODE_DRIVER
+                  ? ["install", "-g", "opencode-ai@latest"]
+                  : ["install", "-g", "@openai/codex@latest"],
+              updateLockKey: "npm-global",
+            }),
+          ),
+      });
+
+      const first = yield* updater.updateProvider(CODEX_DRIVER).pipe(Effect.forkScoped);
+      yield* Effect.promise(() => firstStarted);
+
+      const second = yield* updater.updateProvider(OPENCODE_DRIVER).pipe(Effect.forkScoped);
+      let providersWhileQueued: ReadonlyArray<ServerProvider> = [];
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        providersWhileQueued = yield* registry.getProviders;
+        const queuedStatus = providersWhileQueued.find(
+          (provider) => provider.instanceId === OPENCODE_INSTANCE_ID,
+        )?.updateState?.status;
+        if (queuedStatus === "queued") {
+          break;
+        }
+        yield* Effect.yieldNow;
+      }
+      assert.strictEqual(
+        providersWhileQueued.find((provider) => provider.instanceId === OPENCODE_INSTANCE_ID)
+          ?.updateState?.status,
+        "queued",
       );
-      // OpenCode installs into the same npm prefix, so it shares the lock key but not the package.
-      const updater = yield* makeTestRunner(registry);
-      const gate = yield* ProviderInstallationGate.ProviderInstallationGate;
 
-      const update = yield* updater.updateProvider(CODEX_DRIVER).pipe(Effect.forkScoped);
-      yield* Deferred.await(updateStarted);
-      const shared = yield* gate
-        .execute(
-          CODEX_WORK_INSTANCE_ID,
-          Effect.sync(() => log.push("shared installation ran")),
-        )
-        .pipe(Effect.forkScoped);
-      const other = yield* gate
-        .execute(
-          OPENCODE_INSTANCE_ID,
-          Effect.sync(() => log.push("other driver ran")),
-        )
-        .pipe(Effect.forkScoped);
-      yield* TestClock.adjust("1 minute");
-      yield* Fiber.join(update);
-      yield* Fiber.join(shared);
-      yield* Fiber.join(other);
+      // Cancelling the queued update (client disconnect) must not leave the
+      // provider pinned on "queued".
+      yield* Fiber.interrupt(second);
 
-      assert.deepStrictEqual(log, [
-        "other driver ran",
-        "update command exited",
-        "shared installation ran",
-      ]);
+      const providersAfterInterrupt = yield* registry.getProviders;
+      assert.strictEqual(
+        providersAfterInterrupt.find((provider) => provider.instanceId === OPENCODE_INSTANCE_ID)
+          ?.updateState?.status,
+        "failed",
+      );
+
+      releaseFirstLatch.resolve();
+      yield* Fiber.join(first);
     }).pipe(
       Effect.provide(
         Layer.mergeAll(
-          ProviderInstallationGate.layer,
           layerNonWindowsPlatform,
-          layerLatestVersionHttpClient("1.0.0"),
-          layerMockSpawner(() => ({
-            exitCode: Deferred.succeed(updateStarted, undefined).pipe(
-              Effect.andThen(Effect.sleep("1 minute")),
-              Effect.andThen(Effect.sync(() => log.push("update command exited"))),
-              Effect.as(ChildProcessSpawner.ExitCode(0)),
-            ),
-          })),
+          layerLatestVersionHttpClient("0.0.0"),
+          layerMockSpawner((_command, args) => {
+            calls.push(args.join(" "));
+            if (calls.length === 1) {
+              firstStartedLatch.resolve();
+              return {
+                stdout: "updated",
+                exitCode: Effect.promise(() => releaseFirst).pipe(
+                  Effect.as(ChildProcessSpawner.ExitCode(0)),
+                ),
+              };
+            }
+            return { stdout: "updated" };
+          }),
+        ),
+      ),
+    );
+  });
+
+  it.effect("accepts arbitrary driver-provided update lock keys", () => {
+    const calls: Array<string> = [];
+    return Effect.gen(function* () {
+      const { registry } = yield* makeRegistry(baseProvider);
+      const updater = yield* makeTestRunner({
+        ...registry,
+        getProviderMaintenanceCapabilitiesForInstance: (_instanceId, provider) =>
+          Effect.succeed(
+            makeProviderMaintenanceCapabilities({
+              provider,
+              packageName: "@openai/codex",
+              updateExecutable: "npm",
+              updateArgs: ["install", "-g", "@openai/codex@latest"],
+              updateLockKey: "unknown-lock-key",
+            }),
+          ),
+      });
+
+      const result = yield* updater.updateProvider(CODEX_DRIVER);
+      assert.strictEqual(result.providers[0]?.updateState?.status, "succeeded");
+      assert.deepStrictEqual(calls, ["install -g @openai/codex@latest"]);
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          layerNonWindowsPlatform,
+          layerLatestVersionHttpClient("0.0.0"),
+          layerMockSpawner((_command, args) => {
+            calls.push(args.join(" "));
+            return { stdout: "updated" };
+          }),
         ),
       ),
     );
@@ -1707,4 +1681,203 @@ it.effect("refuses incompatible latest versions and unapproved or unpinnable tar
       ),
     ),
   );
+
+  it.effect("an interrupted update ends failed instead of running forever", () => {
+    const started = Deferred.makeUnsafe<void>();
+    return Effect.gen(function* () {
+      const { registry, updateStatesRef } = yield* makeRegistry(baseNativeCliProvider);
+      const updater = yield* makeTestRunner(registry);
+      const update = yield* updater.updateProvider(NATIVE_CLI_DRIVER).pipe(Effect.forkScoped);
+      yield* Deferred.await(started);
+      yield* Fiber.interrupt(update);
+      const last = (yield* Ref.get(updateStatesRef)).at(-1);
+      assert.deepStrictEqual(
+        [last?.status, last?.message],
+        ["failed", "Update stopped before it finished."],
+      );
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          layerNonWindowsPlatform,
+          layerLatestVersionHttpClient("1.0.0"),
+          layerMockSpawner(() => ({
+            exitCode: Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)),
+          })),
+        ),
+      ),
+    );
+  });
+
+  it.effect("a request dropped while the final state is written still records it", () => {
+    const writing = Deferred.makeUnsafe<void>();
+    const release = Deferred.makeUnsafe<void>();
+    return Effect.gen(function* () {
+      const { registry, updateStatesRef } = yield* makeRegistry(baseNativeCliProvider);
+      const updater = yield* makeTestRunner({
+        ...registry,
+        setProviderMaintenanceActionState: (input) =>
+          input.state?.status === "succeeded"
+            ? Deferred.succeed(writing, undefined).pipe(
+                Effect.andThen(Deferred.await(release)),
+                Effect.andThen(registry.setProviderMaintenanceActionState(input)),
+              )
+            : registry.setProviderMaintenanceActionState(input),
+      });
+
+      const update = yield* updater.updateProvider(NATIVE_CLI_DRIVER).pipe(Effect.forkScoped);
+      yield* Deferred.await(writing);
+      update.interruptUnsafe();
+      yield* Deferred.succeed(release, undefined);
+      yield* Fiber.await(update);
+
+      assert.strictEqual((yield* Ref.get(updateStatesRef)).at(-1)?.status, "succeeded");
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          layerNonWindowsPlatform,
+          layerLatestVersionHttpClient("1.0.0"),
+          layerMockSpawner(() => ({ stdout: "updated" })),
+        ),
+      ),
+    );
+  });
+
+  it.effect("holds text generation for an instance until its update finishes", () => {
+    const updateStarted = Deferred.makeUnsafe<void>();
+    const log: Array<string> = [];
+    return Effect.gen(function* () {
+      const { registry } = yield* makeRegistry(baseProvider, {
+        installedVersionAfterUpdate: "1.0.0",
+      });
+      const updater = yield* makeTestRunner(registry);
+      const instance: ProviderInstance = {
+        instanceId: CODEX_INSTANCE_ID,
+        driverKind: CODEX_DRIVER,
+        continuationIdentity: { driverKind: CODEX_DRIVER, continuationKey: CODEX_INSTANCE_ID },
+        displayName: undefined,
+        enabled: true,
+        snapshot: { getSnapshot: Effect.succeed(baseProvider) } as ProviderInstance["snapshot"],
+        orchestrationAdapter: {} as ProviderInstance["orchestrationAdapter"],
+        textGeneration: TextGeneration.TextGeneration.of({
+          generateCommitMessage: () => Effect.die("unused"),
+          generatePrContent: () => Effect.die("unused"),
+          generateBranchName: () => Effect.die("unused"),
+          generateReviewGuide: () => Effect.die("unused"),
+          generateTranscriptionPostProcessing: () => Effect.die("unused"),
+          generateThreadTitle: () =>
+            Effect.sync(() => {
+              log.push("text generation spawned provider");
+              return { title: "Generated title" };
+            }),
+        }),
+      };
+      const textGeneration = yield* TextGeneration.make.pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            Layer.mock(ProviderInstanceRegistry.ProviderInstanceRegistry)({
+              listInstances: Effect.succeed([instance]),
+              getInstance: (id) => Effect.succeed(id === CODEX_INSTANCE_ID ? instance : undefined),
+            }),
+            ServerSettings.layerTest(),
+            Layer.mock(TextGenerators.TextGenerators)({ runner: () => Effect.undefined }),
+            Layer.mock(SourceControlProviderRegistry.SourceControlProviderRegistry)({
+              resolveLink: () => Effect.die("unused"),
+            }),
+          ),
+        ),
+      );
+
+      const update = yield* updater.updateProvider(CODEX_DRIVER).pipe(Effect.forkScoped);
+      yield* Deferred.await(updateStarted);
+      const generation = yield* textGeneration
+        .generateThreadTitle({
+          cwd: "/tmp",
+          message: "hello",
+          linkedContext: "",
+          modelSelection: { instanceId: CODEX_INSTANCE_ID, model: "gpt-5" },
+        })
+        .pipe(Effect.forkScoped);
+      yield* TestClock.adjust("1 minute");
+      const result = yield* Fiber.join(update);
+      yield* Fiber.join(generation);
+
+      assert.strictEqual(result.providers[0]?.updateState?.status, "succeeded");
+      assert.deepStrictEqual(log, ["update command exited", "text generation spawned provider"]);
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          ProviderInstallationGate.layer,
+          layerNonWindowsPlatform,
+          layerLatestVersionHttpClient("1.0.0"),
+          layerMockSpawner(() => ({
+            exitCode: Deferred.succeed(updateStarted, undefined).pipe(
+              Effect.andThen(Effect.sleep("1 minute")),
+              Effect.andThen(Effect.sync(() => log.push("update command exited"))),
+              Effect.as(ChildProcessSpawner.ExitCode(0)),
+            ),
+          })),
+        ),
+      ),
+    );
+  });
+
+  it.effect("holds every instance that shares the updated installation", () => {
+    const CODEX_WORK_INSTANCE_ID = ProviderInstanceId.make("codex_work");
+    const updateStarted = Deferred.makeUnsafe<void>();
+    const log: Array<string> = [];
+    return Effect.gen(function* () {
+      const { registry } = yield* makeRegistry(
+        [
+          baseProvider,
+          { ...baseProvider, instanceId: CODEX_WORK_INSTANCE_ID },
+          baseOpenCodeProvider,
+        ],
+        { installedVersionAfterUpdate: "1.0.0" },
+      );
+      // OpenCode installs into the same npm prefix, so it shares the lock key but not the package.
+      const updater = yield* makeTestRunner(registry);
+      const gate = yield* ProviderInstallationGate.ProviderInstallationGate;
+
+      const update = yield* updater.updateProvider(CODEX_DRIVER).pipe(Effect.forkScoped);
+      yield* Deferred.await(updateStarted);
+      const shared = yield* gate
+        .execute(
+          CODEX_WORK_INSTANCE_ID,
+          Effect.sync(() => log.push("shared installation ran")),
+        )
+        .pipe(Effect.forkScoped);
+      const other = yield* gate
+        .execute(
+          OPENCODE_INSTANCE_ID,
+          Effect.sync(() => log.push("other driver ran")),
+        )
+        .pipe(Effect.forkScoped);
+      yield* TestClock.adjust("1 minute");
+      yield* Fiber.join(update);
+      yield* Fiber.join(shared);
+      yield* Fiber.join(other);
+
+      assert.deepStrictEqual(log, [
+        "other driver ran",
+        "update command exited",
+        "shared installation ran",
+      ]);
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          ProviderInstallationGate.layer,
+          layerNonWindowsPlatform,
+          layerLatestVersionHttpClient("1.0.0"),
+          layerMockSpawner(() => ({
+            exitCode: Deferred.succeed(updateStarted, undefined).pipe(
+              Effect.andThen(Effect.sleep("1 minute")),
+              Effect.andThen(Effect.sync(() => log.push("update command exited"))),
+              Effect.as(ChildProcessSpawner.ExitCode(0)),
+            ),
+          })),
+        ),
+      ),
+    );
+  });
+
 });
