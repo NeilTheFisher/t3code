@@ -10,7 +10,7 @@ const layer = it.layer(Layer.mergeAll(NodeSqliteClient.layer({ filename: ":memor
 
 const MODEL_SELECTION = '{"instanceId":"codex","model":"gpt-5.6-sol"}';
 
-layer("046_RepairAutomaticSettlementTimestamps", (it) => {
+layer("048_RepairAutomaticSettlementTimestamps", (it) => {
   it.effect("repairs automatic stamps and leaves manual settlement alone", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;

@@ -7,7 +7,7 @@ import { runMigrations } from "../Migrations.ts";
 import migrateActiveOrderKey from "./051_ProjectionThreadsActiveOrderKey.ts";
 
 it.layer(NodeSqliteClient.layer({ filename: ":memory:" }))(
-  "049_ProjectionThreadsActiveOrderKey",
+  "051_ProjectionThreadsActiveOrderKey",
   (it) => {
     it.effect("migrates old threads without changing their timestamps or assigning an order", () =>
       Effect.gen(function* () {

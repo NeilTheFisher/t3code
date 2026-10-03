@@ -374,7 +374,7 @@ layer("016_CanonicalizeModelSelections", (it) => {
   );
 });
 
-layer("044_ClearAutomaticProjectModelDefaults", (it) => {
+layer("046_ClearAutomaticProjectModelDefaults", (it) => {
   it.effect("clears create-time seeds and preserves explicit project defaults", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
