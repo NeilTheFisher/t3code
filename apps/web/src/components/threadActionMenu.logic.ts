@@ -25,6 +25,7 @@ export type ThreadActionMenuId =
   | "copy-branch"
   | "copy-thread"
   | "copy-thread-id"
+  | "export-markdown"
   | "archive"
   | "delete";
 
@@ -232,6 +233,13 @@ export function buildThreadActionMenuItems(
       ],
     },
     { id: "project-settings", label: "Project settings", icon: "settings" },
+    { id: "export-markdown", label: "Export to markdown", icon: "download" },
+    // Archive removes the thread from the sidebar while keeping its
+    // conversation under Settings > Archived threads — distinct from Settle
+    // (stays visible in the Settled shelf) and Delete (clears history for
+    // good), so it sits beside Delete without borrowing its destructive
+    // styling.
+
     {
       id: "archive",
       label: "Archive thread",
