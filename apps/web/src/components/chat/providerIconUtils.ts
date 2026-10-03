@@ -1,3 +1,5 @@
+import type { ServerProviderModel } from "@t3tools/contracts";
+
 export type ModelEsque = {
   slug: string;
   name: string;
@@ -8,6 +10,8 @@ export type ModelEsque = {
   badge?: "new" | undefined;
   isLegacy?: boolean | undefined;
   isUnavailable?: boolean | undefined;
+  contextWindowTokens?: number | undefined;
+  capabilities?: ServerProviderModel["capabilities"];
 };
 
 function escapeRegExp(value: string): string {
