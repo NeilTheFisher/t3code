@@ -579,6 +579,10 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
         if (detail && (incompletePlatforms.length > 0 || androidDiscoveryIncomplete))
           discoveryDetails.set(ready.hostId, detail);
         else discoveryDetails.delete(ready.hostId);
+        // Drop sessions for devices this host no longer reports, but only when
+        // its listing was clean for the session's platform, so a partial hub
+        // listing never removes a live session.
+        const hostDeviceIds = new Set(devices.map((device) => device.id));
         return yield* publish((state) => ({
           ...state,
           hosts: hostSummaries,
@@ -592,7 +596,8 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
           ],
           // A host that ends devices itself (EAS stops sessions at their limits)
           // leaves sessions on devices it no longer lists with nothing to stream.
-          // Other hosts can miss a device for one listing, so theirs stay.
+          // Other hosts prune a session only when the listing was clean for its
+          // platform, so a partial hub listing never removes a live session.
           sessions: ready.devices.endsDevices
             ? state.sessions.filter(
                 (session) =>
@@ -600,7 +605,12 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
                   !before.has(sessionKey(session)) ||
                   devices.some((device) => device.id === session.deviceId),
               )
-            : state.sessions,
+            : state.sessions.filter(
+                (session) =>
+                  session.hostId !== ready.hostId ||
+                  hostDeviceIds.has(session.deviceId) ||
+                  incompletePlatforms.includes(session.platform),
+              ),
           hostStatuses: {
             ...state.hostStatuses,
             [ready.hostId]: {

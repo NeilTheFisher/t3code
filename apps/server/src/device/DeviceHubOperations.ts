@@ -188,11 +188,20 @@ export const makeDeviceHubOperations = (options: {
     const simulatorsUnlisted =
       hubList.simulators.length === 0 &&
       (hubList.errors ?? []).some((error) => SIMULATOR_LIST_FAILED.test(error.message));
+    // A hub that reports an Android probe failure listed no emulators because the
+    // probe broke, not because none exist, so its platform is incomplete too.
+    const emulatorsUnlisted =
+      hubList.emulators.length === 0 &&
+      (hubList.errors ?? []).some((error) => error.message.startsWith("[android-utils] "));
+    const incompletePlatforms = [
+      ...(simulatorsUnlisted ? (["ios"] as const) : []),
+      ...(emulatorsUnlisted ? (["android"] as const) : []),
+    ];
     return {
       devices,
       detail: details.join("\n") || undefined,
       androidDiscoveryIncomplete,
-      ...(simulatorsUnlisted ? { incompletePlatforms: ["ios"] as const } : {}),
+      ...(incompletePlatforms.length > 0 ? { incompletePlatforms } : {}),
     };
   }).pipe(Effect.withSpan("DeviceHubOperations.list"));
 
@@ -266,7 +275,24 @@ export const makeDeviceHubOperations = (options: {
               ),
             ),
           )
-        : postShutdown("/api/devices/shutdown", { platform: device.platform, id: device.id });
+        : postShutdown("/api/devices/shutdown", { platform: device.platform, id: device.id }).pipe(
+            Effect.catch((cause) =>
+              list.pipe(
+                // A physically disconnected device cannot be shut down; clearing
+                // its stale sessions matters more than the failed remote call.
+                // Require a clean listing so a partial read cannot mask a real
+                // failure on a device that is still connected.
+                Effect.flatMap((relist) =>
+                  !(relist.incompletePlatforms ?? []).includes("android") &&
+                  relist.devices.find((candidate) => candidate.id === device.id)?.booted !== true
+                    ? Effect.logInfo("Android device was already gone or shut down", {
+                        deviceId: device.id,
+                      })
+                    : Effect.fail(cause),
+                ),
+              ),
+            ),
+          );
     },
   );
 
