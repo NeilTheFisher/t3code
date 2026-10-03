@@ -1,7 +1,6 @@
 import type { OrchestrationV2ProviderFailureClass } from "@t3tools/contracts";
 import { memo } from "react";
 import { Alert, AlertAction, AlertDescription } from "../ui/alert";
-import { Button } from "../ui/button";
 import { CircleAlertIcon, XIcon } from "lucide-react";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { OpenAI } from "../Icons";
@@ -76,9 +75,18 @@ export const ThreadErrorBanner = memo(function ThreadErrorBanner({
           <AlertAction>
             {chatGptUsageLimit ? <ChatGptUsageButton variant="default" size="sm" /> : null}
             {onDismiss ? (
-              <Button variant="ghost" size="icon-xs" aria-label="Dismiss error" onClick={onDismiss}>
-                <XIcon />
-              </Button>
+              <button
+                type="button"
+                className="inline-flex items-center justify-center rounded-md p-1 text-destructive hover:bg-destructive/10"
+                aria-label="Dismiss error"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onDismiss();
+                }}
+              >
+                <XIcon className="size-3.5" />
+              </button>
             ) : null}
           </AlertAction>
         )}
