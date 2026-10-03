@@ -25,6 +25,7 @@ const buttonVariants = cva(
           "size-5 rounded-sm p-0 before:rounded-[calc(var(--radius-sm)-1px)] [&_svg:not([class*='size-'])]:size-3",
         "icon-tiny": "size-4 p-0 [&_svg:not([class*='size-'])]:size-3",
         "icon-sm": "size-8 sm:size-7",
+        "icon-sm-round": "size-8 rounded-full sm:size-7",
         "icon-xl":
           "size-11 sm:size-10 [&_svg:not([class*='size-'])]:size-5 sm:[&_svg:not([class*='size-'])]:size-4.5",
         "icon-xs":
@@ -51,6 +52,10 @@ const buttonVariants = cva(
           "[--control-icon-color:currentColor] border-transparent text-muted-foreground data-pressed:bg-accent [:hover,[data-pressed]]:bg-accent [:hover,[data-pressed]]:text-foreground",
         "ghost-destructive":
           "[--control-icon-color:currentColor] border-transparent text-muted-foreground data-pressed:bg-accent [:hover,[data-pressed]]:bg-accent [:hover,[data-pressed]]:text-destructive",
+        "primary-soft":
+          "[--control-icon-color:currentColor] border-transparent bg-primary/10 text-primary [:hover,[data-pressed]]:bg-primary/15 [:hover,[data-pressed]]:text-primary",
+        floating:
+          "not-disabled:inset-shadow-[0_1px_--theme(--color-white/16%)] rounded-full border-primary bg-primary text-primary-foreground shadow-primary/24 shadow-lg [:active,[data-pressed]]:inset-shadow-[0_1px_--theme(--color-black/8%)] [:disabled,:active,[data-pressed]]:shadow-none [:hover,[data-pressed]]:bg-primary/90",
         glass:
           "surface-glass [--control-icon-color:var(--contrast-muted-foreground)] rounded-full border-border/60 text-foreground shadow-sm before:rounded-full [:hover,[data-pressed]]:border-border",
         link: "border-transparent underline-offset-4 [:hover,[data-pressed]]:underline",

@@ -3,6 +3,8 @@ import type {
   ServerProviderUsageLimits,
   ServerProviderUsageWindow,
 } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
+import * as Option from "effect/Option";
 
 const WINDOW_KIND_ORDER: Record<ServerProviderUsageWindow["kind"], number> = {
   session: 0,
@@ -131,4 +133,211 @@ export function resolveUsageLimitsAfterProbe(input: {
     return published;
   }
   return probed;
+}
+
+const MONTHS = [
+  "jan",
+  "feb",
+  "mar",
+  "apr",
+  "may",
+  "jun",
+  "jul",
+  "aug",
+  "sep",
+  "oct",
+  "nov",
+  "dec",
+] as const;
+
+const SESSION_MINS = 5 * 60;
+const WEEK_MINS = 7 * 24 * 60;
+const MONTH_MINS = 30 * 24 * 60;
+
+function parseClaudeReset(input: {
+  readonly month: string;
+  readonly day: string;
+  readonly hour: string;
+  readonly minute: string | undefined;
+  readonly meridiem: string;
+  readonly timeZone: string;
+  readonly checkedAt: string;
+}): string | undefined {
+  const month =
+    MONTHS.indexOf(input.month.toLowerCase().slice(0, 3) as (typeof MONTHS)[number]) + 1;
+  if (month === 0) return undefined;
+  const checked = DateTime.make(input.checkedAt);
+  if (Option.isNone(checked)) return undefined;
+  const checkedInResetZone = DateTime.setZoneNamed(checked.value, input.timeZone);
+  if (Option.isNone(checkedInResetZone)) return undefined;
+  const checkedParts = DateTime.toParts(checkedInResetZone.value);
+  const day = Number.parseInt(input.day, 10);
+  let hour = Number.parseInt(input.hour, 10);
+  if (
+    !Number.isFinite(day) ||
+    !Number.isFinite(hour) ||
+    day < 1 ||
+    day > 31 ||
+    hour < 1 ||
+    hour > 12
+  ) {
+    return undefined;
+  }
+  if (hour === 12) hour = 0;
+  if (input.meridiem.toLowerCase() === "pm") hour += 12;
+  const year = checkedParts.month === 12 && month === 1 ? checkedParts.year + 1 : checkedParts.year;
+  const localDateTime = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")} ${String(hour).padStart(2, "0")}:${input.minute ?? "00"}:00`;
+  const reset = DateTime.makeZoned(localDateTime, {
+    timeZone: input.timeZone,
+    adjustForTimeZone: true,
+  });
+  return Option.isSome(reset) ? DateTime.formatIso(reset.value) : undefined;
+}
+
+function claudeScopedWindowId(modelName: string): string {
+  return `seven_day_${modelName.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`;
+}
+
+/**
+ * Fallback Claude usage probe: parses the CLI's human `Current session:` /
+ * `Current week:` output when the SDK's `get_usage` read is unavailable. Window
+ * ids mirror `claudeUsageLimits.ts` so a turn-driven rate-limit event lands on
+ * the row this probe drew.
+ */
+export function parseClaudeUsageLimitsJson(
+  output: string,
+  checkedAt: string,
+): ServerProviderUsageLimits | undefined {
+  let result: string;
+  try {
+    const decoded: unknown = JSON.parse(output);
+    if (
+      typeof decoded !== "object" ||
+      decoded === null ||
+      typeof (decoded as { result?: unknown }).result !== "string"
+    ) {
+      return undefined;
+    }
+    result = (decoded as { result: string }).result;
+  } catch {
+    return undefined;
+  }
+
+  const windows: ServerProviderUsageWindow[] = [];
+  const pattern =
+    /^Current (session|week(?: \([^)]+\))?):\s*(\d{1,3}(?:\.\d+)?)% used\s*[\u00b7-]\s*resets ([A-Za-z]{3,9}) (\d{1,2}), (\d{1,2})(?::(\d{2}))?(am|pm) \(([^)]+)\)$/gim;
+  for (const match of result.matchAll(pattern)) {
+    const [, rawLabel, percent, month, day, hour, minute, meridiem, timeZone] = match;
+    if (!rawLabel || !percent || !month || !day || !hour || !meridiem || !timeZone) continue;
+    const usedPercent = Number.parseFloat(percent);
+    if (!Number.isFinite(usedPercent)) continue;
+    const isSession = rawLabel.toLowerCase() === "session";
+    const modelName = rawLabel.match(/\(([^)]+)\)/)?.[1];
+    const resetsAt = parseClaudeReset({
+      month,
+      day,
+      hour,
+      minute,
+      meridiem,
+      timeZone,
+      checkedAt,
+    });
+    windows.push(
+      isSession
+        ? {
+            id: "five_hour",
+            kind: "session",
+            label: "Session",
+            usedPercent: clampPercent(usedPercent),
+            windowDurationMins: SESSION_MINS,
+            ...(resetsAt ? { resetsAt } : {}),
+          }
+        : {
+            id: modelName ? claudeScopedWindowId(modelName) : "seven_day",
+            kind: "weekly",
+            label: modelName ? `Weekly · ${modelName}` : "Weekly",
+            usedPercent: clampPercent(usedPercent),
+            windowDurationMins: WEEK_MINS,
+            ...(resetsAt ? { resetsAt } : {}),
+          },
+    );
+  }
+
+  if (!windows.some((window) => window.id === "five_hour")) {
+    const sessionWithoutReset = result.match(/^Current session:\s*(\d{1,3}(?:\.\d+)?)% used\s*$/im);
+    const usedPercent = Number.parseFloat(sessionWithoutReset?.[1] ?? "");
+    if (Number.isFinite(usedPercent)) {
+      windows.unshift({
+        id: "five_hour",
+        kind: "session",
+        label: "Session",
+        usedPercent: clampPercent(usedPercent),
+        windowDurationMins: SESSION_MINS,
+      });
+    }
+  }
+
+  return windows.length > 0 ? makeUsageLimits({ checkedAt, windows }) : undefined;
+}
+
+function decodeDashboardHtml(html: string): string {
+  return html
+    .replaceAll("&quot;", '"')
+    .replaceAll("&#34;", '"')
+    .replaceAll("&#x27;", "'")
+    .replaceAll("&#39;", "'")
+    .replaceAll("&amp;", "&")
+    .replaceAll('\\"', '"')
+    .replaceAll("\\u0022", '"');
+}
+
+function parseOpenCodeWindow(
+  html: string,
+  fieldName: string,
+  id: ServerProviderUsageWindow["id"],
+  kind: ServerProviderUsageWindow["kind"],
+  windowDurationMins: number,
+  checkedAt: string,
+): ServerProviderUsageWindow | undefined {
+  const body = html.match(
+    new RegExp(`["']?${fieldName}["']?\\s*:\\s*(?:\\$R\\[\\d+\\]\\s*=\\s*)?\\{([^{}]*)\\}`, "s"),
+  )?.[1];
+  if (!body) return undefined;
+  const usedPercent = Number.parseFloat(
+    body.match(/["']?usagePercent["']?\s*:\s*"?(-?\d+(?:\.\d+)?)"?/)?.[1] ?? "",
+  );
+  const resetInSec = Number.parseFloat(
+    body.match(/["']?resetInSec["']?\s*:\s*"?(-?\d+(?:\.\d+)?)"?/)?.[1] ?? "",
+  );
+  if (!Number.isFinite(usedPercent) || !Number.isFinite(resetInSec)) return undefined;
+  const checked = DateTime.make(checkedAt);
+  const resetsAt = Option.isSome(checked)
+    ? DateTime.formatIso(
+        DateTime.add(checked.value, {
+          seconds: Math.max(0, Math.round(resetInSec)),
+        }),
+      )
+    : undefined;
+  return {
+    id,
+    kind,
+    label: kind === "session" ? "Session" : kind === "weekly" ? "Weekly" : "Monthly",
+    usedPercent: clampPercent(usedPercent),
+    windowDurationMins,
+    ...(resetsAt ? { resetsAt } : {}),
+  };
+}
+
+/** OpenCode's Go dashboard reports subscription limits as server-rendered HTML. */
+export function parseOpenCodeGoUsageHtml(
+  output: string,
+  checkedAt: string,
+): ServerProviderUsageLimits | undefined {
+  const html = decodeDashboardHtml(output);
+  const windows = [
+    parseOpenCodeWindow(html, "rollingUsage", "session", "session", SESSION_MINS, checkedAt),
+    parseOpenCodeWindow(html, "weeklyUsage", "weekly", "weekly", WEEK_MINS, checkedAt),
+    parseOpenCodeWindow(html, "monthlyUsage", "monthly", "monthly", MONTH_MINS, checkedAt),
+  ].filter((window): window is ServerProviderUsageWindow => window !== undefined);
+  return windows.length > 0 ? makeUsageLimits({ checkedAt, windows }) : undefined;
 }

@@ -417,7 +417,7 @@ export function workEntryIndicatesToolSuccess(entry: WorkLogPresentationEntry): 
   );
 }
 
-function workLogEntryIsLocalCodeSearch(entry: WorkLogPresentationEntry): boolean {
+export function workLogEntryIsLocalCodeSearch(entry: WorkLogPresentationEntry): boolean {
   return (
     entry.itemType === "file_search" ||
     (entry.itemType === "web_search" &&

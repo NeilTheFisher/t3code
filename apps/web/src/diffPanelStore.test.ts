@@ -14,10 +14,16 @@ describe("diffPanelStore", () => {
     }),
   );
 
-  it("defaults each thread to Changes without requiring git status", () => {
+  it("defaults each thread to branch changes when the working tree is clean", () => {
     expect(
       selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, THREAD_REF),
     ).toEqual({ kind: "branch", baseRef: null });
+  });
+
+  it("defaults each thread to working changes when the working tree is dirty", () => {
+    expect(
+      selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, THREAD_REF, true),
+    ).toEqual({ kind: "unstaged" });
   });
 
   it("defaults to Changes before a thread is selected", () => {

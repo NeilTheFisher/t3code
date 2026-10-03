@@ -23,7 +23,7 @@ interface PullRequestRow {
   readonly stackJson: string | null;
 }
 
-layer("050_ProjectionThreadPullRequests", (it) => {
+layer("052_ProjectionThreadPullRequests", (it) => {
   it.effect("creates the link table and backfills legacy single links", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
@@ -157,7 +157,7 @@ layer("050_ProjectionThreadPullRequests", (it) => {
 });
 
 it.layer(Layer.fresh(NodeSqliteClient.layer({ filename: ":memory:" })))(
-  "050 Azure legacy links",
+  "052 Azure legacy links",
   (it) => {
     it.effect("keeps legacy Azure repositories distinct across organizations", () =>
       Effect.gen(function* () {

@@ -58,9 +58,16 @@ export function writeFakeCli(options: FakeCliOptions): string {
   }
 
   const launcherPath = NodePath.join(options.directory, options.name);
+  // Spawned children do not inherit the test runner's PATH, so `node` may not
+  // resolve there. Use the running Node's own executable path instead.
+  const nodeExecutable = JSON.stringify(process.execPath);
   NodeFS.writeFileSync(
     launcherPath,
-    ["#!/bin/sh", `exec node "$(dirname "$0")/${options.name}-stub.mjs" "$@"`, ""].join("\n"),
+    [
+      "#!/bin/sh",
+      `exec ${nodeExecutable} "$(dirname "$0")/${options.name}-stub.mjs" "$@"`,
+      "",
+    ].join("\n"),
     "utf8",
   );
   NodeFS.chmodSync(launcherPath, 0o755);
