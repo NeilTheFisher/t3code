@@ -38,6 +38,11 @@ import Migration0032 from "./Migrations/032_AuthPairingProofKeyThumbprint.ts";
 import Migration0033 from "./Migrations/033_ProjectionThreadsSettled.ts";
 import Migration0034 from "./Migrations/034_ProjectionThreadsSnoozed.ts";
 import Migration0035 from "./Migrations/035_ProjectionThreadTitleRegeneration.ts";
+// Ids 36 and 37 are fork migrations live databases already recorded; they are
+// no-ops here so the runner's `id > max(...)` rule cannot skip upstream's own
+// migrations, which therefore sit above 56.
+import AlreadyApplied0036 from "./Migrations/applied/Fork0036_ProjectionThreadPendingBackgroundTasks.ts";
+import AlreadyApplied0037 from "./Migrations/applied/Fork0037_ProjectionThreadTasks.ts";
 import Migration0038 from "./Migrations/038_ProjectionThreadsPinned.ts";
 import Migration0039 from "./Migrations/039_ProjectionTurnsKeysetIndex.ts";
 import Migration0040 from "./Migrations/040_ProjectionThreadsPinOrderKey.ts";
