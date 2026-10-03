@@ -180,6 +180,11 @@ export function useThreadUpdatedAt(ref: ScopedThreadRef | null): DateTime.Utc | 
   );
 }
 
+export function readThreadDetail(ref: ScopedThreadRef | null): EnvironmentThread | null {
+  if (ref === null) return null;
+  return appAtomRegistry.get(environmentThreadDetails.detailAtom(ref));
+}
+
 export function useThreadStatus(ref: ScopedThreadRef | null): EnvironmentThreadStatus {
   return useAtomValue(
     ref === null ? EMPTY_THREAD_STATUS_ATOM : environmentThreadDetails.statusAtom(ref),

@@ -480,6 +480,23 @@ function atomJsonForSegment(
       attrs: { citation: segment.citation, source: segment.source, citeKey: randomNodeKey() },
     };
   }
+  if (segment.type === "terminal-context") {
+    if (!segment.context) {
+      // A placeholder with no matching draft (e.g. a literal paste) stays a
+      // literal character so the document round-trips byte-for-byte.
+      return { type: "text", text: INLINE_TERMINAL_CONTEXT_PLACEHOLDER };
+    }
+    const reference = terminalContextReference(segment.context);
+    return {
+      type: "composer-context-reference",
+      attrs: {
+        kind: reference.kind,
+        contextId: reference.contextId,
+        label: reference.label,
+        source: formatInlineContextReference(reference),
+      },
+    };
+  }
   return {
     type: "composer-context-reference",
     attrs: {

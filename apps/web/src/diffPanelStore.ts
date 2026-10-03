@@ -20,6 +20,7 @@ export type DiffPanelSelection =
   | { kind: "turn"; turnId: RunId; filePath: string | null; revealRequestId: number };
 
 const DEFAULT_SELECTION: DiffPanelSelection = { kind: "branch", baseRef: null };
+const DEFAULT_WORKING_TREE_SELECTION: DiffPanelSelection = { kind: "unstaged" };
 
 interface DiffPanelStoreState {
   byThreadKey: Record<string, DiffPanelSelection>;
@@ -173,9 +174,13 @@ export const useDiffPanelSessionStore = create<DiffPanelSessionStoreState>()((se
 export function selectThreadDiffPanelSelection(
   byThreadKey: Record<string, DiffPanelSelection>,
   ref: ScopedThreadRef | null | undefined,
+  hasWorkingTreeChanges = false,
 ): DiffPanelSelection {
   if (!ref) return DEFAULT_SELECTION;
-  return byThreadKey[scopedThreadKey(ref)] ?? DEFAULT_SELECTION;
+  return (
+    byThreadKey[scopedThreadKey(ref)] ??
+    (hasWorkingTreeChanges ? DEFAULT_WORKING_TREE_SELECTION : DEFAULT_SELECTION)
+  );
 }
 
 export function resolveToolCallDiffTarget(

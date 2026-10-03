@@ -299,7 +299,18 @@ export function workEntryDisplayIndicatesToolFailure(entry: WorkLogPresentationE
   return workEntryIndicatesToolFailureFromOutput(entry, false);
 }
 
-function workLogEntryIsLocalCodeSearch(entry: WorkLogPresentationEntry): boolean {
+export function workEntryIndicatesToolSuccess(entry: WorkLogPresentationEntry): boolean {
+  return (
+    workLogEntryIsToolLike(entry) &&
+    !workEntryIndicatesToolFailure(entry) &&
+    entry.tone !== "thinking" &&
+    entry.toolLifecycleStatus !== "idle" &&
+    entry.toolLifecycleStatus !== "inProgress" &&
+    entry.toolLifecycleStatus !== "stopped"
+  );
+}
+
+export function workLogEntryIsLocalCodeSearch(entry: WorkLogPresentationEntry): boolean {
   return (
     entry.itemType === "file_search" ||
     (entry.itemType === "web_search" &&
