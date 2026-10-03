@@ -23,6 +23,9 @@ import {
   PanelsTopLeftIcon,
   KeyboardIcon,
   PaletteIcon,
+  FileCode2Icon,
+  HardDriveIcon,
+  Mic2Icon,
   SearchIcon,
   ServerIcon,
   Settings2Icon,
@@ -105,6 +108,10 @@ const SETTINGS_SECTION_ICONS: Readonly<
   "/settings/maintenance": WrenchIcon,
   "/settings/labs": FlaskConicalIcon,
   "/settings/about": InfoIcon,
+  "/settings/storage": HardDriveIcon,
+  "/settings/beta": FlaskConicalIcon,
+  "/settings/userscripts": FileCode2Icon,
+  "/settings/voice": Mic2Icon,
   "/settings/archived": ArchiveIcon,
 };
 

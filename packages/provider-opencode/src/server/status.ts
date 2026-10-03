@@ -9,7 +9,9 @@ import * as Cause from "effect/Cause";
 import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Schedule from "effect/Schedule";
+import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 
 import { createModelCapabilities } from "@t3tools/shared/model";
 import { compareSemverVersions } from "@t3tools/shared/semver";
@@ -20,6 +22,7 @@ import {
   providerModelsFromSettings,
   type ServerProviderDraft,
 } from "@t3tools/provider-core/server/snapshotProbe";
+import { parseOpenCodeGoUsageHtml } from "@t3tools/provider-core/server/usageLimits";
 import * as OpenCodeRuntime from "./OpenCodeRuntime.ts";
 import type { ProbedOpenCode } from "./versionProbe.ts";
 import type { Agent, ProviderListResponse } from "@opencode-ai/sdk/v2";
@@ -234,6 +237,12 @@ function openCodeCapabilitiesForModel(input: {
   const rawVariantValues = Object.keys(input.model.variants ?? {});
   const variantValues =
     rawVariantValues.length > 0 ? rawVariantValues : ["low", "medium", "high", "xhigh"];
+  const inputModalities = Object.entries(input.model.capabilities?.input ?? {})
+    .filter(([, supported]) => supported)
+    .map(([modality]) => modality as "text" | "audio" | "image" | "video" | "pdf");
+  const outputModalities = Object.entries(input.model.capabilities?.output ?? {})
+    .filter(([, supported]) => supported)
+    .map(([modality]) => modality as "text" | "audio" | "image" | "video" | "pdf");
   const defaultVariant = inferDefaultVariant(input.providerID, variantValues);
   const variantOptions = variantValues.map((value) =>
     defaultVariant === value
@@ -250,6 +259,11 @@ function openCodeCapabilitiesForModel(input: {
       : { id: agent.name, label: titleCaseSlug(agent.name) },
   );
   return createModelCapabilities({
+    inputModalities,
+    outputModalities,
+    supportsReasoning: input.model.capabilities?.reasoning === true,
+    supportsToolCalls: input.model.capabilities?.toolcall === true,
+    supportsAttachments: input.model.capabilities?.attachment === true,
     optionDescriptors: [
       ...(variantOptions.length > 0
         ? [
@@ -331,11 +345,13 @@ function flattenOpenCodeModels(
 
       const subProvider = nonEmptyTrimmed(provider.name);
       const released = Date.parse(model.release_date);
+      const contextWindowTokens = model.limit?.context;
       entries.push({
         model: {
           slug: `${provider.id}/${model.id}`,
           name,
           ...(subProvider ? { subProvider } : {}),
+          ...(contextWindowTokens && contextWindowTokens > 0 ? { contextWindowTokens } : {}),
           isCustom: false,
           capabilities: openCodeCapabilitiesForModel({
             providerID: provider.id,
@@ -678,6 +694,40 @@ const checkOpenCode2 = Effect.fn("checkOpenCode2")(function* (
   });
 });
 
+/**
+ * `probeRuntime` is the driver's memoized version probe: `opencode --version` for a local binary,
+ * the version endpoints for a configured server. The status check refreshes it, so an in-place
+ * upgrade re-routes the instance.
+ */
+/** OpenCode Go subscription usage, scraped from the workspace dashboard. */
+const fetchOpenCodeGoUsageLimits = Effect.fn("fetchOpenCodeGoUsageLimits")(function* (input: {
+  readonly workspaceId: string;
+  readonly authCookie: string;
+  readonly checkedAt: string;
+}) {
+  if (!input.workspaceId || !input.authCookie) return undefined;
+  const client = yield* HttpClient.HttpClient;
+  const request = HttpClientRequest.get(
+    `https://opencode.ai/workspace/${encodeURIComponent(input.workspaceId)}/go`,
+  ).pipe(
+    HttpClientRequest.setHeader("accept", "text/html,application/xhtml+xml"),
+    HttpClientRequest.setHeader(
+      "cookie",
+      input.authCookie.includes("auth=") ? input.authCookie : `auth=${input.authCookie}`,
+    ),
+    HttpClientRequest.setHeader("user-agent", "T3-Code"),
+  );
+  const response = yield* client.execute(request).pipe(
+    Effect.timeoutOption(10_000),
+    Effect.orElseSucceed(() => Option.none()),
+  );
+  if (Option.isNone(response) || response.value.status < 200 || response.value.status >= 300) {
+    return undefined;
+  }
+  const html = yield* response.value.text.pipe(Effect.orElseSucceed(() => ""));
+  return parseOpenCodeGoUsageHtml(html, input.checkedAt);
+});
+
 export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatus")(function* (
   openCodeSettings: OpenCodeSettings,
   cwd: string,
@@ -689,7 +739,7 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
 ): Effect.fn.Return<
   ServerProviderDraft,
   never,
-  OpenCodeRuntime.OpenCodeRuntime | OpenCodeServerOwner.OpenCodeServerOwner
+  OpenCodeRuntime.OpenCodeRuntime | OpenCodeServerOwner.OpenCodeServerOwner | HttpClient.HttpClient
 > {
   const openCodeRuntime = yield* OpenCodeRuntime.OpenCodeRuntime;
   const serverOwner = yield* OpenCodeServerOwner.OpenCodeServerOwner;
@@ -841,6 +891,11 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
   if (connectedCount > 0 && inventoryModels.length === 0) {
     yield* logDiscoveryFailure({ phase: "inventory", isExternalServer, version });
   }
+  const usageLimits = yield* fetchOpenCodeGoUsageLimits({
+    workspaceId: openCodeSettings.goWorkspaceId,
+    authCookie: openCodeSettings.goAuthCookie,
+    checkedAt,
+  });
   return {
     ...buildServerProvider({
       presentation: OPENCODE_PRESENTATION,
@@ -857,6 +912,7 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
           status: catalogReady ? "authenticated" : "unknown",
           type: "opencode",
         },
+        ...(usageLimits ? { usageLimits } : {}),
         message:
           connectedCount > 0 && !catalogReady
             ? "OpenCode upstream providers are connected, but it did not list any models yet."

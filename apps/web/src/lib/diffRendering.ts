@@ -1,5 +1,6 @@
-import { parsePatchFiles } from "@pierre/diffs/utils/parsePatchFiles";
 import { parseDiffFromFile } from "@pierre/diffs";
+import { parsePatchFiles } from "@pierre/diffs/utils/parsePatchFiles";
+import { applyPatch, createTwoFilesPatch, parsePatch, reversePatch } from "diff";
 import type { FileDiffMetadata } from "@pierre/diffs/types";
 import { READABLE_LIGHT_THEME_NAME } from "./readableSyntaxTheme";
 
@@ -33,7 +34,7 @@ export function fnv1a32(
   return hash >>> 0;
 }
 
-function buildPatchCacheKey(patch: string, scope = "diff-panel"): string {
+export function buildPatchCacheKey(patch: string, scope = "diff-panel"): string {
   const normalizedPatch = patch.trim();
   const primary = fnv1a32(normalizedPatch, FNV_OFFSET_BASIS_32, FNV_PRIME_32).toString(36);
   const secondary = fnv1a32(
@@ -48,6 +49,8 @@ export type RenderablePatch =
   | {
       kind: "files";
       files: FileDiffMetadata[];
+      /** Binary file entries stripped from `files` — render as static rows, never as text diffs. */
+      binaryFiles: FileDiffMetadata[];
       sourceFiles: FileDiffMetadata[];
     }
   | {
@@ -59,6 +62,26 @@ export type RenderablePatch =
 export interface DiffLineStat {
   additions: number;
   deletions: number;
+}
+
+export function expandPartialPatchWithCurrentFile(
+  patch: string,
+  filePath: string,
+  currentContents: string,
+): string | null {
+  const [parsedPatch, ...extraPatches] = parsePatch(patch);
+  if (!parsedPatch || extraPatches.length > 0) return null;
+  const oldContents = applyPatch(currentContents, reversePatch(parsedPatch));
+  if (oldContents === false) return null;
+  return createTwoFilesPatch(
+    `a/${filePath}`,
+    `b/${filePath}`,
+    oldContents,
+    currentContents,
+    undefined,
+    undefined,
+    { context: Number.POSITIVE_INFINITY },
+  );
 }
 
 export function getDiffLineStat(files: ReadonlyArray<FileDiffMetadata>): DiffLineStat {
@@ -79,6 +102,42 @@ interface RenderablePatchOptions {
   ignoreWhitespace?: boolean;
   /** Compact Pierre source offsets for partial-patch rows; retain collapsedBefore for separators. */
   compactPartialHunkOffsets?: boolean;
+  /**
+   * Pierre only allows expanding unmodified regions when a diff carries full
+   * file contents (isPartial=false); patch-parsed diffs never do. When a
+   * patch was generated with full context (git diff -U999999), its single
+   * hunk holds the whole file, so rebuild the diff from those contents to
+   * make unmodified regions expandable.
+   */
+  upgradeFullContextFiles?: boolean;
+}
+
+function upgradeFullContextFile(file: FileDiffMetadata): FileDiffMetadata {
+  if (!file.isPartial || file.hunks.length !== 1) return file;
+  const [hunk] = file.hunks;
+  if (!hunk || hunk.deletionStart > 1 || hunk.additionStart > 1) return file;
+  try {
+    const oldName = file.prevName ?? file.name ?? "";
+    const newName = file.name ?? oldName;
+    if (!newName) return file;
+    const upgraded = parseDiffFromFile(
+      {
+        // Parsed partial lines keep their trailing newlines, so plain concat
+        // reconstructs the exact file contents.
+        name: oldName || newName,
+        contents: file.deletionLines.join(""),
+        ...(file.cacheKey ? { cacheKey: `${file.cacheKey}:full-old` } : {}),
+      },
+      {
+        name: newName,
+        contents: file.additionLines.join(""),
+        ...(file.cacheKey ? { cacheKey: `${file.cacheKey}:full-new` } : {}),
+      },
+    );
+    return upgraded.hunks.length > 0 ? upgraded : file;
+  } catch {
+    return file;
+  }
 }
 
 function hideWhitespaceChanges(file: FileDiffMetadata): FileDiffMetadata {
@@ -159,6 +218,59 @@ function compactPartialHunkOffsets(file: FileDiffMetadata): FileDiffMetadata {
   };
 }
 
+/**
+ * Collect the paths of files that git reported as binary in a unified patch
+ * ("Binary files a/x and b/x differ" or a "GIT binary patch" section).
+ *
+ * @pierre/diffs' parser silently drops these markers, leaving a hunk-less
+ * FileDiffMetadata whose virtualized rendering can crash the app. We detect
+ * them from the raw patch text so they can be rendered as static rows instead.
+ */
+export function extractBinaryPatchPaths(patch: string): Set<string> {
+  const binaryPaths = new Set<string>();
+  const lines = patch.split("\n");
+  let currentPaths: string[] = [];
+  for (const rawLine of lines) {
+    const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+    if (line.startsWith("diff --git ")) {
+      currentPaths = [];
+      const match = /^diff --git (?:"?a\/(.+?)"?) (?:"?b\/(.+?)"?)$/.exec(line);
+      if (match) {
+        for (const path of [match[1], match[2]]) {
+          if (path) currentPaths.push(path);
+        }
+      }
+      continue;
+    }
+    if (line.startsWith("Binary files ") || line === "GIT binary patch") {
+      if (line.startsWith("Binary files ")) {
+        const match =
+          /^Binary files (?:"?a\/(.+?)"?|\/dev\/null) and (?:"?b\/(.+?)"?|\/dev\/null) differ$/.exec(
+            line,
+          );
+        if (match) {
+          for (const path of [match[1], match[2]]) {
+            if (path) binaryPaths.add(path);
+          }
+          continue;
+        }
+      }
+      for (const path of currentPaths) {
+        binaryPaths.add(path);
+      }
+    }
+  }
+  return binaryPaths;
+}
+
+function isBinaryFileDiff(file: FileDiffMetadata, binaryPaths: Set<string>): boolean {
+  if (file.hunks.length !== 0) return false;
+  const candidates = [file.name, file.prevName]
+    .filter((name): name is string => typeof name === "string" && name.length > 0)
+    .map((name) => (name.startsWith("a/") || name.startsWith("b/") ? name.slice(2) : name));
+  return candidates.some((path) => binaryPaths.has(path));
+}
+
 export function getRenderablePatch(
   patch: string | undefined,
   cacheScope = "diff-panel",
@@ -174,12 +286,28 @@ export function getRenderablePatch(
       buildPatchCacheKey(normalizedPatch, cacheScope),
     );
     const sourceFiles = parsedPatches.flatMap((parsedPatch) => parsedPatch.files);
-    const files = sourceFiles.map((file) => {
-      const filtered = options.ignoreWhitespace ? hideWhitespaceChanges(file) : file;
-      return options.compactPartialHunkOffsets ? compactPartialHunkOffsets(filtered) : filtered;
-    });
-    if (files.length > 0) {
-      return { kind: "files", files, sourceFiles };
+    const binaryPaths = extractBinaryPatchPaths(normalizedPatch);
+    const files: FileDiffMetadata[] = [];
+    const binaryFiles: FileDiffMetadata[] = [];
+    for (const sourceFile of sourceFiles) {
+      let file = sourceFile;
+      if (options.upgradeFullContextFiles) {
+        file = upgradeFullContextFile(file);
+      }
+      if (options.ignoreWhitespace) {
+        file = hideWhitespaceChanges(file);
+      }
+      if (options.compactPartialHunkOffsets) {
+        file = compactPartialHunkOffsets(file);
+      }
+      if (isBinaryFileDiff(file, binaryPaths)) {
+        binaryFiles.push(file);
+      } else {
+        files.push(file);
+      }
+    }
+    if (files.length > 0 || binaryFiles.length > 0) {
+      return { kind: "files", files, binaryFiles, sourceFiles };
     }
 
     return {
@@ -196,7 +324,42 @@ export function getRenderablePatch(
   }
 }
 
+/**
+ * Synthesize a renderable diff from before/after text (e.g. Claude Edit
+ * old_string/new_string, which carry no provider patch). Line numbers are
+ * relative to the snippet, not the source file.
+ */
+export function getRenderablePatchFromContents(
+  oldContents: string,
+  newContents: string,
+  name: string,
+  cacheScope = "inline-edit",
+): RenderablePatch | null {
+  if (oldContents === newContents) return null;
+  try {
+    const cacheKey = buildPatchCacheKey(
+      `${name}\x00${oldContents}\x00\x00${newContents}`,
+      cacheScope,
+    );
+    const fileDiff = parseDiffFromFile(
+      { name, contents: oldContents, cacheKey: `${cacheKey}:old` },
+      { name, contents: newContents, cacheKey: `${cacheKey}:new` },
+    );
+    if (fileDiff.hunks.length === 0) return null;
+    return { kind: "files", files: [fileDiff], binaryFiles: [], sourceFiles: [fileDiff] };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * What the patch called the file, as the file's own name. Git writes a name holding a tab, a
+ * newline, a quote or a backslash quoted and escaped, and the parser hands one of those back still
+ * escaped. A viewed mark, a review comment and a file's contents are all asked for by this path,
+ * and the host knows the file only under the name it really has.
+ */
 /** Uses the parser-decoded filename, including Git's quoted and escaped names. */
+
 export function resolveFileDiffPath(fileDiff: FileDiffMetadata): string {
   return fileDiff.name ?? fileDiff.prevName ?? "";
 }

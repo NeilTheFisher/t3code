@@ -184,6 +184,7 @@ import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import * as DatabaseStorage from "./persistence/DatabaseStorage.ts";
 import * as StorageCleanup from "./storageCleanup.ts";
+import * as VoiceSessionService from "./voice/VoiceSessionService.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import { terminalOutputStream, withTerminalOutputWindow } from "./terminal/OutputProtocol.ts";
 import * as ServerBrowser from "./preview/ServerBrowser.ts";
@@ -1336,6 +1337,7 @@ export const layerWsRpc = (
       const serverSettings = yield* ServerSettings.ServerSettingsService;
       const peerLinks = yield* PeerLinks.PeerLinks;
       const peerLinkRequests = yield* PeerLinkRequests.PeerLinkRequests;
+      const voiceSessionService = yield* VoiceSessionService.VoiceSessionService;
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
@@ -2512,6 +2514,18 @@ export const layerWsRpc = (
               : serverSettings.updateProviderInstance(providerInstanceMutation, nextPatch);
             return ServerSettings.redactServerSettingsForClient(settings);
           }),
+        [WS_METHODS.voiceGetCredentialStatus]: () => voiceSessionService.getCredentialStatus,
+        [WS_METHODS.voiceSetCredential]: ({ apiKey }) => voiceSessionService.setCredential(apiKey),
+        [WS_METHODS.voiceRemoveCredential]: () => voiceSessionService.removeCredential,
+        [WS_METHODS.voiceCreateSession]: ({ model }) => voiceSessionService.createSession(model),
+        [WS_METHODS.voiceGetParallelCredentialStatus]: () =>
+          voiceSessionService.getParallelCredentialStatus,
+        [WS_METHODS.voiceSetParallelCredential]: ({ apiKey }) =>
+          voiceSessionService.setParallelCredential(apiKey),
+        [WS_METHODS.voiceRemoveParallelCredential]: () =>
+          voiceSessionService.removeParallelCredential,
+        [WS_METHODS.voiceSearchWeb]: (input) => voiceSessionService.searchWeb(input),
+        [WS_METHODS.voiceExtractWeb]: (input) => voiceSessionService.extractWeb(input),
         [WS_METHODS.serverDiscoverSourceControl]: (_input) => sourceControlDiscovery.discover,
         [WS_METHODS.serverGetTraceDiagnostics]: (_input) =>
           TraceDiagnostics.readTraceDiagnostics({
@@ -2847,6 +2861,7 @@ export const layerWsRpc = (
               input.resource._tag === "attachment" ||
               input.resource._tag === "native-app-icon" ||
               input.resource._tag === "tool-output-image" ||
+              input.resource._tag === "external-file" ||
               input.resource._tag === SOURCE_CONTROL_MEDIA_ASSET ||
               // A network path is served only from the thread's project, looked up below.
               (input.resource._tag === "media-file" &&

@@ -3580,9 +3580,11 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               diffStr: firstChange.diff,
               changes: item.changes.map((change) => {
                 const movePath = change.kind.type === "update" ? change.kind.move_path : undefined;
-                return movePath
-                  ? { operation: change.kind.type, path: movePath, oldPath: change.path }
-                  : { operation: change.kind.type, path: change.path };
+                return {
+                  operation: change.kind.type,
+                  ...(movePath ? { path: movePath, oldPath: change.path } : { path: change.path }),
+                  ...(change.diff.length > 0 ? { patch: change.diff } : {}),
+                };
               }),
             };
             return { node, turnItem };

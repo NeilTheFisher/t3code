@@ -4,6 +4,12 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+// @effect-diagnostics-next-line nodeBuiltinImport:off - one-shot JSON cache read inside tryPromise; the Path service cannot express the home-dir fallback chain.
+import * as NodeFS from "node:fs";
+// @effect-diagnostics-next-line nodeBuiltinImport:off - homedir lookup for the Codex models cache path.
+import * as NodeOS from "node:os";
+// @effect-diagnostics-next-line nodeBuiltinImport:off - joins the models_cache.json path for the cache read above.
+import * as NodePath from "node:path";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Result from "effect/Result";
@@ -245,10 +251,70 @@ function parseCodexModelListResponse(
     name: formatCodexModelName(model.displayName),
     isCustom: false,
     ...(model.isDefault ? { isDefault: true } : {}),
+    ...(isLegacyCodexModel(model.model) ? { isLegacy: true } : {}),
     capabilities: mapCodexModelCapabilities(model),
   }));
 }
 
+const CURRENT_CODEX_MODELS = new Set([
+  "gpt-5.6-luna",
+  "gpt-5.6-terra",
+  "gpt-5.6-sol",
+  "gpt-daybreak-blue-latest",
+  "gpt-daybreak-red-latest",
+]);
+
+export function isLegacyCodexModel(model: string): boolean {
+  return !CURRENT_CODEX_MODELS.has(model);
+}
+
+export function enrichCodexModelsFromCache(
+  models: ReadonlyArray<ServerProviderModel>,
+  cache: unknown,
+): ReadonlyArray<ServerProviderModel> {
+  if (!cache || typeof cache !== "object" || !("models" in cache) || !Array.isArray(cache.models)) {
+    return models;
+  }
+  const contextWindows = new Map<string, number>();
+  for (const entry of cache.models) {
+    if (!entry || typeof entry !== "object") continue;
+    const slug = "slug" in entry && typeof entry.slug === "string" ? entry.slug : undefined;
+    const tokens =
+      "context_window" in entry && typeof entry.context_window === "number"
+        ? entry.context_window
+        : "max_context_window" in entry && typeof entry.max_context_window === "number"
+          ? entry.max_context_window
+          : undefined;
+    if (slug && tokens && Number.isFinite(tokens) && tokens > 0) {
+      contextWindows.set(slug, Math.round(tokens));
+    }
+  }
+  return models.map((model) => {
+    const contextWindowTokens = contextWindows.get(model.slug);
+    return contextWindowTokens === undefined ? model : { ...model, contextWindowTokens };
+  });
+}
+
+async function readCodexModelCache(homePath: string | undefined): Promise<unknown> {
+  // @effect-diagnostics-next-line nodeBuiltinImport:off - a one-shot sync-ish JSON cache read inside tryPromise; the Path service cannot express the fallback chain.
+  const defaultHome = NodePath.join(NodeOS.homedir(), ".codex");
+  const candidates = homePath && homePath !== defaultHome ? [homePath, defaultHome] : [defaultHome];
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(
+        await NodeFS.promises.readFile(NodePath.join(candidate, "models_cache.json"), "utf8"),
+      );
+    } catch {
+      // A custom Codex home may share the default home's downloaded model catalog.
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Prefer our own default-model ranking when one of the preferred slugs is in
+ * the live catalog; otherwise keep whatever Codex itself flagged as default.
+ */
 export function applyPreferredCodexDefaultModel(
   models: ReadonlyArray<ServerProviderModel>,
 ): ReadonlyArray<ServerProviderModel> {
@@ -534,7 +600,7 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
 
   // Optional discovery must finish before the outer timeout can discard the account result.
   const deadlineMs = spawnedAtMs + CODEX_AUTH_PROBE_TIMEOUT_MS - CODEX_DISCOVERY_MARGIN_MS;
-  const [skillsResponse, models, serviceTier, rateLimits] = yield* Effect.all(
+  const [skillsResponse, models, serviceTier, rateLimits, modelCache] = yield* Effect.all(
     [
       withCodexDiscoveryDeadline(client.request("skills/list", { cwds: [input.cwd] }), deadlineMs),
       accountResponse.account?.type === "chatgpt"
@@ -580,6 +646,9 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
               ),
             ),
           ),
+      Effect.tryPromise(() => readCodexModelCache(resolvedHomePath)).pipe(
+        Effect.orElseSucceed(() => undefined),
+      ),
     ],
     { concurrency: "unbounded" },
   );
@@ -588,7 +657,12 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
     account: accountResponse,
     ...(rateLimits ? { rateLimits } : {}),
     version,
-    models,
+    models: applyPreferredCodexDefaultModel(
+      appendCustomCodexModels(
+        enrichCodexModelsFromCache(models, modelCache),
+        input.customModels ?? [],
+      ),
+    ),
     serviceTier,
     skills: skillsResponse ? parseCodexSkillsListResponse(skillsResponse, input.cwd) : [],
   } satisfies CodexAppServerProviderSnapshot;
