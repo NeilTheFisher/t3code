@@ -2,6 +2,10 @@ import type { AssistantCitation } from "@t3tools/contracts";
 import { collectAssistantCitations } from "@t3tools/shared/assistantCitations";
 import { collectComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import {
+  INLINE_TERMINAL_CONTEXT_PLACEHOLDER,
+  type TerminalContextDraft,
+} from "./lib/terminalContext";
+import {
   collectComposerInlineTokens,
   type ComposerInlineToken,
 } from "@t3tools/shared/composerInlineTokens";
@@ -32,6 +36,10 @@ export type ComposerPromptSegment =
       contextId: string;
       label: string;
       source: string;
+    }
+  | {
+      type: "terminal-context";
+      context: TerminalContextDraft | null;
     };
 
 function rangeIncludesIndex(start: number, end: number, index: number): boolean {
@@ -48,11 +56,68 @@ function pushTextSegment(segments: ComposerPromptSegment[], text: string): void 
   segments.push({ type: "text", text });
 }
 
+function forEachPromptSegmentSlice(
+  prompt: string,
+  visitor: (
+    slice:
+      | {
+          type: "text";
+          text: string;
+          promptOffset: number;
+        }
+      | {
+          type: "terminal-context";
+          promptOffset: number;
+        },
+  ) => boolean | void,
+): boolean {
+  let textCursor = 0;
+
+  for (let index = 0; index < prompt.length; index += 1) {
+    if (prompt[index] !== INLINE_TERMINAL_CONTEXT_PLACEHOLDER) {
+      continue;
+    }
+
+    if (
+      index > textCursor &&
+      visitor({
+        type: "text",
+        text: prompt.slice(textCursor, index),
+        promptOffset: textCursor,
+      }) === true
+    ) {
+      return true;
+    }
+    if (visitor({ type: "terminal-context", promptOffset: index }) === true) {
+      return true;
+    }
+    textCursor = index + 1;
+  }
+
+  if (
+    textCursor < prompt.length &&
+    visitor({
+      type: "text",
+      text: prompt.slice(textCursor),
+      promptOffset: textCursor,
+    }) === true
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 function forEachPromptTextSlice(
   prompt: string,
   visitor: (text: string, promptOffset: number) => boolean | void,
 ): boolean {
-  return prompt.length > 0 && visitor(prompt, 0) === true;
+  return forEachPromptSegmentSlice(prompt, (slice) => {
+    if (slice.type !== "text") {
+      return false;
+    }
+    return visitor(slice.text, slice.promptOffset);
+  });
 }
 
 function forEachMentionMatch(
@@ -175,6 +240,29 @@ export function selectionTouchesMentionBoundary(
   });
 }
 
-export function splitPromptIntoComposerSegments(prompt: string): ComposerPromptSegment[] {
-  return splitPromptTextIntoComposerSegments(prompt);
+export function splitPromptIntoComposerSegments(
+  prompt: string,
+  terminalContexts: ReadonlyArray<TerminalContextDraft> = [],
+): ComposerPromptSegment[] {
+  if (!prompt) {
+    return [];
+  }
+
+  const segments: ComposerPromptSegment[] = [];
+  let terminalContextIndex = 0;
+  forEachPromptSegmentSlice(prompt, (slice) => {
+    if (slice.type === "text") {
+      segments.push(...splitPromptTextIntoComposerSegments(slice.text));
+      return false;
+    }
+
+    segments.push({
+      type: "terminal-context",
+      context: terminalContexts[terminalContextIndex] ?? null,
+    });
+    terminalContextIndex += 1;
+    return false;
+  });
+
+  return segments;
 }
