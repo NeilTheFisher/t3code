@@ -60,6 +60,9 @@ export const AssetResource = Schema.Union([
   Schema.TaggedStruct("native-app-icon", {
     app: NativeAppIconReference,
   }),
+  Schema.TaggedStruct("external-file", {
+    path: TrimmedNonEmptyString.check(Schema.isMaxLength(ASSET_PATH_MAX_LENGTH)),
+  }),
   // Media a change request body points at on its host. A private repository serves these only
   // to a request that carries a credential, which the client has none of, so the server fetches
   // them with the credential the host's driver holds for the repository at `cwd`. `repository`
@@ -307,6 +310,29 @@ export class AssetSigningKeyLoadError extends Schema.TaggedError<AssetSigningKey
   }
 }
 
+export class AssetExternalFileNotFoundError extends Schema.TaggedError<AssetExternalFileNotFoundError>()(
+  "AssetExternalFileNotFoundError",
+  {
+    resource: AssetResource,
+  },
+) {
+  override get message(): string {
+    return "External file was not found.";
+  }
+}
+
+export class AssetExternalFileInspectionError extends Schema.TaggedError<AssetExternalFileInspectionError>()(
+  "AssetExternalFileInspectionError",
+  {
+    resource: AssetResource,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return "Failed to inspect the external file.";
+  }
+}
+
 // The tag predates the rename and stays: clients on either side of an update decode it.
 export class AssetSourceControlMediaUrlValidationError extends Schema.TaggedError<AssetSourceControlMediaUrlValidationError>()(
   "AssetGitHubMediaUrlValidationError",
@@ -332,5 +358,7 @@ export const AssetAccessError = Schema.Union([
   AssetProjectFaviconNotFoundError,
   AssetSourceControlMediaUrlValidationError,
   AssetSigningKeyLoadError,
+  AssetExternalFileNotFoundError,
+  AssetExternalFileInspectionError,
 ]);
 export type AssetAccessError = typeof AssetAccessError.Type;
