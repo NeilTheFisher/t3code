@@ -4,7 +4,7 @@ import { msg } from "gt-react";
 import { DEFAULT_LOCALE } from "./i18n/locales";
 import { getActiveLocale, m, type MessageResolver } from "./i18n/messages";
 
-function getTimestampFormatOptions(
+export function getTimestampFormatOptions(
   timestampFormat: TimestampFormat,
   includeSeconds: boolean,
 ): Intl.DateTimeFormatOptions {

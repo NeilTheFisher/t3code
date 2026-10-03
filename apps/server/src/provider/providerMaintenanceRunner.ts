@@ -77,7 +77,7 @@ export interface ProviderMaintenanceRunnerShape {
 export class ProviderMaintenanceRunner extends Context.Service<
   ProviderMaintenanceRunner,
   ProviderMaintenanceRunnerShape
->()("t3/provider/providerMaintenanceRunner") {}
+>()("@neilthefisher/t3/provider/providerMaintenanceRunner") {}
 
 class ProviderMaintenanceCommandError extends Schema.TaggedError<ProviderMaintenanceCommandError>()(
   "ProviderMaintenanceCommandError",
@@ -688,6 +688,35 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
       },
     );
 
+    // An interrupted update (client disconnect kills the RPC fiber) aborts
+    // `recordFailedUpdate` mid-write, which would pin the provider on
+    // "queued"/"running" forever and keep the sidebar pill spinning. This
+    // runs in the exit finalizer's uninterruptible region, so it always gets
+    // the last word.
+    const recordInterruptedUpdate = Effect.fn("ProviderMaintenanceRunner.recordInterruptedUpdate")(
+      function* () {
+        const providers = yield* providerRegistry.getProviders;
+        const current = providers.find(
+          (candidate) => candidate.instanceId === instanceId,
+        )?.updateState;
+        if (!current || (current.status !== "queued" && current.status !== "running")) {
+          return;
+        }
+        yield* setUpdateState(
+          makeUpdateState({
+            status: "failed",
+            startedAt: current.startedAt,
+            finishedAt: yield* nowIso,
+            message:
+              current.status === "queued"
+                ? "Update was cancelled while waiting to start."
+                : "Update interrupted before completion.",
+            output: null,
+          }),
+        );
+      },
+    );
+
     return yield* commandCoordinator
       .withCommandLock({
         targetKey,
@@ -696,20 +725,10 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
         run: runProviderUpdate(),
       })
       .pipe(
-        // A dropped request interrupts the update; a "running" state would spin until restart.
-        Effect.onInterrupt(() =>
-          Effect.gen(function* () {
-            // A finished state stays, even if the request drops while it is being written.
-            if (yield* Ref.get(settled)) return;
-            yield* setUpdateState(
-              makeUpdateState({
-                status: "failed",
-                startedAt: yield* Ref.get(startedAtRef),
-                finishedAt: yield* nowIso,
-                message: "Update stopped before it finished.",
-              }),
-            );
-          }).pipe(Effect.ignore),
+        Effect.onExit((exit) =>
+          exit._tag === "Failure" && Cause.hasInterruptsOnly(exit.cause)
+            ? recordInterruptedUpdate()
+            : Effect.void,
         ),
         Effect.mapError((error) =>
           isServerProviderUpdateError(error)

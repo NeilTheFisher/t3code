@@ -2,23 +2,42 @@ import { useGT } from "gt-react";
 import { TerminalIcon } from "lucide-react";
 
 import type { ContextPresentationCapability } from "../contextPresentationRegistry";
-import { ContextChipPopover, ContextChipShell } from "../contextChipParts";
+import { ContextChipPopover } from "../contextChipParts";
 
 interface TerminalContextInlineChipProps {
   label: string;
-  terminalLabel: string;
-  lineStart: number;
-  lineEnd: number;
-  text: string;
-  detailsMode: ContextPresentationCapability["details"];
+  /** Plain-text tooltip for the compact inline chip (legacy composer rendering). */
+  tooltipText?: string;
+  terminalLabel?: string;
+  lineStart?: number;
+  lineEnd?: number;
+  text?: string;
+  detailsMode?: ContextPresentationCapability["details"];
   expired?: boolean;
 }
 
 export function TerminalContextInlineChip(props: TerminalContextInlineChipProps) {
-  const { label, terminalLabel, lineStart, lineEnd, text, detailsMode, expired = false } = props;
+  const {
+    label,
+    tooltipText,
+    terminalLabel,
+    lineStart,
+    lineEnd,
+    text,
+    detailsMode,
+    expired = false,
+  } = props;
   const gt = useGT();
 
-  if (!expired && text.length > 0 && detailsMode === "popover") {
+  if (
+    !expired &&
+    text !== undefined &&
+    text.length > 0 &&
+    terminalLabel !== undefined &&
+    lineStart !== undefined &&
+    lineEnd !== undefined &&
+    detailsMode === "popover"
+  ) {
     return (
       <ContextChipPopover
         kind="terminal"
@@ -50,6 +69,8 @@ export function TerminalContextInlineChip(props: TerminalContextInlineChipProps)
     );
   }
 
+  const resolvedTooltip = tooltipText ?? text ?? "";
+
   return (
     <ContextChipShell
       kind="terminal"
@@ -70,7 +91,7 @@ export function TerminalContextInlineChip(props: TerminalContextInlineChipProps)
             )
           : detailsMode === "none"
             ? undefined
-            : text
+            : resolvedTooltip
       }
     />
   );
