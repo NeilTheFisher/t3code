@@ -208,6 +208,308 @@ describe("ClientSettings quit confirmation", () => {
     expect(settings.confirmQuit).toBe(mode);
     expect(encodeClientSettings(settings).confirmQuit).toBe(mode);
   });
+
+  it("rejects legacy booleans at the patch boundary", () => {
+    expect(() => decodeClientSettingsPatch({ confirmQuit: true })).toThrow();
+  });
+});
+
+describe("ClientSettings browser recording frame rate", () => {
+  it("defaults to 30 fps", () => {
+    expect(decodeClientSettings({}).browserRecordingFrameRate).toBe(30);
+  });
+
+  it.each([30, 60])("accepts a supported frame rate: %s", (frameRate) => {
+    expect(
+      decodeClientSettings({ browserRecordingFrameRate: frameRate }).browserRecordingFrameRate,
+    ).toBe(frameRate);
+    expect(
+      decodeClientSettingsPatch({ browserRecordingFrameRate: frameRate }).browserRecordingFrameRate,
+    ).toBe(frameRate);
+  });
+
+  it.each([24, 59, 120])("rejects an unsupported frame rate: %s", (frameRate) => {
+    expect(() => decodeClientSettings({ browserRecordingFrameRate: frameRate })).toThrow();
+    expect(() => decodeClientSettingsPatch({ browserRecordingFrameRate: frameRate })).toThrow();
+  });
+});
+
+describe("ClientSettings recording input overlays", () => {
+  it("defaults both overlays off and accepts independent opt-ins", () => {
+    const settings = decodeClientSettings({});
+    expect(settings.browserRecordingShowKeyPresses).toBe(false);
+    expect(settings.browserRecordingShowMousePresses).toBe(false);
+    expect(
+      decodeClientSettingsPatch({
+        browserRecordingShowKeyPresses: true,
+        browserRecordingShowMousePresses: false,
+      }),
+    ).toMatchObject({
+      browserRecordingShowKeyPresses: true,
+      browserRecordingShowMousePresses: false,
+    });
+  });
+});
+
+describe("ClientSettings glass opacity", () => {
+  it("defaults to a readable translucent surface", () => {
+    expect(decodeClientSettings({}).glassOpacity).toBe(80);
+  });
+
+  it.each([39, 101, 72.5])("rejects an invalid glass opacity: %s", (value) => {
+    expect(() => decodeClientSettings({ glassOpacity: value })).toThrow();
+    expect(() => decodeClientSettingsPatch({ glassOpacity: value })).toThrow();
+  });
+
+  it.each([40, 100])("accepts a glass opacity within the supported range: %s", (value) => {
+    expect(decodeClientSettings({ glassOpacity: value }).glassOpacity).toBe(value);
+    expect(decodeClientSettingsPatch({ glassOpacity: value }).glassOpacity).toBe(value);
+  });
+});
+
+describe("ClientSettings appearance contrast", () => {
+  it("defaults to the theme's original contrast", () => {
+    expect(decodeClientSettings({}).appearanceContrast).toBe(100);
+  });
+
+  it.each([49, 201, 92.5])("rejects an invalid appearance contrast: %s", (value) => {
+    expect(() => decodeClientSettings({ appearanceContrast: value })).toThrow();
+    expect(() => decodeClientSettingsPatch({ appearanceContrast: value })).toThrow();
+  });
+
+  it.each([50, 200])("accepts an appearance contrast in range: %s", (value) => {
+    expect(decodeClientSettings({ appearanceContrast: value }).appearanceContrast).toBe(value);
+    expect(decodeClientSettingsPatch({ appearanceContrast: value }).appearanceContrast).toBe(value);
+  });
+});
+
+describe("ClientSettings panel animations", () => {
+  it("defaults to instant changes", () => {
+    expect(decodeClientSettings({}).panelAnimationDurationMs).toBe(0);
+  });
+
+  it.each([0, 400])("accepts a panel animation duration: %s", (value) => {
+    expect(decodeClientSettingsPatch({ panelAnimationDurationMs: value })).toEqual({
+      panelAnimationDurationMs: value,
+    });
+  });
+
+  it.each([-1, 401, 150.5])("rejects an invalid panel animation duration: %s", (value) => {
+    expect(() => decodeClientSettingsPatch({ panelAnimationDurationMs: value })).toThrow();
+  });
+});
+
+describe("ClientSettings environment identification", () => {
+  it("defaults to artwork and accepts each presentation mode", () => {
+    expect(decodeClientSettings({}).environmentIdentificationMode).toBe("artwork");
+
+    for (const mode of ["artwork", "pill", "none"] as const) {
+      expect(
+        decodeClientSettingsPatch({ environmentIdentificationMode: mode })
+          .environmentIdentificationMode,
+      ).toBe(mode);
+    }
+  });
+
+  it("rejects unsupported presentation modes", () => {
+    expect(() => decodeClientSettings({ environmentIdentificationMode: "badge" })).toThrow();
+    expect(() => decodeClientSettingsPatch({ environmentIdentificationMode: "badge" })).toThrow();
+  });
+});
+
+describe("ClientSettings sidebar", () => {
+  it("defaults to the current sidebar", () => {
+    expect(decodeClientSettings({}).legacySidebarEnabled).toBe(false);
+  });
+
+  it("drops the retired sidebar v2 beta keys, resetting everyone to the default", () => {
+    const decoded = decodeClientSettings({
+      sidebarV2Enabled: false,
+      sidebarV2ConfiguredByUser: true,
+    });
+    expect(decoded.legacySidebarEnabled).toBe(false);
+    expect(decoded).not.toHaveProperty("sidebarV2Enabled");
+    expect(decoded).not.toHaveProperty("sidebarV2ConfiguredByUser");
+  });
+
+  it("drops the retired compact sidebar keys for users who opted in", () => {
+    const stored = { compactSidebarEnabled: true, sidebarCompactThreadRows: true };
+    const decoded = decodeClientSettings(stored);
+    expect(decoded).not.toHaveProperty("compactSidebarEnabled");
+    expect(decoded).not.toHaveProperty("sidebarCompactThreadRows");
+    expect(decodeClientSettingsPatch(stored)).toEqual({});
+  });
+
+  it("preserves an explicit legacy sidebar opt-in", () => {
+    expect(decodeClientSettings({ legacySidebarEnabled: true }).legacySidebarEnabled).toBe(true);
+    expect(decodeClientSettingsPatch({ legacySidebarEnabled: true }).legacySidebarEnabled).toBe(
+      true,
+    );
+  });
+
+  it("keeps unpin confirmation opt-in and patchable", () => {
+    expect(decodeClientSettings({}).confirmThreadUnpin).toBe(false);
+    expect(decodeClientSettingsPatch({ confirmThreadUnpin: true }).confirmThreadUnpin).toBe(true);
+    expect(() => decodeClientSettingsPatch({ confirmThreadUnpin: "yes" })).toThrow();
+  });
+});
+
+describe("ClientSettings context window meter", () => {
+  it("defaults off and preserves an explicit legacy opt-in", () => {
+    expect(decodeClientSettings({}).contextWindowMeterEnabled).toBe(false);
+    expect(
+      decodeClientSettings({ contextWindowMeterEnabled: true }).contextWindowMeterEnabled,
+    ).toBe(true);
+    expect(
+      decodeClientSettingsPatch({ contextWindowMeterEnabled: true }).contextWindowMeterEnabled,
+    ).toBe(true);
+  });
+});
+
+describe("ClientSettings send shortcut", () => {
+  it("defaults to Enter and validates the supported choices", () => {
+    expect(decodeClientSettings({}).sendShortcut).toBe("enter");
+    for (const sendShortcut of ["enter", "mod-enter-multiline", "mod-enter"]) {
+      expect(decodeClientSettings({ sendShortcut }).sendShortcut).toBe(sendShortcut);
+      expect(decodeClientSettingsPatch({ sendShortcut }).sendShortcut).toBe(sendShortcut);
+    }
+    expect(() => decodeClientSettingsPatch({ sendShortcut: "invalid" })).toThrow();
+  });
+});
+
+describe("ClientSettings follow-up behavior", () => {
+  it("defaults to queue and accepts either behavior", () => {
+    expect(decodeClientSettings({}).followUpBehavior).toBe("queue");
+    for (const followUpBehavior of ["queue", "steer"]) {
+      expect(decodeClientSettings({ followUpBehavior }).followUpBehavior).toBe(followUpBehavior);
+      expect(decodeClientSettingsPatch({ followUpBehavior }).followUpBehavior).toBe(
+        followUpBehavior,
+      );
+    }
+    expect(() => decodeClientSettingsPatch({ followUpBehavior: "invalid" })).toThrow();
+  });
+});
+
+describe("ClientSettings composer collapse", () => {
+  it("collapses on scroll by default and accepts opting out", () => {
+    expect(decodeClientSettings({}).composerCollapseOnScroll).toBe(true);
+    expect(
+      decodeClientSettingsPatch({ composerCollapseOnScroll: false }).composerCollapseOnScroll,
+    ).toBe(false);
+  });
+
+  it("drops the retired blur trigger key", () => {
+    const decoded = decodeClientSettings({ composerCollapseOnBlur: false });
+    expect(decoded.composerCollapseOnScroll).toBe(true);
+    expect(decoded).not.toHaveProperty("composerCollapseOnBlur");
+  });
+});
+
+describe("ServerSettings thread settlement", () => {
+  it("defaults merge settlement on and inactivity settlement to three days", () => {
+    const settings = decodeServerSettings({});
+    expect(settings.sidebarAutoSettleAfterDays).toBe(3);
+    expect(settings.sidebarAutoSettleOnMerge).toBe(true);
+  });
+
+  it("allows both automatic rules to be disabled", () => {
+    expect(
+      decodeServerSettings({
+        sidebarAutoSettleAfterDays: null,
+        sidebarAutoSettleOnMerge: false,
+      }),
+    ).toMatchObject({ sidebarAutoSettleAfterDays: null, sidebarAutoSettleOnMerge: false });
+    expect(
+      decodeServerSettingsPatch({
+        sidebarAutoSettleAfterDays: null,
+        sidebarAutoSettleOnMerge: false,
+      }),
+    ).toMatchObject({ sidebarAutoSettleAfterDays: null, sidebarAutoSettleOnMerge: false });
+  });
+
+  it.each([-1, 0, 91])("rejects an auto-settle threshold outside 1..90: %s", (value) => {
+    expect(() => decodeServerSettings({ sidebarAutoSettleAfterDays: value })).toThrow();
+    expect(() => decodeServerSettingsPatch({ sidebarAutoSettleAfterDays: value })).toThrow();
+  });
+});
+
+describe("ClientSettings pull request merge methods", () => {
+  it("defaults to no project overrides and accepts supported methods", () => {
+    expect(decodeClientSettings({}).pullRequestMergeMethodOverrides).toEqual({});
+    expect(
+      decodeClientSettingsPatch({
+        pullRequestMergeMethodOverrides: { project: "squash" },
+      }).pullRequestMergeMethodOverrides,
+    ).toEqual({ project: "squash" });
+  });
+
+  it("rejects unsupported project merge methods", () => {
+    expect(() =>
+      decodeClientSettingsPatch({
+        pullRequestMergeMethodOverrides: { project: "fast-forward" },
+      }),
+    ).toThrow();
+  });
+});
+
+describe("ClientSettings provider usage", () => {
+  it("keeps context-popover usage opt-in", () => {
+    expect(decodeClientSettings({}).showProviderUsageInContextPopover).toBe(false);
+    expect(
+      decodeClientSettings({ showProviderUsageInContextPopover: true })
+        .showProviderUsageInContextPopover,
+    ).toBe(true);
+  });
+});
+
+describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
+  it("defaults to an empty record so legacy configs without the key still decode", () => {
+    expect(DEFAULT_SERVER_SETTINGS.providerInstances).toEqual({});
+  });
+
+  it("decodes a fully empty config (legacy on-disk shape) without complaint", () => {
+    const decoded = decodeServerSettings({});
+    expect(decoded.providerInstances).toEqual({});
+  });
+
+  it("decodes a multi-instance map mixing first-party and fork drivers", () => {
+    const decoded = decodeServerSettings({
+      providerInstances: {
+        codex_personal: {
+          driver: "codex",
+          displayName: "Codex (personal)",
+          config: { homePath: "~/.codex_personal" },
+        },
+        codex_work: {
+          driver: "codex",
+          config: { homePath: "~/.codex_work" },
+        },
+        ollama_local: {
+          driver: "ollama",
+          displayName: "Ollama (local)",
+          config: { endpoint: "http://localhost:11434" },
+        },
+      },
+    });
+    const personalId = ProviderInstanceId.make("codex_personal");
+    const workId = ProviderInstanceId.make("codex_work");
+    const ollamaId = ProviderInstanceId.make("ollama_local");
+
+    expect(decoded.providerInstances[personalId]?.driver).toBe("codex");
+    expect(decoded.providerInstances[workId]?.config).toEqual({ homePath: "~/.codex_work" });
+    expect(decoded.providerInstances[ollamaId]?.driver).toBe("ollama");
+    expect(decoded.providerInstances[ollamaId]?.config).toEqual({
+      endpoint: "http://localhost:11434",
+    });
+  });
+
+  it("rejects instance keys that violate the slug pattern", () => {
+    expect(() =>
+      decodeServerSettings({
+        providerInstances: { "1bad": { driver: "codex" } },
+      }),
+    ).toThrow();
+  });
 });
 
 describe("provider enabled defaults", () => {

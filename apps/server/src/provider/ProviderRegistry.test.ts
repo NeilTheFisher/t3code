@@ -64,6 +64,7 @@ import type {
   ProviderInstance,
   ProviderWorkspaceSnapshot,
 } from "@t3tools/provider-core/server/driver";
+import { resolveRetainedClaudeUsage } from "./Drivers/ClaudeDriver.ts";
 import * as ProviderInstanceRegistry from "./ProviderInstanceRegistry.ts";
 import * as ProviderRegistry from "./ProviderRegistry.ts";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
@@ -208,6 +209,94 @@ function layerMockSpawner(
       const cmd = command as unknown as { args: ReadonlyArray<string> };
       return Effect.succeed(mockHandle(handler(cmd.args)));
     }),
+  );
+}
+
+function recordingMockSpawnerLayer(
+  handler: (args: ReadonlyArray<string>) => {
+    stdout: string;
+    stderr: string;
+    code: number;
+  },
+) {
+  const commands: Array<{
+    readonly args: ReadonlyArray<string>;
+    readonly env: NodeJS.ProcessEnv | undefined;
+    readonly cwd: string | undefined;
+  }> = [];
+  const layer = Layer.succeed(
+    ChildProcessSpawner.ChildProcessSpawner,
+    ChildProcessSpawner.make((command) => {
+      const cmd = command as unknown as {
+        args: ReadonlyArray<string>;
+        options?: {
+          readonly env?: NodeJS.ProcessEnv;
+          readonly cwd?: string;
+        };
+      };
+      commands.push({ args: cmd.args, env: cmd.options?.env, cwd: cmd.options?.cwd });
+      return Effect.succeed(mockHandle(handler(cmd.args)));
+    }),
+  );
+  return { layer, commands };
+}
+
+function layerMockCommandSpawner(
+  handler: (
+    command: string,
+    args: ReadonlyArray<string>,
+  ) => { stdout: string; stderr: string; code: number },
+) {
+  return Layer.succeed(
+    ChildProcessSpawner.ChildProcessSpawner,
+    ChildProcessSpawner.make((command) => {
+      const cmd = command as unknown as {
+        command: string;
+        args: ReadonlyArray<string>;
+      };
+      return Effect.succeed(mockHandle(handler(cmd.command, cmd.args)));
+    }),
+  );
+}
+
+function layerFailingSpawner(description: string) {
+  return Layer.succeed(
+    ChildProcessSpawner.ChildProcessSpawner,
+    ChildProcessSpawner.make(() =>
+      Effect.fail(
+        PlatformError.systemError({
+          _tag: "NotFound",
+          module: "ChildProcess",
+          method: "spawn",
+          description,
+        }),
+      ),
+    ),
+  );
+}
+
+function layerHangingScopedSpawner(killCalls: Ref.Ref<number>) {
+  return Layer.succeed(
+    ChildProcessSpawner.ChildProcessSpawner,
+    ChildProcessSpawner.make(() =>
+      Effect.gen(function* () {
+        const handle = ChildProcessSpawner.makeHandle({
+          pid: ChildProcessSpawner.ProcessId(1),
+          exitCode: Effect.never,
+          isRunning: Effect.succeed(true),
+          kill: () => Ref.update(killCalls, (current) => current + 1),
+          unref: Effect.succeed(Effect.void),
+          stdin: Sink.drain,
+          stdout: Stream.never,
+          stderr: Stream.never,
+          all: Stream.never,
+          getInputFd: () => Sink.drain,
+          getOutputFd: () => Stream.empty,
+        });
+        yield* Effect.addFinalizer(() => handle.kill().pipe(Effect.ignore));
+        return handle;
+      }),
+    ),
   );
 }
 
@@ -376,6 +465,56 @@ it.layer(
             input: { hint: "Describe the issue (optional)" },
           },
         ]);
+      }),
+    );
+
+    it.effect("includes Codex subscription usage from the app-server snapshot", () =>
+      Effect.gen(function* () {
+        const status = yield* checkCodexProviderStatus(defaultCodexSettings, () =>
+          Effect.succeed(
+            makeCodexProbeSnapshot({
+              rateLimits: {
+                snapshot: {
+                  primary: { usedPercent: 20, windowDurationMins: 300 },
+                  secondary: { usedPercent: 40, windowDurationMins: 10_080 },
+                },
+                resetCredits: null,
+              },
+            }),
+          ),
+        );
+
+        assert.deepStrictEqual(status.usageLimits?.windows, [
+          {
+            id: "primary",
+            kind: "session",
+            label: "Session",
+            usedPercent: 20,
+            windowDurationMins: 300,
+          },
+          {
+            id: "secondary",
+            kind: "weekly",
+            label: "Weekly",
+            usedPercent: 40,
+            windowDurationMins: 10_080,
+          },
+        ]);
+      }),
+    );
+
+    it.effect("passes configured launch args to the Codex provider probe", () =>
+      Effect.gen(function* () {
+        let observedLaunchArgs: string | undefined;
+        const settings = decodeCodexSettings({ launchArgs: "--strict-config --enable foo" });
+
+        const status = yield* checkCodexProviderStatus(settings, (input) => {
+          observedLaunchArgs = input.launchArgs;
+          return Effect.succeed(makeCodexProbeSnapshot());
+        });
+
+        assert.strictEqual(status.status, "ready");
+        assert.strictEqual(observedLaunchArgs, "--strict-config --enable foo");
       }),
     );
 
@@ -1928,8 +2067,11 @@ it.layer(
 
     it.effect("re-probes when settings change the codex binaryPath", () =>
       Effect.gen(function* () {
-        const firstMissing = `t3code_codex_first_`;
-        const secondMissing = `t3code_codex_second_`;
+        // Use explicit nonexistent paths so this regression test does not
+        // depend on the host PATH size or filesystem latency while the
+        // maintenance resolver searches for a deliberately missing command.
+        const firstMissing = `/t3code-tests/missing/codex-first`;
+        const secondMissing = `/t3code-tests/missing/codex-second`;
         const spawnedCommands: Array<string> = [];
         const secondProbeStarted = yield* Deferred.make<void>();
         const releaseSecondProbe = yield* Deferred.make<void>();
@@ -2404,6 +2546,393 @@ it.layer(
           layerMockSpawner((args) => {
             const joined = args.join(" ");
             if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
+            throw new Error(`Unexpected args: ${joined}`);
+          }),
+        ),
+      ),
+    );
+
+    it.effect("returns a display label for claude subscription types", () =>
+      Effect.gen(function* () {
+        const status = yield* checkClaudeProviderStatus(
+          defaultClaudeSettings,
+          claudeCapabilities({ subscriptionType: "maxplan" }),
+        );
+        assert.strictEqual(status.status, "ready");
+        assert.strictEqual(status.auth.status, "authenticated");
+        assert.strictEqual(status.auth.type, "maxplan");
+        assert.strictEqual(status.auth.label, "Claude Max Subscription");
+      }).pipe(
+        Effect.provide(
+          layerMockSpawner((args) => {
+            const joined = args.join(" ");
+            if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
+            if (joined === "auth status")
+              return {
+                stdout: '{"loggedIn":true,"authMethod":"claude.ai"}\n',
+                stderr: "",
+                code: 0,
+              };
+            throw new Error(`Unexpected args: ${joined}`);
+          }),
+        ),
+      ),
+    );
+
+    it.effect("reads banked resets only for subscription logins", () =>
+      Effect.gen(function* () {
+        const check = (overrides: Partial<TestClaudeCapabilities>) =>
+          checkClaudeProviderStatus(
+            defaultClaudeSettings,
+            () =>
+              Effect.succeed({
+                email: undefined,
+                subscriptionType: undefined,
+                tokenSource: undefined,
+                apiKeySource: undefined,
+                apiProvider: undefined,
+                slashCommands: [],
+                usage: { rate_limits_available: true, rate_limits: {} },
+                ...overrides,
+              }),
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            () => Effect.succeed({ availableCount: 2 }),
+          );
+        const subscription = yield* check({ subscriptionType: "max" });
+        const bedrock = yield* check({ apiProvider: "bedrock" });
+        assert.deepStrictEqual(subscription.usageLimits?.resetCredits, { availableCount: 2 });
+        assert.strictEqual(bedrock.usageLimits?.resetCredits, undefined);
+      }).pipe(
+        Effect.provide(
+          layerMockSpawner((args) => {
+            const joined = args.join(" ");
+            if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
+            throw new Error(`Unexpected args: ${joined}`);
+          }),
+        ),
+      ),
+    );
+
+    it.effect("does not duplicate Claude in full subscription labels", () =>
+      Effect.gen(function* () {
+        const status = yield* checkClaudeProviderStatus(
+          defaultClaudeSettings,
+          claudeCapabilities({
+            subscriptionType: "Claude Max Subscription",
+          }),
+        );
+        assert.strictEqual(status.auth.status, "authenticated");
+        assert.strictEqual(status.auth.type, "Claude Max Subscription");
+        assert.strictEqual(status.auth.label, "Claude Max Subscription");
+      }).pipe(
+        Effect.provide(
+          layerMockSpawner((args) => {
+            const joined = args.join(" ");
+            if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
+            throw new Error(`Unexpected args: ${joined}`);
+          }),
+        ),
+      ),
+    );
+
+    it.effect("does not duplicate Claude in provider-prefixed subscription names", () =>
+      Effect.gen(function* () {
+        const status = yield* checkClaudeProviderStatus(
+          defaultClaudeSettings,
+          claudeCapabilities({
+            subscriptionType: "Claude Max",
+          }),
+        );
+        assert.strictEqual(status.auth.status, "authenticated");
+        assert.strictEqual(status.auth.type, "Claude Max");
+        assert.strictEqual(status.auth.label, "Claude Max Subscription");
+      }).pipe(
+        Effect.provide(
+          layerMockSpawner((args) => {
+            const joined = args.join(" ");
+            if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
+            throw new Error(`Unexpected args: ${joined}`);
+          }),
+        ),
+      ),
+    );
+
+    it.effect("returns claude auth email from initialization result", () =>
+      Effect.gen(function* () {
+        const status = yield* checkClaudeProviderStatus(
+          defaultClaudeSettings,
+          claudeCapabilities({ email: "claude@example.com" }),
+        );
+        assert.strictEqual(status.auth.status, "authenticated");
+        assert.strictEqual(status.auth.email, "claude@example.com");
+      }).pipe(
+        Effect.provide(
+          layerMockSpawner((args) => {
+            const joined = args.join(" ");
+            if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
+            if (joined === "auth status")
+              return {
+                stdout:
+                  '{"loggedIn":true,"authMethod":"claude.ai","account":{"email":"claude@example.com"}}\n',
+                stderr: "",
+                code: 0,
+              };
+            throw new Error(`Unexpected args: ${joined}`);
+          }),
+        ),
+      ),
+    );
+
+    it.effect("runs Claude status probes with the configured CLAUDE_CONFIG_DIR", () => {
+      const claudeConfigDir = "/tmp/t3code-claude-home";
+      const recorded = recordingMockSpawnerLayer((args) => {
+        const joined = args.join(" ");
+        if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
+        if (joined === "auth status")
+          return {
+            stdout: '{"loggedIn":true,"authMethod":"claude.ai"}\n',
+            stderr: "",
+            code: 0,
+          };
+        throw new Error(`Unexpected args: ${joined}`);
+      });
+
+      return Effect.gen(function* () {
+        const status = yield* checkClaudeProviderStatus(
+          {
+            ...defaultClaudeSettings,
+            homePath: claudeConfigDir,
+          },
+          claudeCapabilities(),
+        );
+        assert.strictEqual(status.status, "ready");
+        assert.deepStrictEqual(
+          recorded.commands.map((command) => command.env?.CLAUDE_CONFIG_DIR),
+          [(yield* Path.Path).resolve(claudeConfigDir)],
+        );
+      }).pipe(Effect.provide(recorded.layer));
+    });
+
+    it.effect("includes probed claude slash commands in the provider snapshot", () =>
+      Effect.gen(function* () {
+        const status = yield* checkClaudeProviderStatus(
+          defaultClaudeSettings,
+          claudeCapabilities({
+            subscriptionType: "maxplan",
+            slashCommands: [
+              {
+                name: "review",
+                description: "Review a pull request",
+                input: { hint: "pr-or-branch" },
+              },
+            ],
+          }),
+        );
+
+        assert.deepStrictEqual(status.slashCommands.slice(1), [
+          {
+            name: "review",
+            description: "Review a pull request",
+            input: { hint: "pr-or-branch" },
+          },
+        ]);
+      }).pipe(
+        Effect.provide(
+          layerMockSpawner((args) => {
+            const joined = args.join(" ");
+            if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
+            if (joined === "auth status")
+              return {
+                stdout: '{"loggedIn":true,"authMethod":"claude.ai"}\n',
+                stderr: "",
+                code: 0,
+              };
+            throw new Error(`Unexpected args: ${joined}`);
+          }),
+        ),
+      ),
+    );
+
+    it.effect("deduplicates probed claude slash commands by name", () =>
+      Effect.gen(function* () {
+        const status = yield* checkClaudeProviderStatus(
+          defaultClaudeSettings,
+          claudeCapabilities({
+            subscriptionType: "maxplan",
+            slashCommands: [
+              {
+                name: "ui",
+                description: "Explore and refine UI",
+              },
+              {
+                name: "ui",
+                input: { hint: "component-or-screen" },
+              },
+            ],
+          }),
+        );
+
+        assert.deepStrictEqual(status.slashCommands, [
+          COMPACT_SLASH_COMMAND,
+          {
+            name: "ui",
+            description: "Explore and refine UI",
+            input: { hint: "component-or-screen" },
+          },
+        ]);
+      }).pipe(
+        Effect.provide(
+          layerMockSpawner((args) => {
+            const joined = args.join(" ");
+            if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
+            if (joined === "auth status")
+              return {
+                stdout: '{"loggedIn":true,"authMethod":"claude.ai"}\n',
+                stderr: "",
+                code: 0,
+              };
+            throw new Error(`Unexpected args: ${joined}`);
+          }),
+        ),
+      ),
+    );
+
+    it.effect("returns an api key label for claude api key auth", () =>
+      Effect.gen(function* () {
+        const status = yield* checkClaudeProviderStatus(
+          defaultClaudeSettings,
+          claudeCapabilities({ tokenSource: "ANTHROPIC_AUTH_TOKEN" }),
+        );
+        assert.strictEqual(status.status, "ready");
+        assert.strictEqual(status.auth.status, "authenticated");
+        assert.strictEqual(status.auth.type, "apiKey");
+        assert.strictEqual(status.auth.label, "Claude API Key");
+      }).pipe(
+        Effect.provide(
+          layerMockSpawner((args) => {
+            const joined = args.join(" ");
+            if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
+            if (joined === "auth status")
+              return {
+                stdout: '{"loggedIn":true,"authMethod":"api-key"}\n',
+                stderr: "",
+                code: 0,
+              };
+            throw new Error(`Unexpected args: ${joined}`);
+          }),
+        ),
+      ),
+    );
+
+    it.effect("skips Claude subscription usage for API key auth", () =>
+      Effect.gen(function* () {
+        let usageProbeCalls = 0;
+        const status = yield* checkClaudeProviderStatus(
+          defaultClaudeSettings,
+          claudeCapabilities({ tokenSource: "ANTHROPIC_AUTH_TOKEN" }),
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          () => {
+            usageProbeCalls += 1;
+            return Effect.void.pipe(Effect.as(undefined as ServerProvider["usageLimits"]));
+          },
+        );
+
+        assert.strictEqual(status.auth.type, "apiKey");
+        assert.strictEqual(status.usageLimits, undefined);
+        assert.strictEqual(usageProbeCalls, 0);
+      }).pipe(
+        Effect.provide(
+          layerMockSpawner((args) => {
+            if (args.join(" ") === "--version") {
+              return { stdout: "2.1.218\n", stderr: "", code: 0 };
+            }
+            throw new Error(`Unexpected args: ${args.join(" ")}`);
+          }),
+        ),
+      ),
+    );
+
+    it.effect("returns unavailable when claude is missing", () =>
+      Effect.gen(function* () {
+        const status = yield* checkClaudeProviderStatus(
+          defaultClaudeSettings,
+          claudeCapabilities(),
+        );
+        assert.strictEqual(status.status, "error");
+        assert.strictEqual(status.installed, false);
+        assert.strictEqual(status.auth.status, "unknown");
+        assert.strictEqual(status.message, "Claude Agent CLI (`claude`) was not found on PATH.");
+      }).pipe(Effect.provide(layerFailingSpawner("spawn claude ENOENT"))),
+    );
+
+    it.effect("returns error when version check fails with non-zero exit code", () => {
+      const secretStderr = "Something went wrong: secret-token-value";
+      return Effect.gen(function* () {
+        const status = yield* checkClaudeProviderStatus(
+          defaultClaudeSettings,
+          claudeCapabilities(),
+        );
+        assert.strictEqual(status.status, "error");
+        assert.strictEqual(status.installed, true);
+        assert.strictEqual(status.message, "Claude Agent CLI is installed but failed to run.");
+        assert.ok(!(status.message ?? "").includes(secretStderr));
+      }).pipe(
+        Effect.provide(
+          layerMockSpawner((args) => {
+            const joined = args.join(" ");
+            if (joined === "--version")
+              return {
+                stdout: "",
+                stderr: secretStderr,
+                code: 1,
+              };
+            throw new Error(`Unexpected args: ${joined}`);
+          }),
+        ),
+      );
+    });
+
+    it.effect("returns warning when the Claude initialization result is unavailable", () =>
+      Effect.gen(function* () {
+        const status = yield* checkClaudeProviderStatus(
+          defaultClaudeSettings,
+          noClaudeCapabilities,
+        );
+        assert.strictEqual(status.status, "warning");
+        assert.strictEqual(status.installed, true);
+        assert.strictEqual(status.auth.status, "unknown");
+        assert.strictEqual(
+          status.message,
+          "Could not verify Claude authentication status from initialization result.",
+        );
+
+        const timedOut = yield* checkClaudeProviderStatus(defaultClaudeSettings, () =>
+          Effect.fail(new Cause.TimeoutError()),
+        );
+        assert.strictEqual(timedOut.status, "warning");
+        assert.strictEqual(timedOut.auth.status, "unknown");
+        assert.strictEqual(
+          timedOut.message,
+          "Timed out after 25s while checking Claude account status.",
+        );
+      }).pipe(
+        Effect.provide(
+          layerMockSpawner((args) => {
+            const joined = args.join(" ");
+            if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
+            if (joined === "auth status")
+              return {
+                stdout: '{"loggedIn":false}\n',
+                stderr: "",
+                code: 1,
+              };
             throw new Error(`Unexpected args: ${joined}`);
           }),
         ),
