@@ -110,6 +110,8 @@ export interface DeviceOperations {
       readonly detail: string | undefined;
       /** Some Android virtual devices could not be listed; the rest are. */
       readonly androidDiscoveryIncomplete?: boolean;
+      /** Raw hub listing failures, so callers can tell a partial listing from a clean one. */
+      readonly errors?: ReadonlyArray<{ readonly message: string; readonly error?: string }>;
     },
     DeviceOperationError
   >;
