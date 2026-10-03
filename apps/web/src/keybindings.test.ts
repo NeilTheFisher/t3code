@@ -15,6 +15,12 @@ import {
   effectiveShortcutsForCommand,
   formatShortcutLabel,
   isRichTextBoldShortcut,
+  modelPickerJumpCommandForIndex,
+  modelPickerJumpIndexFromCommand,
+  isOpenFavoriteEditorShortcut,
+  isTerminalClearShortcut,
+  isTerminalPasteShortcut,
+  isTerminalCloseShortcut,
   isTerminalNewShortcut,
   isTerminalSplitShortcut,
   resolveChatShortcutCommand,
@@ -708,6 +714,67 @@ describe("resolveShortcutCommand", () => {
         platform: "MacIntel",
       }),
       "diff.toggle",
+    );
+  });
+});
+
+describe("formatShortcutLabel", () => {
+  it("formats labels for macOS", () => {
+    assert.strictEqual(
+      formatShortcutLabel(modShortcut("d", { shiftKey: true }), "MacIntel"),
+      "⇧⌘D",
+    );
+  });
+
+  it("formats labels for non-macOS", () => {
+    assert.strictEqual(
+      formatShortcutLabel(modShortcut("d", { shiftKey: true }), "Linux"),
+      "Ctrl+Shift+D",
+    );
+  });
+
+  it("formats labels for plus key", () => {
+    assert.strictEqual(formatShortcutLabel(modShortcut("+"), "MacIntel"), "⌘+");
+    assert.strictEqual(formatShortcutLabel(modShortcut("+"), "Linux"), "Ctrl++");
+  });
+});
+
+describe("isTerminalClearShortcut", () => {
+  it("matches Ctrl+L on all platforms", () => {
+    assert.isTrue(isTerminalClearShortcut(event({ key: "l", ctrlKey: true }), "Linux"));
+    assert.isTrue(isTerminalClearShortcut(event({ key: "l", ctrlKey: true }), "MacIntel"));
+  });
+
+  it("matches Cmd+K on macOS", () => {
+    assert.isTrue(isTerminalClearShortcut(event({ key: "k", metaKey: true }), "MacIntel"));
+  });
+
+  it("ignores non-keydown events", () => {
+    assert.isFalse(
+      isTerminalClearShortcut(event({ type: "keyup", key: "l", ctrlKey: true }), "Linux"),
+    );
+  });
+});
+
+describe("isTerminalPasteShortcut", () => {
+  it("matches Ctrl+V and Ctrl+Shift+V on non-mac platforms", () => {
+    assert.isTrue(isTerminalPasteShortcut(event({ key: "v", ctrlKey: true }), "Linux"));
+    assert.isTrue(
+      isTerminalPasteShortcut(event({ key: "V", ctrlKey: true, shiftKey: true }), "Win32"),
+    );
+  });
+
+  it("matches Cmd+V on macOS but not Ctrl+V", () => {
+    assert.isTrue(isTerminalPasteShortcut(event({ key: "v", metaKey: true }), "MacIntel"));
+    assert.isFalse(isTerminalPasteShortcut(event({ key: "v", ctrlKey: true }), "MacIntel"));
+  });
+
+  it("ignores alt variants and non-keydown events", () => {
+    assert.isFalse(
+      isTerminalPasteShortcut(event({ key: "v", ctrlKey: true, altKey: true }), "Linux"),
+    );
+    assert.isFalse(
+      isTerminalPasteShortcut(event({ type: "keyup", key: "v", ctrlKey: true }), "Linux"),
     );
   });
 });
