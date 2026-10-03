@@ -5,6 +5,7 @@
  */
 import type { OrchestrationV2TurnItem } from "@t3tools/contracts";
 import { formatReadToolLabel, formatSearchToolLabel } from "@t3tools/shared/toolActivity";
+import { extractToolFileChanges } from "../../provider/Layers/DiffUtils.ts";
 
 // Search results stay on the timeline wire, so keep their text a preview.
 const SEARCH_PREVIEW_MAX_CHARS = 8_000;
@@ -99,17 +100,32 @@ export function openCodeToolTurnItem(
     case "file_change": {
       const oldStr = recordString(input, "oldString", "oldText");
       const newStr = recordString(input, "newString", "content", "newText");
+      const filePath = recordString(input, "filePath", "path", "file");
       // A failed edit has no diff; keep its error where the diff would be.
       const diffStr =
         recordString(tool.completedMetadata, "diff", "patch") ??
         (base.status === "failed" && output?.trim() ? output : undefined);
+      const fileChanges =
+        extractToolFileChanges(tool.name, input) ??
+        (filePath === undefined || diffStr === undefined
+          ? undefined
+          : [{ path: filePath, diff: diffStr }]);
       return {
         ...base,
         type: "file_change",
-        fileName: recordString(input, "filePath", "path", "file") ?? tool.name,
+        fileName: filePath ?? tool.name,
         ...(oldStr === undefined ? {} : { oldStr }),
         ...(newStr === undefined ? {} : { newStr }),
         ...(diffStr === undefined ? {} : { diffStr }),
+        ...(fileChanges === undefined || fileChanges.length === 0
+          ? {}
+          : {
+              changes: fileChanges.map((change) => ({
+                operation: "edit",
+                path: change.path,
+                ...(change.diff.length === 0 ? {} : { patch: change.diff }),
+              })),
+            }),
       };
     }
     case "file_search": {

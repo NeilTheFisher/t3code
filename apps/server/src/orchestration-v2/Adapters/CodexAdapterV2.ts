@@ -3583,6 +3583,11 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
               type: "file_change",
               fileName: firstChange.path,
               diffStr: firstChange.diff,
+              changes: item.changes.map((change) => ({
+                operation: change.kind.type,
+                path: change.path,
+                ...(change.diff.length > 0 ? { patch: change.diff } : {}),
+              })),
             };
             return { node, turnItem };
           });

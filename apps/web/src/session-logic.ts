@@ -65,6 +65,13 @@ export type WorkLogToolLifecycleStatus =
   | "declined"
   | "stopped";
 
+/** One file touched by a file-change tool call, with its unified diff when known. */
+export interface FileChange {
+  readonly filePath: string;
+  readonly postFileHash?: string;
+  readonly patch?: string;
+}
+
 export interface WorkLogEntry {
   readonly questionAnswer?: import("@t3tools/contracts").UserInputAttachmentAnswerPayload;
   readonly id: string;
@@ -75,6 +82,10 @@ export interface WorkLogEntry {
   readonly command?: string;
   readonly rawCommand?: string;
   readonly changedFiles?: ReadonlyArray<string>;
+  /** Detailed file change info for file_change tool calls. */
+  readonly fileChange?: FileChange;
+  /** Per-file patches reported by a provider for one file-change tool call. */
+  readonly fileChanges?: ReadonlyArray<FileChange>;
   readonly tone: "thinking" | "tool" | "info" | "error";
   readonly toolTitle?: string;
   readonly toolCallId?: string;
@@ -471,6 +482,10 @@ function projectedWorkEntry(row: OrchestrationV2ProjectedTurnItem): WorkLogEntry
         toolData: item,
       };
     case "file_change": {
+      const fileChanges = (item.changes ?? []).map((change) => ({
+        filePath: change.path,
+        ...(change.patch === undefined || change.patch.length === 0 ? {} : { patch: change.patch }),
+      }));
       return {
         ...common,
         label:
@@ -479,6 +494,12 @@ function projectedWorkEntry(row: OrchestrationV2ProjectedTurnItem): WorkLogEntry
             ? `Changed ${item.changes.length} files`
             : `Changed ${item.fileName}`),
         changedFiles: item.changes?.map((change) => change.path) ?? [item.fileName],
+        ...(fileChanges.length === 0
+          ? {}
+          : {
+              fileChanges,
+              ...(fileChanges.length === 1 ? { fileChange: fileChanges[0] } : {}),
+            }),
         toolTitle: title ?? "File change",
         toolData: item,
       };

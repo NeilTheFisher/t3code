@@ -835,6 +835,76 @@ describe("V2 session presentation", () => {
     }
   });
 
+  it("preserves each V2 file-change patch for inline review", () => {
+    const now = DateTime.makeUnsafe("2026-06-20T00:00:00.000Z");
+    const threadId = ThreadId.make("thread-file-patches");
+    const runId = RunId.make("run-file-patches");
+    const nodeId = NodeId.make("node-file-patches");
+    const base = {
+      threadId,
+      runId,
+      nodeId,
+      providerThreadId: null,
+      providerTurnId: null,
+      nativeItemRef: null,
+      parentItemId: null,
+      status: "completed" as const,
+      title: null,
+      startedAt: now,
+      completedAt: now,
+      updatedAt: now,
+    };
+    const fileItem = {
+      ...base,
+      id: TurnItemId.make("item-file-patches"),
+      ordinal: 0,
+      type: "file_change" as const,
+      fileName: "apps/web/src/session-logic.ts",
+      changes: [
+        {
+          operation: "update",
+          path: "apps/web/src/session-logic.ts",
+          patch: "@@ -1 +1 @@\n-old\n+new",
+        },
+        {
+          operation: "update",
+          path: "apps/server/src/server.ts",
+          patch: "@@ -2 +2 @@\n-before\n+after",
+        },
+      ],
+    } satisfies OrchestrationV2TurnItem;
+    const visibleTurnItems: ReadonlyArray<OrchestrationV2ProjectedTurnItem> = [
+      {
+        position: 0,
+        visibility: "local",
+        sourceThreadId: threadId,
+        sourceItemId: fileItem.id,
+        item: fileItem,
+      },
+    ];
+
+    const entries = deriveTimelineEntriesFromVisibleTurnItems({
+      visibleTurnItems,
+      optimisticMessages: [],
+      plans: [],
+    });
+
+    expect(entries[0]?.kind).toBe("work");
+    if (entries[0]?.kind === "work") {
+      expect(entries[0].entry.changedFiles).toEqual([
+        "apps/web/src/session-logic.ts",
+        "apps/server/src/server.ts",
+      ]);
+      expect(entries[0].entry.fileChanges).toEqual([
+        {
+          filePath: "apps/web/src/session-logic.ts",
+          patch: "@@ -1 +1 @@\n-old\n+new",
+        },
+        { filePath: "apps/server/src/server.ts", patch: "@@ -2 +2 @@\n-before\n+after" },
+      ]);
+    }
+  });
+
   it("resolves attempt identity through V2 execution nodes", () => {
     const now = DateTime.makeUnsafe("2026-06-20T00:00:00.000Z");
     const threadId = ThreadId.make("thread-attempts");
