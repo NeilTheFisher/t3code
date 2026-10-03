@@ -247,7 +247,16 @@ const hubEnvironment = Effect.fn("LocalDeviceHost.hubEnvironment")(function* (
 
 /** Only a Mac can list Apple simulators; elsewhere the hub's attempt surfaces as an error. */
 const hubPlatformArguments = (hostPlatform: NodeJS.Platform) =>
-  hostPlatform === "darwin" ? [] : ["--platform", "android"];
+  hostPlatform === "darwin"
+    ? []
+    : [
+        "--platform",
+        "android",
+        // The hub's default Android capture source (grpc-screenshot) only works
+        // on emulators; scrcpy also streams physical devices over adb.
+        "--stream-source",
+        "scrcpy",
+      ];
 
 export const make = Effect.fn("LocalDeviceHost.make")(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
