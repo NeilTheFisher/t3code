@@ -175,12 +175,22 @@ export function parseSemuPacket(raw: ArrayBuffer): {
   return { data: bytes, isKey: null, timestamp: null };
 }
 
-const isVideoSessionMessage = (text: string) => {
+/**
+ * The size key of a `video-session` message, or null when the text is not one.
+ * serve-emu echoes a `video-session` on every source reset — including the
+ * reset we trigger with `reset-video` — so the size lets the caller ignore that
+ * echo and rebuild the decoder only when the device actually changed size.
+ */
+const videoSessionSizeKey = (text: string): string | null => {
   try {
-    const message = JSON.parse(text) as { type?: unknown };
-    return message.type === "video-session";
+    const message = JSON.parse(text) as {
+      type?: unknown;
+      size?: { width?: unknown; height?: unknown };
+    };
+    if (message.type !== "video-session") return null;
+    return `${message.size?.width ?? "?"}x${message.size?.height ?? "?"}`;
   } catch {
-    return false;
+    return null;
   }
 };
 
@@ -369,6 +379,7 @@ export function createDeviceStreamClient(
   let screen: DeviceScreenSize | null = null;
   let firstFrame = false;
   let configuring = false;
+  let lastSessionSize: string | null = null;
   let mjpeg = false;
   let generation = 0;
   let decoderEpoch = 0;
@@ -871,6 +882,7 @@ export function createDeviceStreamClient(
   // Android: one socket for video and input.
   const connectAndroid = () => {
     if (stopped) return;
+    lastSessionSize = null;
     const ws = new WebSocket(wsUrl(`/ws?device=${device}&frame-meta=1`));
     ws.binaryType = "arraybuffer";
     socket = ws;
@@ -884,7 +896,11 @@ export function createDeviceStreamClient(
       if (typeof event.data === "string") {
         // The encoder restarts at a new size when the device rotates; the
         // next keyframe carries a fresh SPS, so the decoder is rebuilt from it.
-        if (isVideoSessionMessage(event.data)) {
+        // serve-emu also echoes a same-size `video-session` after our own
+        // `reset-video`, which must be ignored or the two ping-pong forever.
+        const size = videoSessionSizeKey(event.data);
+        if (size !== null && size !== lastSessionSize) {
+          lastSessionSize = size;
           closeDecoder();
           configuring = false;
           connecting();

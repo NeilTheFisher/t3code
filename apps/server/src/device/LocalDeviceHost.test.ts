@@ -38,10 +38,20 @@ const diagnose = (
   );
 
 describe("Android SDK availability", () => {
-  it.effect("explains that adb alone is insufficient to launch an emulator", () =>
+  it.effect("explains that adb alone cannot list devices without the command-line tools", () =>
     Effect.gen(function* () {
       const reason = yield* diagnose(["/sdk/platform-tools/adb"], { ANDROID_HOME: "/sdk" });
-      expect(reason).toContain("Android Emulator is missing");
+      expect(reason).toContain("Command-line Tools (latest) are missing");
+    }),
+  );
+
+  it.effect("accepts adb and command-line tools without the emulator for physical devices", () =>
+    Effect.gen(function* () {
+      const reason = yield* diagnose(
+        ["/sdk/platform-tools/adb", "/sdk/cmdline-tools/latest/bin/avdmanager"],
+        { ANDROID_HOME: "/sdk" },
+      );
+      expect(reason).toBeNull();
     }),
   );
 
