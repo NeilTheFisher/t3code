@@ -83,6 +83,27 @@ Nothing. We built T3 Code because we wanted the best possible development experi
 
 We wanted something performant, remote-ready, and truly open. If we ever go the wrong direction, we want you to have everything you need to fork the source code and build the tool that you want, under your own name and branding.
 
+## Fork-specific features
+
+This checkout is a maintained fork of `pingdotgg/t3code`. In addition to upstream T3 Code, it
+includes:
+
+- Richer work logs with command output, provider-specific tool titles, collaboration labels, and
+  inline file-change diffs for Codex, Claude, and OpenCode with persistent line wrapping and
+  expandable full-context regions.
+- Scalable thread history and recovery, including bounded activity storage, scroll-up pagination,
+  restart recovery, cross-client deletion handling, and more reliable interrupted/input lifecycles.
+- Provider continuity features such as switching provider or model mid-thread, model favorites,
+  context and usage limits, and improved OpenCode skill/session support.
+- File, diff, preview, and terminal improvements including binary-safe diffs, focused expandable
+  sidebar diffs, workspace and external image previews, an embedded web surface, and terminal paste.
+- Attention and status improvements including background-task waiting state, retention of important
+  and recent threads, dismissible errors, and reliable settling of inactive threads.
+
+These capability groups are rebase invariants, not an exhaustive changelog. See
+[AGENTS.md](./AGENTS.md#fork-rebase-invariants) for the checks required after updating from
+upstream.
+
 ## Documentation
 
 - [Install and first run](./docs/user/install.md)

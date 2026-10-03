@@ -545,7 +545,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
     onEditorFocusChange?.(true);
   };
 
-  const handleBlur = () => {
+  const handleBlur = useCallback(() => {
     setIsFocused(false);
     settingsSheetPresentation.onEditorFocusChange(false);
     onEditorFocusChange?.(false);
