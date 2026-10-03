@@ -45,6 +45,14 @@ const ICON_PATHS: Record<string, ReadonlyArray<{ tag: string; attrs: Record<stri
       },
     },
   ],
+  download: [
+    {
+      tag: "path",
+      attrs: { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" },
+    },
+    { tag: "path", attrs: { d: "m7 10 5 5 5-5" } },
+    { tag: "path", attrs: { d: "M12 15V3" } },
+  ],
   "git-branch": [
     { tag: "line", attrs: { x1: "6", x2: "6", y1: "3", y2: "15" } },
     { tag: "circle", attrs: { cx: "18", cy: "6", r: "3" } },
