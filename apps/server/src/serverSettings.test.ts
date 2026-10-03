@@ -328,7 +328,9 @@ it.layer(NodeServices.layer)("server settings", (it) => {
   it.effect("decodes nested settings patches", () =>
     Effect.gen(function* () {
       assert.deepEqual(
-        yield* decodeSettingsPatch({ providers: { codex: { binaryPath: "/tmp/codex" } } }),
+        yield* decodeSettingsPatch({
+          providers: { codex: { binaryPath: "/tmp/codex" } },
+        }),
         {
           providers: { codex: { binaryPath: "/tmp/codex" } },
         },
@@ -1215,6 +1217,8 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         binaryPath: "/opt/homebrew/bin/opencode",
         serverUrl: "http://127.0.0.1:4096",
         serverPassword: "secret-password",
+        goWorkspaceId: "",
+        goAuthCookie: "",
         customModels: [],
       });
     }).pipe(Effect.provide(layerServerSettings())),
@@ -1280,6 +1284,8 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           opencode: {
             serverUrl: "http://127.0.0.1:4096",
             serverPassword: "secret-password",
+            goWorkspaceId: "",
+            goAuthCookie: "",
           },
         },
         automaticGitFetchInterval: Duration.seconds(10),
@@ -1486,8 +1492,16 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           [instanceId]: {
             driver: ProviderDriverKind.make("codex"),
             environment: [
-              { name: "OPENROUTER_API_KEY", value: "sk-or-secret", sensitive: true },
-              { name: "ANTHROPIC_BASE_URL", value: "https://openrouter.ai/api", sensitive: false },
+              {
+                name: "OPENROUTER_API_KEY",
+                value: "sk-or-secret",
+                sensitive: true,
+              },
+              {
+                name: "ANTHROPIC_BASE_URL",
+                value: "https://openrouter.ai/api",
+                sensitive: false,
+              },
             ],
             config: {},
           },
@@ -1501,7 +1515,11 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           sensitive: true,
           valueRedacted: true,
         },
-        { name: "ANTHROPIC_BASE_URL", value: "https://openrouter.ai/api", sensitive: false },
+        {
+          name: "ANTHROPIC_BASE_URL",
+          value: "https://openrouter.ai/api",
+          sensitive: false,
+        },
       ]);
 
       const raw = yield* fileSystem.readFileString(serverConfig.settingsPath);
@@ -1514,7 +1532,11 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           sensitive: true,
           valueRedacted: true,
         },
-        { name: "ANTHROPIC_BASE_URL", value: "https://openrouter.ai/api", sensitive: false },
+        {
+          name: "ANTHROPIC_BASE_URL",
+          value: "https://openrouter.ai/api",
+          sensitive: false,
+        },
       ]);
 
       const roundTripped = yield* serverSettings.updateSettings({
@@ -1523,8 +1545,17 @@ it.layer(NodeServices.layer)("server settings", (it) => {
             driver: ProviderDriverKind.make("codex"),
             displayName: "Codex Personal",
             environment: [
-              { name: "OPENROUTER_API_KEY", value: "", sensitive: true, valueRedacted: true },
-              { name: "ANTHROPIC_BASE_URL", value: "https://openrouter.ai/api", sensitive: false },
+              {
+                name: "OPENROUTER_API_KEY",
+                value: "",
+                sensitive: true,
+                valueRedacted: true,
+              },
+              {
+                name: "ANTHROPIC_BASE_URL",
+                value: "https://openrouter.ai/api",
+                sensitive: false,
+              },
             ],
             config: {},
           },

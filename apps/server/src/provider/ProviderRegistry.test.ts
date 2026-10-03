@@ -38,7 +38,7 @@ import { createModelCapabilities } from "@t3tools/shared/model";
 import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
 
 import { checkCodexProviderStatus, type CodexAppServerProviderSnapshot } from "./CodexProvider.ts";
-import { checkClaudeProviderStatus } from "./ClaudeProvider.ts";
+import { checkClaudeProviderStatus, probeClaudeUsageLimits } from "./ClaudeProvider.ts";
 import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import * as AntigravityInstallation from "./AntigravityInstallation.ts";
 import * as ModelManifest from "./ModelManifest.ts";
@@ -56,6 +56,7 @@ import {
   writeProviderStatusCache,
 } from "./providerStatusCache.ts";
 import { COMPACT_SLASH_COMMAND } from "./providerSnapshot.ts";
+import { resolveRetainedClaudeUsage } from "./Drivers/ClaudeDriver.ts";
 import type { ProviderInstance, ProviderWorkspaceSnapshot } from "./ProviderDriver.ts";
 import * as ProviderInstanceRegistry from "./ProviderInstanceRegistry.ts";
 import * as ProviderRegistry from "./ProviderRegistry.ts";
@@ -210,6 +211,7 @@ function recordingMockSpawnerLayer(
   const commands: Array<{
     readonly args: ReadonlyArray<string>;
     readonly env: NodeJS.ProcessEnv | undefined;
+    readonly cwd: string | undefined;
   }> = [];
   const layer = Layer.succeed(
     ChildProcessSpawner.ChildProcessSpawner,
@@ -218,9 +220,10 @@ function recordingMockSpawnerLayer(
         args: ReadonlyArray<string>;
         options?: {
           readonly env?: NodeJS.ProcessEnv;
+          readonly cwd?: string;
         };
       };
-      commands.push({ args: cmd.args, env: cmd.options?.env });
+      commands.push({ args: cmd.args, env: cmd.options?.env, cwd: cmd.options?.cwd });
       return Effect.succeed(mockHandle(handler(cmd.args)));
     }),
   );
@@ -448,6 +451,41 @@ it.layer(
             name: "feedback",
             description: "Send this thread and Codex logs to OpenAI",
             input: { hint: "Describe the issue (optional)" },
+          },
+        ]);
+      }),
+    );
+
+    it.effect("includes Codex subscription usage from the app-server snapshot", () =>
+      Effect.gen(function* () {
+        const status = yield* checkCodexProviderStatus(defaultCodexSettings, () =>
+          Effect.succeed(
+            makeCodexProbeSnapshot({
+              rateLimits: {
+                snapshot: {
+                  primary: { usedPercent: 20, windowDurationMins: 300 },
+                  secondary: { usedPercent: 40, windowDurationMins: 10_080 },
+                },
+                resetCredits: null,
+              },
+            }),
+          ),
+        );
+
+        assert.deepStrictEqual(status.usageLimits?.windows, [
+          {
+            id: "primary",
+            kind: "session",
+            label: "Session",
+            usedPercent: 20,
+            windowDurationMins: 300,
+          },
+          {
+            id: "secondary",
+            kind: "weekly",
+            label: "Weekly",
+            usedPercent: 40,
+            windowDurationMins: 10_080,
           },
         ]);
       }),
@@ -2669,8 +2707,11 @@ it.layer(
     // A binary path change must rebuild Codex and publish its new probe result.
     it.effect("re-probes when settings change the codex binaryPath", () =>
       Effect.gen(function* () {
-        const firstMissing = `t3code_codex_first_`;
-        const secondMissing = `t3code_codex_second_`;
+        // Use explicit nonexistent paths so this regression test does not
+        // depend on the host PATH size or filesystem latency while the
+        // maintenance resolver searches for a deliberately missing command.
+        const firstMissing = `/t3code-tests/missing/codex-first`;
+        const secondMissing = `/t3code-tests/missing/codex-second`;
         const spawnedCommands: Array<string> = [];
         const secondProbeStarted = yield* Deferred.make<void>();
         const releaseSecondProbe = yield* Deferred.make<void>();
@@ -2978,6 +3019,28 @@ it.layer(
   // ── checkClaudeProviderStatus tests ──────────────────────────
 
   describe("checkClaudeProviderStatus", () => {
+    it("preserves Claude usage only for the same known account", () => {
+      const available: ServerProvider["usageLimits"] = {
+        checkedAt: "2026-07-22T12:00:00.000Z",
+        windows: [{ id: "five_hour", kind: "session", label: "Session", usedPercent: 30 }],
+      };
+
+      const initial = resolveRetainedClaudeUsage(undefined, "first@example.com", available);
+      assert.strictEqual(initial.usageLimits, available);
+      assert.strictEqual(
+        resolveRetainedClaudeUsage(initial.retained, "first@example.com", undefined).usageLimits,
+        available,
+      );
+      assert.strictEqual(
+        resolveRetainedClaudeUsage(initial.retained, "second@example.com", undefined).usageLimits,
+        undefined,
+      );
+      assert.strictEqual(
+        resolveRetainedClaudeUsage(initial.retained, undefined, undefined).usageLimits,
+        undefined,
+      );
+    });
+
     it.effect("returns ready when claude is installed and authenticated", () =>
       Effect.gen(function* () {
         const status = yield* checkClaudeProviderStatus(
@@ -3003,6 +3066,82 @@ it.layer(
         ),
       ),
     );
+
+    it.effect("includes best-effort Claude subscription usage", () => {
+      const spawner = layerMockSpawner((args) => {
+        const joined = args.join(" ");
+        if (joined === "--version") return { stdout: "2.1.218\n", stderr: "", code: 0 };
+        if (joined.startsWith("--print /usage --output-format json")) {
+          return {
+            stdout: JSON.stringify({
+              result: "Current session: 30% used \u00b7 resets Jul 23, 1:30am (America/Chicago)",
+            }),
+            stderr: "",
+            code: 0,
+          };
+        }
+        throw new Error(`Unexpected args: ${joined}`);
+      });
+
+      return Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse("2026-07-22T12:00:00.000Z"));
+        const status = yield* checkClaudeProviderStatus(
+          defaultClaudeSettings,
+          claudeCapabilities(),
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          // The driver owns the cached usage probe; it hands the layer a
+          // resolver like this one, which falls back to the CLI print probe.
+          // Discharge the probe's own services so the resolver stays closed.
+          () =>
+            probeClaudeUsageLimits(defaultClaudeSettings).pipe(
+              Effect.provide(Layer.merge(spawner, Path.layer)),
+            ),
+        );
+        assert.strictEqual(status.status, "ready");
+        assert.deepStrictEqual(status.usageLimits?.windows, [
+          {
+            id: "five_hour",
+            kind: "session",
+            label: "Session",
+            usedPercent: 30,
+            windowDurationMins: 300,
+            resetsAt: "2026-07-23T06:30:00.000Z",
+          },
+        ]);
+      }).pipe(Effect.provide(spawner));
+    });
+
+    it.effect("runs the Claude usage probe from the configured workspace cwd", () => {
+      const recorded = recordingMockSpawnerLayer((args) => {
+        if (args.join(" ").startsWith("--print /usage --output-format json")) {
+          return {
+            stdout: JSON.stringify({
+              result: "Current session: 30% used \u00b7 resets Jul 23, 1:30am (America/Chicago)",
+            }),
+            stderr: "",
+            code: 0,
+          };
+        }
+        throw new Error(`Unexpected args: ${args.join(" ")}`);
+      });
+
+      return Effect.gen(function* () {
+        const usageLimits = yield* probeClaudeUsageLimits(
+          defaultClaudeSettings,
+          undefined,
+          "/tmp/provider-usage-workspace",
+        );
+        assert.strictEqual(usageLimits?.windows[0]?.usedPercent, 30);
+        assert.deepStrictEqual(
+          recorded.commands.map((command) => command.cwd),
+          ["/tmp/provider-usage-workspace"],
+        );
+      }).pipe(Effect.provide(recorded.layer));
+    });
 
     it.effect("returns ready and labels Bedrock-backed Claude as authenticated", () =>
       Effect.gen(function* () {
@@ -3298,6 +3437,38 @@ it.layer(
                 code: 0,
               };
             throw new Error(`Unexpected args: ${joined}`);
+          }),
+        ),
+      ),
+    );
+
+    it.effect("skips Claude subscription usage for API key auth", () =>
+      Effect.gen(function* () {
+        let usageProbeCalls = 0;
+        const status = yield* checkClaudeProviderStatus(
+          defaultClaudeSettings,
+          claudeCapabilities({ tokenSource: "ANTHROPIC_AUTH_TOKEN" }),
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          () => {
+            usageProbeCalls += 1;
+            return Effect.void.pipe(Effect.as(undefined as ServerProvider["usageLimits"]));
+          },
+        );
+
+        assert.strictEqual(status.auth.type, "apiKey");
+        assert.strictEqual(status.usageLimits, undefined);
+        assert.strictEqual(usageProbeCalls, 0);
+      }).pipe(
+        Effect.provide(
+          layerMockSpawner((args) => {
+            if (args.join(" ") === "--version") {
+              return { stdout: "2.1.218\n", stderr: "", code: 0 };
+            }
+            throw new Error(`Unexpected args: ${args.join(" ")}`);
           }),
         ),
       ),
