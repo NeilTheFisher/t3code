@@ -14,6 +14,7 @@ import {
   splitPromptIntoComposerSegments,
   type ComposerPromptSegment,
 } from "./composer-editor-mentions";
+import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "./lib/terminalContext";
 
 import { resolveShortcutCommand, type ShortcutEventLike } from "./keybindings";
 
@@ -98,7 +99,13 @@ function clampCursor(text: string, cursor: number): number {
 }
 
 function isWhitespace(char: string): boolean {
-  return char === " " || char === "\n" || char === "\t" || char === "\r";
+  return (
+    char === " " ||
+    char === "\n" ||
+    char === "\t" ||
+    char === "\r" ||
+    char === INLINE_TERMINAL_CONTEXT_PLACEHOLDER
+  );
 }
 
 function tokenStartForCursor(text: string, cursor: number): number {
@@ -147,6 +154,14 @@ export function expandCollapsedComposerCursor(
       expandedCursor += expandedLength;
       continue;
     }
+    if (segment.type === "terminal-context") {
+      if (remaining <= 1) {
+        return expandedCursor + remaining;
+      }
+      remaining -= 1;
+      expandedCursor += 1;
+      continue;
+    }
 
     const segmentLength = segment.text.length;
     if (remaining <= segmentLength) {
@@ -158,6 +173,8 @@ export function expandCollapsedComposerCursor(
 
   return expandedCursor;
 }
+
+const isInlineTokenSegment = (segment: ComposerPromptSegment): boolean => segment.type !== "text";
 
 function collapsedSegmentLength(segment: ComposerPromptSegment): number {
   if (segment.type === "text") {
@@ -190,6 +207,34 @@ export function clampCollapsedComposerCursor(
     splitPromptIntoComposerSegments(text),
     cursorInput,
   );
+}
+
+export function isCollapsedCursorAdjacentToInlineToken(
+  text: string,
+  cursorInput: number,
+  direction: "left" | "right",
+): boolean {
+  const segments = splitPromptIntoComposerSegments(text);
+  if (!segments.some(isInlineTokenSegment)) {
+    return false;
+  }
+
+  const cursor = clampCollapsedComposerCursorForSegments(segments, cursorInput);
+  let collapsedOffset = 0;
+
+  for (const segment of segments) {
+    if (isInlineTokenSegment(segment)) {
+      if (direction === "left" && cursor === collapsedOffset + 1) {
+        return true;
+      }
+      if (direction === "right" && cursor === collapsedOffset) {
+        return true;
+      }
+    }
+    collapsedOffset += collapsedSegmentLength(segment);
+  }
+
+  return false;
 }
 
 export function collapseExpandedComposerCursor(
@@ -233,6 +278,14 @@ export function collapseExpandedComposerCursor(
         return collapsedCursor + 1;
       }
       remaining -= expandedLength;
+      collapsedCursor += 1;
+      continue;
+    }
+    if (segment.type === "terminal-context") {
+      if (remaining <= 1) {
+        return collapsedCursor + remaining;
+      }
+      remaining -= 1;
       collapsedCursor += 1;
       continue;
     }
