@@ -49,6 +49,14 @@ import Migration0032 from "./Migrations/032_AuthPairingProofKeyThumbprint.ts";
 import Migration0033 from "./Migrations/033_ProjectionThreadsSettled.ts";
 import Migration0034 from "./Migrations/034_ProjectionThreadsSnoozed.ts";
 import Migration0035 from "./Migrations/035_ProjectionThreadTitleRegeneration.ts";
+// Ids 36 and 37 belong to fork migrations that shipped before the upstream
+// orchestrator rewrite reclaimed both numbers, and are already recorded in live
+// databases. They are declared here as no-ops so this build keeps the fork's id
+// space: the runner applies only `id > max(effect_sql_migrations)`, so upstream's
+// own migrations must sit above the fork's high-water mark (56) or they are
+// silently skipped.
+import AlreadyApplied0036 from "./Migrations/applied/Fork0036_ProjectionThreadPendingBackgroundTasks.ts";
+import AlreadyApplied0037 from "./Migrations/applied/Fork0037_ProjectionThreadTasks.ts";
 import Migration0038 from "./Migrations/038_ProjectionThreadsPinned.ts";
 import Migration0039 from "./Migrations/039_ProjectionTurnsKeysetIndex.ts";
 import Migration0040 from "./Migrations/040_ProjectionThreadsPinOrderKey.ts";

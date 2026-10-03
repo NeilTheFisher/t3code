@@ -6,14 +6,14 @@ import * as Migrator from "effect/sql/Migrator";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import { migrationManifest, runMigrations } from "./Migrations.ts";
-import PullRequestFilesViewed from "./Migrations/053_PullRequestFilesViewed.ts";
-import RemoveRedundantProjectionIndexes from "./Migrations/056_RemoveRedundantProjectionIndexes.ts";
-import OrchestrationV2 from "./Migrations/055_OrchestrationV2.ts";
+import PullRequestFilesViewed from "./Migrations/055_PullRequestFilesViewed.ts";
+import RemoveRedundantProjectionIndexes from "./Migrations/058_RemoveRedundantProjectionIndexes.ts";
+import OrchestrationV2 from "./Migrations/057_OrchestrationV2.ts";
 
 // The V2 schema is unchanged from the published September 15–16 previews.
 const seedPreview = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
-  yield* runMigrations({ toMigrationInclusive: 52 });
+  yield* runMigrations({ toMigrationInclusive: 54 });
   yield* Migrator.make({})({
     loader: Migrator.fromRecord({ "53_OrchestrationV2": OrchestrationV2 }),
   });
@@ -34,11 +34,9 @@ describe("V2 preview upgrade", () => {
       yield* seedPreview;
       const imports = yield* sql`SELECT * FROM orchestration_v2_legacy_imports`;
       assert.deepStrictEqual(yield* runMigrations(), [
-        [53, "PullRequestFilesViewed"],
-        [54, "ProjectionThreadsAutoSettleDisabledAt"],
-        [56, "RemoveRedundantProjectionIndexes"],
-        [57, "ScheduledTaskWebhooks"],
-        [58, "WebhookRelayDeliveries"],
+        [55, "PullRequestFilesViewed"],
+        [56, "ProjectionThreadsAutoSettleDisabledAt"],
+        [58, "RemoveRedundantProjectionIndexes"],
       ]);
       assert.deepStrictEqual(yield* runMigrations(), []);
       assert.deepStrictEqual(yield* sql`SELECT * FROM orchestration_v2_legacy_imports`, imports);
@@ -67,7 +65,7 @@ describe("V2 preview upgrade", () => {
     (withIndexes) =>
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
-        yield* runMigrations({ toMigrationInclusive: 52 });
+        yield* runMigrations({ toMigrationInclusive: 54 });
         yield* Migrator.make({})({
           loader: Migrator.fromRecord({
             "53_PullRequestFilesViewed": PullRequestFilesViewed,
@@ -105,8 +103,8 @@ describe("V2 preview upgrade", () => {
       `;
       assert.ok(Exit.isFailure(yield* Effect.exit(runMigrations())));
       assert.deepStrictEqual(
-        yield* sql`SELECT migration_id, name FROM effect_sql_migrations WHERE migration_id >= 53`,
-        [{ migration_id: 53, name: "OrchestrationV2" }],
+        yield* sql`SELECT migration_id, name FROM effect_sql_migrations WHERE migration_id >= 55`,
+        [{ migration_id: 55, name: "OrchestrationV2" }],
       );
       assert.deepStrictEqual(
         yield* sql`SELECT name FROM sqlite_master WHERE name = 'pull_request_files_viewed'`,
@@ -115,11 +113,9 @@ describe("V2 preview upgrade", () => {
       assert.strictEqual((yield* sql`SELECT * FROM orchestration_v2_legacy_imports`).length, 1);
       yield* sql`DROP TRIGGER fail_preview_upgrade`;
       assert.deepStrictEqual(yield* runMigrations(), [
-        [53, "PullRequestFilesViewed"],
-        [54, "ProjectionThreadsAutoSettleDisabledAt"],
-        [56, "RemoveRedundantProjectionIndexes"],
-        [57, "ScheduledTaskWebhooks"],
-        [58, "WebhookRelayDeliveries"],
+        [55, "PullRequestFilesViewed"],
+        [56, "ProjectionThreadsAutoSettleDisabledAt"],
+        [58, "RemoveRedundantProjectionIndexes"],
       ]);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
