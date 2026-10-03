@@ -131,7 +131,12 @@ export const ThreadErrorBanner = memo(function ThreadErrorBanner({
                 variant="ghost"
                 size="icon-xs"
                 aria-label={gt("Dismiss error")}
-                onClick={onDismiss}
+                onMouseDown={(e) => {
+                  // Dismissing must not pull focus out of the composer.
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onDismiss();
+                }}
               >
                 <XIcon />
               </Button>
