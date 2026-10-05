@@ -1092,7 +1092,7 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
 });
 
 export class OpenCodeRuntime extends Context.Service<OpenCodeRuntime, OpenCodeRuntimeShape>()(
-  "@neilthefisher/t3/provider/opencodeRuntime",
+  "t3/provider/opencodeRuntime",
 ) {}
 
 export const layer = Layer.effect(OpenCodeRuntime, makeOpenCodeRuntime).pipe(

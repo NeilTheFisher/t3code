@@ -39,23 +39,6 @@ import {
 } from "./providerInstance.ts";
 import { PullRequestMergeMethod } from "./pullRequest.ts";
 
-// ── Userscripts ──────────────────────────────────────────────
-
-export const UserscriptType = Schema.Literals(["css", "javascript"]);
-export type UserscriptType = typeof UserscriptType.Type;
-
-export const Userscript = Schema.Struct({
-  id: Schema.String,
-  name: TrimmedNonEmptyString,
-  code: Schema.String,
-  type: UserscriptType,
-  enabled: Schema.Boolean,
-  deviceId: Schema.String,
-});
-export type Userscript = typeof Userscript.Type;
-
-export const DEFAULT_USERSCRIPTS: Record<string, readonly Userscript[]> = {};
-
 // ── Client Settings (local-only) ───────────────────────────────
 
 export const TimestampFormat = Schema.Literals(["locale", "12-hour", "24-hour"]);
@@ -1500,9 +1483,6 @@ export const ServerSettings = Schema.Struct({
   usageModelAliases: Schema.Record(TrimmedNonEmptyString, TrimmedNonEmptyString).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
-  userscripts: Schema.Record(Schema.String, Schema.Array(Userscript)).pipe(
-    Schema.withDecodingDefault(Effect.succeed({})),
-  ),
 });
 export type ServerSettings = typeof ServerSettings.Type;
 
@@ -1807,9 +1787,6 @@ export const ServerSettingsPatch = Schema.Struct({
   usageModelAliases: Schema.optionalKey(
     Schema.Record(TrimmedNonEmptyString, Schema.NullOr(TrimmedNonEmptyString)),
   ),
-  // Per-device userscripts. The client sends only its own device's entry;
-  // deepMerge preserves scripts from other devices.
-  userscripts: Schema.optionalKey(Schema.Record(Schema.String, Schema.Array(Userscript))),
 });
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
 
