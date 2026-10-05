@@ -316,6 +316,14 @@ export interface ChatComposerHandle {
     expandedCursor: number;
     contextIds: string[];
   };
+  /** Replace a range of the composer draft (voice/automation edits). */
+  replaceTextRange: (input: {
+    rangeStart: number;
+    rangeEnd: number;
+    replacement: string;
+    expectedText?: string;
+  }) => boolean;
+  /** Reset composer cursor/trigger/highlight after external prompt mutations (e.g. onSend). */
   resetCursorState: (options?: {
     cursor?: number;
     prompt?: string;
@@ -2883,6 +2891,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       readSnapshot: () => {
         return readComposerSnapshotStable();
       },
+      replaceTextRange: (input) =>
+        applyPromptReplacement(input.rangeStart, input.rangeEnd, input.replacement, {
+          ...(input.expectedText !== undefined ? { expectedText: input.expectedText } : {}),
+        }),
       resetCursorState: (options?: {
         cursor?: number;
         prompt?: string;

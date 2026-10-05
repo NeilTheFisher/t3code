@@ -1276,7 +1276,7 @@ export function ProviderInstanceCard({
               instanceId={instanceId}
               driverKind={driverKind}
               models={modelsForDisplay}
-              customModels={customModels.map((entry) => entry.slug)}
+              customModels={customModels}
               hiddenModels={hiddenModels}
               favoriteModels={favoriteModels}
               modelOrder={modelOrder}
