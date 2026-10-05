@@ -26,7 +26,7 @@
           "anyUnknownInErrorContext": "error",
           "unsafeEffectTypeAssertion": "error",
           "instanceOfSchema": "error",
-          "deterministicKeys": "off",
+          "deterministicKeys": "error",
           "strictEffectProvide": "off",
           "missingEffectServiceDependency": "error",
           "leakingRequirements": "error",
