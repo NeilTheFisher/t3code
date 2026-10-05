@@ -5,13 +5,9 @@ import * as SqlClient from "effect/sql/SqlClient";
 import PullRequestFilesViewed from "./Migrations/055_PullRequestFilesViewed.ts";
 import AutoSettleDisabledAt from "./Migrations/056_ProjectionThreadsAutoSettleDisabledAt.ts";
 
-// Published previews assigned V2 to 53, then 54. Keep their schema and import
-// progress intact while reserving main's migration ids for upgrades from main.
-//
-// Every id below is offset by +2 from upstream: this fork shipped migrations 36
-// (ProjectionThreadPendingBackgroundTasks) and 37 (ProjectionThreadTasks) before
-// the orchestrator rewrite reclaimed those numbers, and it keeps them as no-ops so
-// live databases stay contiguous. See Migrations.ts.
+// Published previews assigned V2 to 53, then 54: keep their schema and import
+// progress while reserving main's ids. Every id below is offset by +2 because this
+// fork shipped migrations 36 and 37 first (see Migrations.ts).
 export const reconcileV2PreviewMigration = Effect.fn("reconcileV2PreviewMigration")(function* () {
   const sql = yield* SqlClient.SqlClient;
   return yield* sql.withTransaction(
@@ -21,7 +17,7 @@ export const reconcileV2PreviewMigration = Effect.fn("reconcileV2PreviewMigratio
       `;
       if (tables.length === 0) return [];
       const history = yield* sql<{ readonly migration_id: number; readonly name: string }>`
-        SELECT migration_id, name FROM effect_sql_migrations WHERE migration_id >= 57
+        SELECT migration_id, name FROM effect_sql_migrations WHERE migration_id >= 55
       `;
       const legacy = history.find(
         (row) =>
