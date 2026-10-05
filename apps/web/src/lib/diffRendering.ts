@@ -340,7 +340,10 @@ export function getRenderablePatchFromContents(
 ): RenderablePatch | null {
   if (oldContents === newContents) return null;
   try {
-    const cacheKey = buildPatchCacheKey(`${name} ${oldContents}  ${newContents}`, cacheScope);
+    const cacheKey = buildPatchCacheKey(
+      `${name}\x00${oldContents}\x00\x00${newContents}`,
+      cacheScope,
+    );
     const fileDiff = parseDiffFromFile(
       { name, contents: oldContents, cacheKey: `${cacheKey}:old` },
       { name, contents: newContents, cacheKey: `${cacheKey}:new` },
