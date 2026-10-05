@@ -1293,9 +1293,6 @@ export const ServerSettings = Schema.Struct({
   usageModelAliases: Schema.Record(TrimmedNonEmptyString, TrimmedNonEmptyString).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
-  userscripts: Schema.Record(Schema.String, Schema.Array(Userscript)).pipe(
-    Schema.withDecodingDefault(Effect.succeed({})),
-  ),
 });
 export type ServerSettings = typeof ServerSettings.Type;
 
@@ -1567,9 +1564,6 @@ export const ServerSettingsPatch = Schema.Struct({
   usageModelAliases: Schema.optionalKey(
     Schema.Record(TrimmedNonEmptyString, Schema.NullOr(TrimmedNonEmptyString)),
   ),
-  // Per-device userscripts. The client sends only its own device's entry;
-  // deepMerge preserves scripts from other devices.
-  userscripts: Schema.optionalKey(Schema.Record(Schema.String, Schema.Array(Userscript))),
 });
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
 
