@@ -1,16 +1,11 @@
-import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipeline";
 import { ThreadId, type WorktreeSetupSnapshot } from "@t3tools/contracts";
 import {
   CheckpointRef,
   NodeId,
-  ProviderDriverKind,
-  ProviderInstanceId,
-  ProviderTurnId,
   RunAttemptId,
   TurnItemId,
   RuntimeRequestId,
   type OrchestrationV2ProjectedTurnItem,
-  type OrchestrationV2TurnItem,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import {
@@ -22,15 +17,12 @@ import {
 import { makeStreamingTimelineFixture } from "../../test-fixtures";
 import type { TurnDiffSummary } from "../../types";
 import { describe, expect, it } from "vite-plus/test";
-import { EnvironmentId, MessageId, RunId } from "@t3tools/contracts";
-import { serializeAssistantCitation } from "@t3tools/shared/assistantCitations";
+import { MessageId, RunId } from "@t3tools/contracts";
 import {
   computeStableMessagesTimelineRows,
   computeMessageDurationStart,
   deriveMessagesTimelineRows,
-  timelineEntryTurnFoldRunId,
   deriveMessagesTimelineRowsWithState,
-  shouldCollapseUserMessage,
   liveWorkEntryLabel,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
@@ -47,9 +39,7 @@ import {
   resolveTimelineMinimapTopPercent,
   resolveWorkGroupScrollIndex,
   shouldFollowWorkGroupAppend,
-  threadReadLabelPrefix,
-  threadReadTargetId,
-  threadReadTargetTitle,
+  shouldPreserveAssistantLineBreaks,
   type MessagesTimelineRow,
   resolveTimelineToolPresentation,
   workEntryDisplayLabel,
@@ -108,18 +98,6 @@ describe("expanded tool group scrolling", () => {
 });
 
 describe("work entry labels", () => {
-  it("uses live titles only for active thread shells", () => {
-    const shell = { title: " Review auth flow ", archivedAt: null, deletedAt: null };
-    expect(threadReadTargetTitle(shell)).toBe("Review auth flow");
-    expect(threadReadTargetTitle({ ...shell, title: "Harden session refresh" })).toBe(
-      "Harden session refresh",
-    );
-    expect(threadReadTargetTitle({ ...shell, archivedAt: "2026-10-07T12:00:00Z" })).toBeNull();
-    expect(threadReadTargetTitle({ ...shell, deletedAt: "2026-10-07T12:00:00Z" })).toBeNull();
-    expect(threadReadTargetTitle({ ...shell, title: "  " })).toBeNull();
-    expect(threadReadTargetTitle(null)).toBeNull();
-  });
-
   const entry = {
     id: "tool-1",
     createdAt: "2026-09-01T12:00:00Z",
@@ -177,37 +155,6 @@ describe("work entry labels", () => {
       label,
     );
     expect(workEntryDisplayLabel(browserEntry, undefined)).toBe(label);
-  });
-
-  it.each([
-    ["inProgress", true, "Reading thread"],
-    ["completed", false, "Read thread"],
-    ["failed", false, "Failed to read thread"],
-    ["declined", false, "Declined to read thread"],
-    ["stopped", false, "Stopped reading thread"],
-  ] as const)("names the read thread in the %s label", (toolLifecycleStatus, active, prefix) => {
-    const threadRead = {
-      ...entry,
-      itemType: "dynamic_tool" as const,
-      toolLifecycleStatus,
-      structuredPayload: {
-        type: "dynamic_tool",
-        toolName: "t3-code.t3_thread_read",
-        input: { threadId: " thread-child ", view: "activity" },
-      } as never,
-    };
-    expect(threadReadTargetId(threadRead)).toBe("thread-child");
-    expect(threadReadLabelPrefix(liveWorkEntryLabel(threadRead, undefined, active))).toBe(prefix);
-    expect(threadReadLabelPrefix(workEntryDisplayLabel(threadRead, undefined))).toBe(prefix);
-  });
-
-  it("finds no target for other tools or thread reads without one", () => {
-    const payload = (toolName: string, input: unknown) => ({
-      structuredPayload: { type: "dynamic_tool", toolName, input } as never,
-    });
-    expect(threadReadTargetId(payload("t3-code.t3_thread_wait", { threadId: "t" }))).toBeNull();
-    expect(threadReadTargetId(payload("t3-code.t3_thread_read", { threadId: "  " }))).toBeNull();
-    expect(threadReadTargetId(payload("t3-code.t3_thread_read", null))).toBeNull();
   });
 
   it("uses the active summary state for legacy tools without a lifecycle status", () => {
@@ -756,70 +703,34 @@ describe("deriveMessagesTimelineRows", () => {
     expect(first.kind === "work" && first.entry.toolLifecycleStatus).toBe("inProgress");
   });
 
-  it.each(["cua_repl.js", "node_repl.js", "js"])(
-    "shows the %s action title for a retained tool item",
-    (toolName) => {
-      const fixture = makeStreamingTimelineFixture();
-      const source = fixture.visibleTurnItems.find((row) => row.item.type === "dynamic_tool")!;
-      if (source.item.type !== "dynamic_tool") throw new Error("Expected tool fixture");
-      const item = {
-        ...source.item,
-        title: null,
-        toolName,
-        input: {
-          code: "await game.getAXStateAndScreenshot();",
-          title: "Inspect Saga music screen",
-        },
-      };
-      const entries = deriveTimelineEntriesFromVisibleTurnItems({
-        visibleTurnItems: [{ ...source, item }],
-        optimisticMessages: [],
-      });
-      const work = entries.find((entry) => entry.kind === "work");
-      expect(work?.kind === "work" && workEntryDisplayLabel(work.entry, undefined)).toBe(
-        "Inspect Saga music screen",
-      );
-      const rows = deriveMessagesTimelineRows({
-        timelineEntries: entries,
-        isWorking: false,
-        runningRunId: fixture.runId,
-        activeTurnStartedAt: fixture.time(0),
-        turnDiffSummaries: [],
-        supportsConversationRollback: false,
-      });
-      expect(rows.find((row) => row.kind === "work")).toMatchObject({
-        displayLabel: "Inspect Saga music screen",
-      });
-    },
-  );
-
-  it("recovers the failed Sky call stored as a generic js integration", () => {
+  it("shows the CUA action title for a retained tool item", () => {
     const fixture = makeStreamingTimelineFixture();
     const source = fixture.visibleTurnItems.find((row) => row.item.type === "dynamic_tool")!;
     if (source.item.type !== "dynamic_tool") throw new Error("Expected tool fixture");
     const item = {
       ...source.item,
-      type: "dynamic_tool" as const,
-      status: "failed" as const,
-      title: "js",
-      toolName: "node_repl.js",
-      toolSource: { key: "mcp:node_repl", name: "node repl", kind: "integration" as const },
-      input: {
-        title: "Restrict the breakpoint to Git actions",
-        code: "await sky.type_text({app:'T3 Code (Nightly)',text:'debug(ga.run)'});",
-      },
+      title: null,
+      toolName: "cua_repl.js",
+      input: { code: "await game.getAXStateAndScreenshot();", title: "Inspect Saga music screen" },
     };
     const entries = deriveTimelineEntriesFromVisibleTurnItems({
       visibleTurnItems: [{ ...source, item }],
       optimisticMessages: [],
     });
-    const entry = entries.find((row) => row.kind === "work");
-    expect(entry?.kind === "work" && workEntryDisplayLabel(entry.entry, undefined)).toBe(
-      "Restrict the breakpoint to Git actions",
+    const work = entries.find((entry) => entry.kind === "work");
+    expect(work?.kind === "work" && workEntryDisplayLabel(work.entry, undefined)).toBe(
+      "Inspect Saga music screen",
     );
-    expect(entry?.kind === "work" && entry.entry).toMatchObject({
-      toolSurface: "computer",
-      toolSource: { key: "computer-use", kind: "computer" },
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: entries,
+      isWorking: false,
+      runningRunId: fixture.runId,
+      activeTurnStartedAt: fixture.time(0),
+      turnDiffSummaries: [],
+      supportsConversationRollback: false,
+    });
+    expect(rows.find((row) => row.kind === "work")).toMatchObject({
+      displayLabel: "Inspect Saga music screen",
     });
   });
 
@@ -1019,7 +930,6 @@ describe("deriveMessagesTimelineRows", () => {
                     status: "superseded" as const,
                     attemptOrdinal: 0,
                     rootNodeId: "old-root" as never,
-                    completedAt: null,
                   },
                 }
               : {}),
@@ -2124,60 +2034,6 @@ describe("deriveMessagesTimelineRows", () => {
       expect.objectContaining({ entry: expect.objectContaining({ id: "new-work" }) }),
     ]);
     expect(rows.some((row) => row.kind === "thinking")).toBe(false);
-  });
-
-  it("carries the latest thought on the live row while a later tool runs", () => {
-    type WorkEntry = Extract<
-      Parameters<typeof deriveMessagesTimelineRows>[0]["timelineEntries"][number],
-      { kind: "work" }
-    >;
-    const work = (
-      id: string,
-      at: string,
-      fields: Omit<WorkEntry["entry"], "id" | "createdAt" | "runId" | "label">,
-    ): WorkEntry => ({
-      id: `${id}-entry`,
-      kind: "work",
-      createdAt: at,
-      entry: { id, createdAt: at, runId: "turn-1" as never, label: id, ...fields },
-    });
-    const rows = deriveMessagesTimelineRows({
-      timelineEntries: [
-        work("old-thought", "2026-01-01T00:00:01Z", {
-          itemType: "reasoning",
-          detail: "First idea.",
-          tone: "thinking" as const,
-          toolLifecycleStatus: "completed" as const,
-        }),
-        work("new-thought", "2026-01-01T00:00:02Z", {
-          itemType: "reasoning",
-          detail: "Found the cause.",
-          tone: "thinking" as const,
-          toolLifecycleStatus: "completed" as const,
-        }),
-        work("running-command", "2026-01-01T00:00:03Z", {
-          command: "rg cause",
-          requestKind: "command",
-          tone: "tool" as const,
-          toolLifecycleStatus: "inProgress" as const,
-        }),
-      ],
-      latestRun: {
-        runId: "turn-1" as never,
-        status: "running",
-        startedAt: "2026-01-01T00:00:00Z",
-        completedAt: null,
-      },
-      isWorking: true,
-      activeTurnStartedAt: "2026-01-01T00:00:00Z",
-      turnDiffSummaries: [],
-      supportsConversationRollback: false,
-    });
-
-    expect(rows.find((row) => row.kind === "work-live")).toMatchObject({
-      entry: { id: "running-command" },
-      thought: { id: "new-thought" },
-    });
   });
 
   it("keeps an actually running tool in the shared activity row", () => {
@@ -4003,7 +3859,6 @@ describe("v2 run and attempt history", () => {
       attemptOrdinal: 1,
       rootNodeId: "node-attempt-1" as never,
       status: "superseded" as const,
-      completedAt: null,
     };
     const activeAttempt = {
       id: activeAttemptId,
@@ -4011,7 +3866,6 @@ describe("v2 run and attempt history", () => {
       attemptOrdinal: 2,
       rootNodeId: "node-attempt-2" as never,
       status: "running" as const,
-      completedAt: null,
     };
     const timelineEntries = [
       {
@@ -5265,7 +5119,6 @@ describe("failed turn transcript", () => {
             attemptOrdinal: 1,
             rootNodeId: NodeId.make("superseded-root"),
             status: "superseded" as const,
-            completedAt: null,
           },
         })),
         latestRun: {
