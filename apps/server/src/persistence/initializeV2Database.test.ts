@@ -87,7 +87,7 @@ it.effect(
       try {
         assert.equal(
           v1.prepare("SELECT MAX(migration_id) AS id FROM effect_sql_migrations").get()?.id,
-          52,
+          54,
         );
         assert.equal(
           v1

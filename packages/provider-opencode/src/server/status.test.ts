@@ -575,7 +575,7 @@ it.layer(layerTest)("checkOpenCodeProviderStatus", (it) => {
   it.effect("lists a local OpenCode 2 binary's models in Full access only, never via 1.x", () =>
     Effect.gen(function* () {
       runtimeMock.state.versionStdout = "opencode v2.0.18\n";
-      const snapshot = yield* checkProvider(
+      const snapshot = yield* checkStatus(
         makeOpenCodeSettings(),
         process.cwd(),
         undefined,
@@ -622,7 +622,7 @@ it.layer(layerTest)("checkOpenCodeProviderStatus", (it) => {
   it.effect("reports a failed OpenCode 2 model list without the server's response", () =>
     Effect.gen(function* () {
       runtimeMock.state.versionStdout = "opencode v2.0.18\n";
-      const snapshot = yield* checkProvider(
+      const snapshot = yield* checkStatus(
         makeOpenCodeSettings(),
         process.cwd(),
         undefined,
@@ -740,7 +740,7 @@ it.layer(layerTest)("checkOpenCodeProviderStatus with configured server URL", (i
         serverUrl: "http://127.0.0.1:9999",
         serverPassword: "secret-password",
       });
-      const snapshot = yield* checkProvider(
+      const snapshot = yield* checkStatus(
         settings,
         process.cwd(),
         undefined,
@@ -802,7 +802,7 @@ it.layer(layerTest)("checkOpenCodeProviderStatus with configured server URL", (i
 
   it.effect("reports a rejected OpenCode 2 password as an auth error, not a version", () =>
     Effect.gen(function* () {
-      const snapshot = yield* checkProvider(
+      const snapshot = yield* checkStatus(
         makeOpenCodeSettings({ serverUrl: "http://127.0.0.1:9999", serverPassword: "wrong" }),
         process.cwd(),
         undefined,
