@@ -38,7 +38,6 @@ export type SettingsPath =
   | "/settings/about"
   | "/settings/archived";
   | "/settings/archived"
-  | "/settings/userscripts"
   | "/settings/voice";
 
 export type SettingsSearchScope =
@@ -108,7 +107,6 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/labs": "Labs",
   "/settings/about": "About",
   "/settings/archived": "Archive",
-  "/settings/userscripts": "Userscripts",
   "/settings/voice": "Voice",
 };
 
@@ -1181,7 +1179,6 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/labs": null,
   "/settings/about": null,
   "/settings/archived": "project-defaults",
-  "/settings/userscripts": null,
   "/settings/voice": null,
 };
 
