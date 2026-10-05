@@ -125,7 +125,7 @@ export function useThreadProjection(ref: ScopedThreadRef | null): EnvironmentThr
 
 export function readThreadDetail(ref: ScopedThreadRef | null): EnvironmentThread | null {
   if (ref === null) return null;
-  return appAtomRegistry.get(environmentThreadDetails.detailAtom(ref));
+  return appAtomRegistry.get(environmentThreadDetails.threadAtom(ref));
 }
 
 export function useThreadStatus(ref: ScopedThreadRef | null): EnvironmentThreadStatus {

@@ -509,11 +509,11 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
         const beforeMessageId =
           typeof args.beforeMessageId === "string" ? args.beforeMessageId : null;
         const endIndex = beforeMessageId
-          ? thread.messages.findIndex((message) => message.id === beforeMessageId)
-          : thread.messages.length;
+          ? thread.projection.messages.findIndex((message) => message.id === beforeMessageId)
+          : thread.projection.messages.length;
         if (endIndex < 0) return { ok: false, error: "Pagination cursor not found." };
         const startIndex = Math.max(0, endIndex - limit);
-        const page = thread.messages.slice(startIndex, endIndex).map((message) => ({
+        const page = thread.projection.messages.slice(startIndex, endIndex).map((message) => ({
           id: message.id,
           role: message.role,
           text:
@@ -524,7 +524,11 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
         }));
         return {
           ok: true,
-          task: { environmentId: ref.environmentId, threadId: ref.threadId, title: thread.title },
+          task: {
+            environmentId: ref.environmentId,
+            threadId: ref.threadId,
+            title: thread.projection.thread.title,
+          },
           messages: page,
           hasMore: startIndex > 0,
           nextBeforeMessageId: startIndex > 0 ? (page[0]?.id ?? null) : null,
@@ -748,7 +752,7 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
       const connection = new OpenAIRealtimeConnection();
       connectionRef.current = connection;
       const latestAssistantMessage =
-        [...(readThreadDetail(registration.threadRef)?.messages ?? [])]
+        [...(readThreadDetail(registration.threadRef)?.projection.messages ?? [])]
           .toReversed()
           .find((message) => message.role === "assistant" && !message.streaming)?.text ?? null;
 
