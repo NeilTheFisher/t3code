@@ -15,7 +15,7 @@ const seedPreview = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   yield* runMigrations({ toMigrationInclusive: 54 });
   yield* Migrator.make({})({
-    loader: Migrator.fromRecord({ "53_OrchestrationV2": OrchestrationV2 }),
+    loader: Migrator.fromRecord({ "55_OrchestrationV2": OrchestrationV2 }),
   });
   yield* sql`
     INSERT INTO orchestration_v2_legacy_imports
@@ -23,7 +23,7 @@ const seedPreview = Effect.gen(function* () {
     VALUES ('preview-thread', '2026-09-15', '2026-09-15', '2026-09-16', 42)
   `;
   yield* sql`
-    UPDATE effect_sql_migrations SET created_at = '2026-09-15 00:00:00' WHERE migration_id = 53
+    UPDATE effect_sql_migrations SET created_at = '2026-09-15 00:00:00' WHERE migration_id = 55
   `;
 });
 
@@ -48,7 +48,7 @@ describe("V2 preview upgrade", () => {
         migrationManifest,
       );
       assert.deepStrictEqual(
-        yield* sql`SELECT created_at FROM effect_sql_migrations WHERE migration_id = 55`,
+        yield* sql`SELECT created_at FROM effect_sql_migrations WHERE migration_id = 57`,
         [{ created_at: "2026-09-15 00:00:00" }],
       );
       yield* sql`
@@ -68,10 +68,10 @@ describe("V2 preview upgrade", () => {
         yield* runMigrations({ toMigrationInclusive: 54 });
         yield* Migrator.make({})({
           loader: Migrator.fromRecord({
-            "53_PullRequestFilesViewed": PullRequestFilesViewed,
-            "54_OrchestrationV2": OrchestrationV2,
+            "55_PullRequestFilesViewed": PullRequestFilesViewed,
+            "56_OrchestrationV2": OrchestrationV2,
             ...(withIndexes
-              ? { "55_RemoveRedundantProjectionIndexes": RemoveRedundantProjectionIndexes }
+              ? { "57_RemoveRedundantProjectionIndexes": RemoveRedundantProjectionIndexes }
               : {}),
           }),
         });
@@ -124,7 +124,7 @@ describe("V2 preview upgrade", () => {
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       yield* seedPreview;
-      yield* sql`INSERT INTO effect_sql_migrations (migration_id, name) VALUES (54, 'UnknownFork')`;
+      yield* sql`INSERT INTO effect_sql_migrations (migration_id, name) VALUES (56, 'UnknownFork')`;
       const history = yield* sql`SELECT * FROM effect_sql_migrations ORDER BY migration_id`;
       assert.ok(Exit.isFailure(yield* Effect.exit(runMigrations())));
       assert.deepStrictEqual(
