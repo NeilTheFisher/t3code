@@ -22,6 +22,7 @@ export type SettingsPath =
   | "/settings/general"
   | "/settings/diagnostics"
   | "/settings/voice"
+  | "/settings/voice-conversations"
   | "/settings/appearance"
   | "/settings/chat"
   | "/settings/diffs"
@@ -40,8 +41,7 @@ export type SettingsPath =
   | "/settings/maintenance"
   | "/settings/labs"
   | "/settings/about"
-  | "/settings/archived"
-  | "/settings/userscripts";
+  | "/settings/archived";
 
 export type SettingsSearchScope =
   | "environment"
@@ -120,8 +120,8 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/labs": msg("Labs"),
   "/settings/about": msg("About"),
   "/settings/voice": msg("Voice"),
+  "/settings/voice-conversations": msg("Voice conversations"),
   "/settings/archived": msg("Archive"),
-  "/settings/userscripts": msg("Userscripts"),
 };
 
 /** Sidebar labels; an entry of its own lets a translator shorten one below its page title. */
@@ -151,6 +151,7 @@ const ALL_SETTINGS_NAV_GROUPS: ReadonlyArray<SettingsNavGroup> = [
       "/settings/diffs",
       "/settings/keybindings",
       "/settings/voice",
+      "/settings/voice-conversations",
       "/settings/snap-shot",
     ],
   },
@@ -1527,6 +1528,28 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/archived",
     searchTerms: [msg("restore reopen deleted history projects")],
   },
+  {
+    id: "composer-collapse",
+    title: msg("Collapse composer on scroll"),
+    to: "/settings/chat",
+    searchTerms: ["composer rest resting scroll wheel conversation timeline shrink minimize"],
+  },
+  {
+    id: "gerrit-credentials",
+    title: msg("Gerrit HTTP credentials"),
+    to: "/settings/source-control",
+    searchTerms: ["gerrit http base url username password credentials replies reviewers"],
+    environmentOnly: true,
+    scope: "environment-defaults",
+  },
+  {
+    id: "thread-workspaces",
+    title: msg("Thread workspaces (beta)"),
+    to: "/settings/general",
+    searchTerms: [
+      "workspace group threads personal work office sidebar footer strip drag organize context",
+    ],
+  },
 ] as const satisfies ReadonlyArray<SettingsSearchItem>;
 
 export type SettingsSearchItemId = (typeof SETTINGS_SEARCH_ITEMS)[number]["id"];
@@ -1538,6 +1561,7 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/projects": "project",
   "/settings/general": null,
   "/settings/voice": null,
+  "/settings/voice-conversations": null,
   "/settings/appearance": null,
   "/settings/chat": null,
   "/settings/diffs": null,
@@ -1557,7 +1581,6 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/labs": null,
   "/settings/about": null,
   "/settings/archived": "project-defaults",
-  "/settings/userscripts": null,
   "/settings/voice": null,
 };
 
