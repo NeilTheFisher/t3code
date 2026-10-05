@@ -832,11 +832,7 @@ export function ProviderInstanceCard({
     );
   };
 
-  const updateCustomModels = (nextSlugs: ReadonlyArray<string>) => {
-    const bySlug = new Map(customModels.map((entry) => [entry.slug, entry] as const));
-    const next: ReadonlyArray<CustomModelDefinition> = nextSlugs.map(
-      (slug) => bySlug.get(slug) ?? { slug, name: slug, capabilities: null },
-    );
+  const updateCustomModels = (next: ReadonlyArray<CustomModelDefinition>) => {
     const nextConfig = nextConfigBlobWithValue(
       instance.config,
       "customModels",
@@ -1361,7 +1357,7 @@ export function ProviderInstanceCard({
               instanceId={instanceId}
               driverKind={driverKind}
               models={modelsForDisplay}
-              customModels={customModels.map((entry) => entry.slug)}
+              customModels={customModels}
               hiddenModels={hiddenModels}
               favoriteModels={favoriteModels}
               modelOrder={modelOrder}
