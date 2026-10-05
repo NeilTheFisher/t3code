@@ -1,7 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useRoute, type RouteProp } from "@react-navigation/native";
 import { useState } from "react";
-import { useMemo, useState } from "react";
 import {
   EnvironmentId,
   ThreadId,
@@ -141,20 +140,6 @@ function useResolvedThreadSelection(params: ThreadSelectionRouteParams | undefin
           }
       : lastRouteThreadRef;
   const selectedThreadShell = useQuietThreadShell(selectedThreadRef);
-  const routeThreadRef = useMemo<ScopedThreadRef | null>(() => {
-    const environmentId = firstRouteParam(routeParams.environmentId);
-    const threadId = firstRouteParam(routeParams.threadId);
-    if (!environmentId || !threadId) {
-      return null;
-    }
-
-    return {
-      environmentId: EnvironmentId.make(environmentId),
-      threadId: ThreadId.make(threadId),
-    };
-  }, [routeParams.environmentId, routeParams.threadId]);
-  const selectedThreadRef = routeThreadRef;
-  const selectedThreadShell = useThreadShell(selectedThreadRef);
   const selectedThreadKey =
     selectedThreadRef === null
       ? null
