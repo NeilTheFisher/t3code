@@ -76,7 +76,7 @@ export interface ProviderMaintenanceRunnerShape {
 export class ProviderMaintenanceRunner extends Context.Service<
   ProviderMaintenanceRunner,
   ProviderMaintenanceRunnerShape
->()("@neilthefisher/t3/provider/providerMaintenanceRunner") {}
+>()("t3/provider/providerMaintenanceRunner") {}
 
 class ProviderMaintenanceCommandError extends Schema.TaggedError<ProviderMaintenanceCommandError>()(
   "ProviderMaintenanceCommandError",
@@ -628,10 +628,8 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
     );
 
     // An interrupted update (client disconnect kills the RPC fiber) aborts
-    // `recordFailedUpdate` mid-write, which would pin the provider on
-    // "queued"/"running" forever and keep the sidebar pill spinning. This
-    // runs in the exit finalizer's uninterruptible region, so it always gets
-    // the last word.
+    // `recordFailedUpdate` mid-write, pinning the provider on "running" forever.
+    // This runs in the exit finalizer's uninterruptible region.
     const recordInterruptedUpdate = Effect.fn("ProviderMaintenanceRunner.recordInterruptedUpdate")(
       function* () {
         const providers = yield* providerRegistry.getProviders;

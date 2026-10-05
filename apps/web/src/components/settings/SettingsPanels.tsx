@@ -1322,7 +1322,7 @@ export function ChatSettingsPanel() {
             </div>
           }
         />
->>>>>>> 956973a976 (feat(fork): web-perf-ux)      </SettingsSection>
+      </SettingsSection>
     </SettingsPageContainer>
   );
 }
