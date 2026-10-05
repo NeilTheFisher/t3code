@@ -619,17 +619,6 @@ function ThreadSettingsSessionProvider(
     });
   };
 
-  const pressModel = (option: ModelOption) => {
-    void Haptics.selectionAsync();
-    setPendingModel((current) =>
-      pendingModelAfterPress({
-        current,
-        pressed: option,
-        pressedIsApplied: isApplied(option),
-        restoreSelection: props.restoreSelection,
-      }),
-    );
-  };
   const pressModel = useCallback(
     (option: ModelOption) => {
       if (props.serverConfig && props.hasStartedSession && props.selectedModel) {
