@@ -7,7 +7,7 @@
  * `useAudioPlayerStore`, which the global mini-player also renders from.
  */
 import { useCallback } from "react";
-import { type MessageId } from "@t3tools/contracts";
+import { type MessageId, type ScopedThreadRef } from "@t3tools/contracts";
 import { useClientSettings } from "./useSettings";
 import { useAudioPlayerStore } from "~/audioPlayerStore";
 import {
@@ -339,6 +339,7 @@ export interface PlayOptions {
 export async function startPlayback(
   id: MessageId,
   text: string,
+  threadRef: ScopedThreadRef | null,
   options: PlayOptions,
 ): Promise<void> {
   const store = useAudioPlayerStore.getState();
@@ -353,12 +354,14 @@ export async function startPlayback(
     useAudioPlayerStore.getState().setError("Nothing to read aloud.", id);
     return;
   }
-  paragraphCues = paragraphs.map(cueOf);
+  // teardown() clears `paragraphCues`, so the new cues must be assigned after
+  // it — assigning first left every cue null and suppressed all highlighting.
   teardown();
+  paragraphCues = paragraphs.map(cueOf);
   const controller = new AbortController();
   abortController = controller;
   const { volume, rate } = store;
-  store.setLoading(id, excerptTitle(spoken));
+  store.setLoading(id, excerptTitle(spoken), threadRef);
   setPlaybackVolume(volume);
 
   const { ctx, gain } = ensureAudioGraph();
@@ -488,8 +491,8 @@ export function useTtsPlayer() {
   const tts = useClientSettings((s) => s.tts);
 
   const play = useCallback(
-    (id: MessageId, text: string) =>
-      startPlayback(id, text, { voice: tts.voice, serverUrl: tts.serverUrl }),
+    (id: MessageId, text: string, threadRef: ScopedThreadRef | null) =>
+      startPlayback(id, text, threadRef, { voice: tts.voice, serverUrl: tts.serverUrl }),
     [tts.voice, tts.serverUrl],
   );
 
