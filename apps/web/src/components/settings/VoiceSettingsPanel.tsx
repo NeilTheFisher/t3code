@@ -209,7 +209,7 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
   return (
     <SettingsPageContainer>
       <div>
-        <h1 className="text-xl font-semibold tracking-[-0.02em]">Voice</h1>
+        <h1 className="text-xl font-semibold tracking-tight">Voice</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Configure the global OpenAI Realtime voice layer for T3 Code.
         </p>
@@ -220,7 +220,11 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
           title="API key"
           description="Stored only by the selected T3 Code server. The app uses it to mint short-lived browser credentials."
           status={
-            <span className={configured ? "text-emerald-600 dark:text-emerald-400" : undefined}>
+            <span
+              className={
+                configured ? "text-success-foreground dark:text-success-foreground" : undefined
+              }
+            >
               {configured ? "Configured" : "Not configured"}
             </span>
           }
@@ -293,7 +297,11 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
           description="Stored only by the selected T3 Code server. The voice agent uses Parallel Search and Extract through server-side tools."
           status={
             <span
-              className={parallelConfigured ? "text-emerald-600 dark:text-emerald-400" : undefined}
+              className={
+                parallelConfigured
+                  ? "text-success-foreground dark:text-success-foreground"
+                  : undefined
+              }
             >
               {parallelConfigured ? "Configured" : "Not configured"}
             </span>
@@ -386,7 +394,7 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
                   <SelectItem key={option.value} value={option.value}>
                     <div>
                       <div>{option.label}</div>
-                      <div className="text-[11px] text-muted-foreground">{option.description}</div>
+                      <div className="text-2xs text-muted-foreground">{option.description}</div>
                     </div>
                   </SelectItem>
                 ))}
@@ -590,14 +598,12 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
                     session.status === "error"
                       ? "size-2 rounded-full bg-destructive"
                       : session.status === "active"
-                        ? "size-2 rounded-full bg-emerald-500"
+                        ? "size-2 rounded-full bg-success"
                         : "size-2 rounded-full bg-muted-foreground/45"
                   }
                 />
-                <span className="min-w-0 flex-1 truncate text-[13px] font-medium">
-                  {session.title}
-                </span>
-                <time className="shrink-0 text-[11px] text-muted-foreground">
+                <span className="min-w-0 flex-1 truncate text-xs font-medium">{session.title}</span>
+                <time className="shrink-0 text-2xs text-muted-foreground">
                   {new Date(session.startedAt).toLocaleString()}
                 </time>
               </summary>
