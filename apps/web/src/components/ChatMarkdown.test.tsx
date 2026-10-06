@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { EnvironmentId, type AuthEnvironmentScope } from "@t3tools/contracts";
+import { EnvironmentId, MessageId, type AuthEnvironmentScope } from "@t3tools/contracts";
 import { createRoot } from "react-dom/client";
 import { useThreadFindHighlights } from "./chat/threadFindHighlights";
 import { searchableMessageSegments } from "@t3tools/shared/threadFindText";
@@ -1272,3 +1272,39 @@ it.each([
     }
   },
 );
+describe("ChatMarkdown TTS paragraph highlight", () => {
+  const highlightProbes = (renderer: ReactTestRenderer) =>
+    renderer.root.findAll(
+      (node) =>
+        node.type === "div" &&
+        node.props["aria-hidden"] === true &&
+        node.props.className === "hidden",
+    );
+
+  it("mounts the highlight probe only when a message id is provided", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    let renderer: ReactTestRenderer | undefined;
+    try {
+      await act(async () => {
+        renderer = create(
+          <ChatMarkdown
+            cwd={undefined}
+            text={"First paragraph.\n\nSecond paragraph."}
+            ttsMessageId={MessageId.make("msg-tts")}
+          />,
+        );
+      });
+      expect(highlightProbes(renderer!)).toHaveLength(1);
+
+      await act(async () => {
+        renderer!.update(<ChatMarkdown cwd={undefined} text={"Just text."} />);
+      });
+      expect(highlightProbes(renderer!)).toHaveLength(0);
+    } finally {
+      await act(async () => {
+        renderer?.unmount();
+      });
+      vi.unstubAllGlobals();
+    }
+  });
+});

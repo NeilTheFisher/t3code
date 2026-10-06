@@ -50,6 +50,7 @@ import {
   AuthPreviewOperateScope,
   type AssetResource,
   type EnvironmentId,
+  type MessageId,
   type ScopedThreadRef,
   type ServerProviderSkill,
   type ThreadPullRequestKey,
@@ -106,6 +107,9 @@ import { parseComposerContextHref } from "@t3tools/shared/composerContextReferen
 import { parseThreadLinkHref } from "@t3tools/shared/threadLinks";
 import { AssistantCitationChip } from "./chat/AssistantCitationChip";
 import { MarkdownThreadLink } from "./chat/MarkdownThreadLink";
+import { TtsParagraphHighlight } from "./chat/TtsParagraphHighlight";
+import remarkGfm from "remark-gfm";
+import type { Processor } from "unified";
 import { isWindowsAbsolutePath } from "@t3tools/shared/path";
 import {
   artifactTemplateFromHastProperties,
@@ -244,6 +248,9 @@ interface ChatMarkdownProps {
       text nests under the heading that introduces it, such as a chat message's
       author. Rendered tags and their styling are unchanged. */
   headingLevelOffset?: number | undefined;
+  /** Assistant message this markdown belongs to, so the paragraph being spoken
+      by TTS can be highlighted. Omit for markdown that is not spoken. */
+  ttsMessageId?: MessageId | undefined;
 }
 
 export interface ChatMarkdownContextReference {
@@ -3323,6 +3330,7 @@ function ChatMarkdown({
   lineBreaks = false,
   parseRawHtml = true,
   extraRemarkPlugins = EMPTY_REMARK_PLUGINS,
+  ttsMessageId,
   ...props
 }: ChatMarkdownProps) {
   const {
@@ -3371,6 +3379,7 @@ function ChatMarkdown({
           {text}
         </ReactMarkdown>
       </ChatMarkdownRendererContext>
+      {ttsMessageId ? <TtsParagraphHighlight messageId={ttsMessageId} /> : null}
       {localMediaPreview ? (
         <ExpandedImageDialog
           preview={localMediaPreview}
