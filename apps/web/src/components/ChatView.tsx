@@ -131,6 +131,10 @@ import { useActiveThreadRef } from "../hooks/useActiveThreadRef";
 import { composerRequiresModifier } from "../composer-logic";
 import {
   derivePhase,
+  deriveTimelineEntriesFromVisibleTurnItemsWithState,
+  mergeModelChangeNotices,
+  deriveModelChangeNotices,
+  selectHandoffImageResources,
   deriveActiveWorkStartedAt,
   deriveCanInterruptRunningThread,
   findLatestProposedPlan,
@@ -1553,6 +1557,25 @@ export default function ChatView(props: ChatViewProps) {
   const timelineEntries = isServerThread ? serverTimelineEntries : draftTimelineEntries;
   const timelineMessages = timelineEntries.flatMap((entry) =>
     entry.kind === "message" ? [entry.message] : [],
+  const modelChangeNotices = useMemo(
+    () =>
+      serverProjection === null
+        ? []
+        : deriveModelChangeNotices(serverProjection.runs, (instanceId, model) => {
+            const provider = providerStatuses.find((status) => status.instanceId === instanceId);
+            const matched = provider?.models.find((candidate) => candidate.slug === model);
+            return matched ? getTriggerDisplayModelName(matched) : null;
+          }),
+    [serverProjection, providerStatuses],
+  );
+  const serverTimelineEntriesWithNotices = useMemo(
+    () => mergeModelChangeNotices(serverTimelineEntries, modelChangeNotices),
+    [serverTimelineEntries, modelChangeNotices],
+  );
+  const timelineEntries = isServerThread ? serverTimelineEntriesWithNotices : draftTimelineEntries;
+  const timelineMessages = useMemo(
+    () => timelineEntries.flatMap((entry) => (entry.kind === "message" ? [entry.message] : [])),
+    [timelineEntries],
   );
   const timelineEmpty = timelineEntries.length === 0 && !hasStreamedTimelineRows;
   const displayedTimelineKey = activeThreadKey ?? routeThreadKey;
