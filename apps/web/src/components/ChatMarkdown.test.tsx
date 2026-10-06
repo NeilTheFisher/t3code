@@ -1,4 +1,4 @@
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId, MessageId } from "@t3tools/contracts";
 import { act, type ComponentProps, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { create, type ReactTestRenderer } from "react-test-renderer";
@@ -945,5 +945,42 @@ describe("ChatMarkdown Windows file links", () => {
     expect(html).not.toContain("javascript:");
     expect(html).not.toContain("d:alert");
     expect(html).not.toContain("chat-markdown-file-link");
+  });
+});
+
+describe("ChatMarkdown TTS paragraph highlight", () => {
+  const highlightProbes = (renderer: ReactTestRenderer) =>
+    renderer.root.findAll(
+      (node) =>
+        node.type === "div" &&
+        node.props["aria-hidden"] === true &&
+        node.props.className === "hidden",
+    );
+
+  it("mounts the highlight probe only when a message id is provided", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    let renderer: ReactTestRenderer | undefined;
+    try {
+      await act(async () => {
+        renderer = create(
+          <ChatMarkdown
+            cwd={undefined}
+            text={"First paragraph.\n\nSecond paragraph."}
+            ttsMessageId={MessageId.make("msg-tts")}
+          />,
+        );
+      });
+      expect(highlightProbes(renderer!)).toHaveLength(1);
+
+      await act(async () => {
+        renderer!.update(<ChatMarkdown cwd={undefined} text={"Just text."} />);
+      });
+      expect(highlightProbes(renderer!)).toHaveLength(0);
+    } finally {
+      await act(async () => {
+        renderer?.unmount();
+      });
+      vi.unstubAllGlobals();
+    }
   });
 });
