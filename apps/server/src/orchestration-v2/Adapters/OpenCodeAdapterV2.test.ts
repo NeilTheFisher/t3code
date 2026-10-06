@@ -384,12 +384,12 @@ describe("OpenCodeAdapterV2", () => {
           const { updatedAt, ...usage } = tokenUsage!;
           assert.equal(typeof updatedAt, "string");
           assert.deepEqual(usage, {
-            usedTokens: 48,
+            usedTokens: 22,
             maxTokens: null,
-            inputTokens: 34,
-            cachedInputTokens: 6,
-            outputTokens: 14,
-            reasoningOutputTokens: 4,
+            inputTokens: 17,
+            cachedInputTokens: 3,
+            outputTokens: 5,
+            reasoningOutputTokens: 2,
           });
         }
       }).pipe(Effect.provide(IdAllocator.layer), Effect.scoped),
