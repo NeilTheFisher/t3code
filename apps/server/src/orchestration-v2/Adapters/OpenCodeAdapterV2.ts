@@ -238,6 +238,12 @@ interface OpenCodeTurnTokenUsageAccumulator {
   reasoningTokens: number;
   hasSubagents: boolean;
   complete: boolean;
+  /**
+   * Tokens from the most recent step. The per-step input already covers the
+   * whole conversation, so this is the current context size the meter shows —
+   * the accumulated totals below would over-count it.
+   */
+  lastStepTokens: OpenCodeStepUsage["tokens"] | undefined;
 }
 
 function makeOpenCodeTurnTokenUsageAccumulator(): OpenCodeTurnTokenUsageAccumulator {
@@ -253,6 +259,7 @@ function makeOpenCodeTurnTokenUsageAccumulator(): OpenCodeTurnTokenUsageAccumula
     reasoningTokens: 0,
     hasSubagents: false,
     complete: true,
+    lastStepTokens: undefined,
   };
 }
 
@@ -267,6 +274,7 @@ function accumulateOpenCodeStepUsage(
   accumulator.cacheCreationTokens += part.tokens.cache.write;
   accumulator.outputTokens += part.tokens.output + part.tokens.reasoning;
   accumulator.reasoningTokens += part.tokens.reasoning;
+  accumulator.lastStepTokens = part.tokens;
 }
 
 interface ActiveOpenCodeTurn {
@@ -1169,16 +1177,23 @@ export function makeOpenCodeAdapterV2(
                   // the v2 adapter's input+output split here. The model's
                   // context window is not known to this adapter, so the meter
                   // falls back to its used-token count when maxTokens is null.
-                  ...(turn.usage.partIds.size === 0
+                  ...(turn.usage.partIds.size === 0 || turn.usage.lastStepTokens === undefined
                     ? {}
                     : {
                         tokenUsage: {
-                          usedTokens: turn.usage.inputTokens + turn.usage.outputTokens,
+                          usedTokens:
+                            turn.usage.lastStepTokens.input +
+                            turn.usage.lastStepTokens.cache.read +
+                            turn.usage.lastStepTokens.cache.write +
+                            turn.usage.lastStepTokens.output,
                           maxTokens: null,
-                          inputTokens: turn.usage.inputTokens,
-                          cachedInputTokens: turn.usage.cachedInputTokens,
-                          outputTokens: turn.usage.outputTokens,
-                          reasoningOutputTokens: turn.usage.reasoningTokens,
+                          inputTokens:
+                            turn.usage.lastStepTokens.input +
+                            turn.usage.lastStepTokens.cache.read +
+                            turn.usage.lastStepTokens.cache.write,
+                          cachedInputTokens: turn.usage.lastStepTokens.cache.read,
+                          outputTokens: turn.usage.lastStepTokens.output,
+                          reasoningOutputTokens: turn.usage.lastStepTokens.reasoning,
                           updatedAt: DateTime.formatIso(completedAt),
                         },
                       }),
