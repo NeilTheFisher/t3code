@@ -24,6 +24,7 @@ import { shouldUseRestingComposerLayout } from "../composerFooterLayout";
 import { useComposerFocusState } from "./useComposerFocusState";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import type { LegendListRef } from "@legendapp/list/react";
+import { useAudioPlayerStore } from "~/audioPlayerStore";
 
 const activityTestState = vi.hoisted(() => ({
   expanded: false,
@@ -85,6 +86,14 @@ beforeEach(() => {
   activityTestState.subagentTooltips = false;
   activityTestState.expanded = false;
   activityTestState.expandedRuns = false;
+  useAudioPlayerStore.setState({
+    status: "idle",
+    playingMessageId: null,
+    threadRef: null,
+    activeParagraph: null,
+    activeParagraphCue: null,
+    scrollToActiveRequest: 0,
+  });
 });
 
 vi.mock("@legendapp/list/react", async () => {
@@ -481,7 +490,135 @@ function buildSnapShotTimelineEntry(previewUrl?: string) {
   };
 }
 
+function buildMessageEntry(
+  entryId: string,
+  messageId: MessageId,
+  role: "user" | "assistant",
+  text: string,
+  runId: RunId | null,
+) {
+  return {
+    id: entryId,
+    kind: "message" as const,
+    createdAt: MESSAGE_CREATED_AT,
+    message: {
+      id: messageId,
+      role,
+      text,
+      runId,
+      createdAt: MESSAGE_CREATED_AT,
+      updatedAt: MESSAGE_CREATED_AT,
+      streaming: false,
+    },
+  };
+}
+
 describe("MessagesTimeline", () => {
+  it("scrolls the list to the narrated assistant row on a reveal request", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    vi.stubGlobal("requestAnimationFrame", () => 0);
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    const messageId = MessageId.make("narrated-assistant");
+    const scrollToIndex = vi.fn();
+    const props = buildProps();
+    props.listRef.current = { scrollToIndex } as unknown as LegendListRef;
+    useAudioPlayerStore.setState({
+      status: "playing",
+      playingMessageId: messageId,
+      threadRef: {
+        environmentId: ACTIVE_THREAD_ENVIRONMENT_ID,
+        threadId: ThreadId.make("thread-1"),
+      },
+      scrollToActiveRequest: 1,
+    });
+    let renderer: ReactTestRenderer | undefined;
+    try {
+      await act(() => {
+        renderer = create(
+          <MessagesTimeline
+            {...props}
+            timelineEntries={[
+              buildMessageEntry("entry-narrated", messageId, "assistant", "Read this aloud.", null),
+            ]}
+          />,
+        );
+      });
+      expect(scrollToIndex).toHaveBeenCalledTimes(1);
+      expect(scrollToIndex).toHaveBeenCalledWith({
+        index: 0,
+        animated: true,
+        viewPosition: 0.5,
+      });
+    } finally {
+      await act(() => renderer?.unmount());
+    }
+  });
+
+  it("expands the owning turn fold before scrolling to a folded narrated row", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    vi.stubGlobal("requestAnimationFrame", () => 0);
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    const runId = RunId.make("run-1");
+    const commentaryId = MessageId.make("narrated-commentary");
+    const terminalId = MessageId.make("narrated-terminal");
+    const scrollToIndex = vi.fn();
+    const props = buildProps();
+    props.listRef.current = { scrollToIndex } as unknown as LegendListRef;
+    useAudioPlayerStore.setState({
+      status: "playing",
+      playingMessageId: commentaryId,
+      threadRef: {
+        environmentId: ACTIVE_THREAD_ENVIRONMENT_ID,
+        threadId: ThreadId.make("thread-1"),
+      },
+      scrollToActiveRequest: 1,
+    });
+    let renderer: ReactTestRenderer | undefined;
+    try {
+      await act(() => {
+        renderer = create(
+          <MessagesTimeline
+            {...props}
+            timelineEntries={[
+              buildMessageEntry("entry-user", MessageId.make("user-1"), "user", "hi", null),
+              {
+                id: "entry-work",
+                kind: "work",
+                createdAt: MESSAGE_CREATED_AT,
+                entry: {
+                  id: "work-1",
+                  createdAt: MESSAGE_CREATED_AT,
+                  label: "Read file",
+                  tone: "tool",
+                  itemType: "dynamic_tool",
+                  toolLifecycleStatus: "completed",
+                  toolData: { input: { path: "README.md" } },
+                },
+              },
+              buildMessageEntry(
+                "entry-commentary",
+                commentaryId,
+                "assistant",
+                "Working on it.",
+                runId,
+              ),
+              buildMessageEntry("entry-terminal", terminalId, "assistant", "Done.", runId),
+            ]}
+          />,
+        );
+      });
+      // The commentary row starts folded, so the reveal expands the turn and
+      // then scrolls to the now-mounted row.
+      expect(JSON.stringify(renderer!.toJSON())).toContain("Working on it.");
+      expect(scrollToIndex).toHaveBeenCalledTimes(1);
+      const [args] = scrollToIndex.mock.calls[0]!;
+      expect(args).toMatchObject({ animated: true, viewPosition: 0.5 });
+      expect(args.index).toBeGreaterThan(0);
+    } finally {
+      await act(() => renderer?.unmount());
+    }
+  });
+
   it("shows dynamic tool input without cached output when the row is expanded", async () => {
     activityTestState.expanded = true;
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);

@@ -34,7 +34,12 @@ import {
   ThreadId,
   type ToolActivityIcon,
 } from "@t3tools/contracts";
-import { parseScopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import {
+  parseScopedThreadKey,
+  scopeThreadRef,
+  scopedThreadKey,
+} from "@t3tools/client-runtime/environment";
+import { useAudioPlayerStore } from "~/audioPlayerStore";
 import { useAtomValue } from "@effect/atom-react";
 import { environmentThreadDetails } from "../../state/threads";
 import { resolveUserMessagePresentation } from "@t3tools/client-runtime/user-message";
@@ -933,6 +938,103 @@ const ConversationTimeline = memo(function ConversationTimeline({
   // Run status/timestamps churn on every stream event; the shared row context
   // must not change with them or every timeline row re-renders per event.
   const runs = useStableHandoffRuns(runsProp);
+
+  // TTS reveal: a mini-player click (or starting narration) must land on the
+  // narrated assistant message even when virtualization has not mounted its
+  // row. `TtsParagraphHighlight` only scrolls a block that already exists, so
+  // this drives the list itself. It fires on an explicit reveal request or a
+  // new narrated message — never on paragraph ticks — so it cannot fight the
+  // user's own scrolling.
+  const playingMessageId = useAudioPlayerStore((state) => state.playingMessageId);
+  const playingThreadRef = useAudioPlayerStore((state) => state.threadRef);
+  const scrollToActiveRequest = useAudioPlayerStore((state) => state.scrollToActiveRequest);
+  const revealTokenRef = useRef<string | null>(null);
+  const pendingRevealRef = useRef<MessageId | null>(null);
+  useEffect(() => {
+    if (playingMessageId === null) {
+      revealTokenRef.current = null;
+      pendingRevealRef.current = null;
+      return;
+    }
+    const token = `${playingMessageId}:${scrollToActiveRequest}`;
+    if (revealTokenRef.current !== token) {
+      revealTokenRef.current = token;
+      pendingRevealRef.current = playingMessageId;
+    }
+    const pendingMessageId = pendingRevealRef.current;
+    if (pendingMessageId === null) return;
+    if (playingThreadRef === null || citationThreadRef === null) return;
+    if (scopedThreadKey(playingThreadRef) !== scopedThreadKey(citationThreadRef)) return;
+    // Wait for a thread switch's saved-position restore to settle, then reveal.
+    if (restoringThreadPosition || rows.length === 0) return;
+
+    const rowIndex = rows.findIndex(
+      (row) => row.kind === "message" && row.message.id === pendingMessageId,
+    );
+    const list = listRef.current;
+    if (rowIndex >= 0) {
+      if (list) {
+        pendingRevealRef.current = null;
+        void list.scrollToIndex({
+          index: rowIndex,
+          animated: !prefersReducedMotion,
+          viewPosition: 0.5,
+        });
+      }
+      return;
+    }
+
+    // The row is folded away. Expand the turn/attempt fold that owns its run,
+    // then let the next render scroll to the now-mounted row.
+    let messageRunId: RunId | null = null;
+    for (const entry of timelineEntries) {
+      if (entry.kind === "message" && entry.message.id === pendingMessageId) {
+        messageRunId = entry.message.runId;
+        break;
+      }
+    }
+    if (messageRunId === null) {
+      pendingRevealRef.current = null;
+      return;
+    }
+    const foldRows = rows.flatMap((row, index) =>
+      (row.kind === "turn-fold" || row.kind === "attempt-fold") && row.runId === messageRunId
+        ? [{ row, index }]
+        : [],
+    );
+    const collapsedFolds = foldRows.filter(({ row }) => !row.expanded);
+    if (collapsedFolds.length > 0) {
+      for (const { row } of collapsedFolds) {
+        if (row.kind === "turn-fold") onToggleTurnFold(row.runId);
+        else onToggleAttemptFold(row.attemptId);
+      }
+      return;
+    }
+    // No fold left to open (e.g. the run's row is outside the loaded history):
+    // fall back to the nearest visible fold row for the run.
+    pendingRevealRef.current = null;
+    const nearest = foldRows[0];
+    if (nearest !== undefined) {
+      void list?.scrollToIndex({
+        index: nearest.index,
+        animated: !prefersReducedMotion,
+        viewPosition: 0.5,
+      });
+    }
+  }, [
+    citationThreadRef,
+    listRef,
+    onToggleAttemptFold,
+    onToggleTurnFold,
+    playingMessageId,
+    playingThreadRef,
+    prefersReducedMotion,
+    restoringThreadPosition,
+    rows,
+    scrollToActiveRequest,
+    timelineEntries,
+  ]);
+
   const minimapItems = useMemo(() => deriveTimelineMinimapItems(rows), [rows]);
   const restoreRowIndex =
     restoringThreadPosition && rememberedPosition?.atEnd === false
