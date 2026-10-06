@@ -3378,6 +3378,7 @@ export function GeneralSettingsPanel() {
                     .play(
                       ttsPreviewMessageId,
                       `This is the ${settings.tts.voice} voice. The quick brown fox jumps over the lazy dog.`,
+                      null,
                     )
                     .catch(() => {
                       // Error surfaced via audioPlayerStore; no-op here.
