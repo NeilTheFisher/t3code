@@ -1047,7 +1047,7 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
                 <span
                   className={cn(
                     "size-1.5 rounded-full",
-                    status === "error" ? "bg-destructive" : "bg-emerald-500",
+                    status === "error" ? "bg-destructive" : "bg-success",
                   )}
                 />
                 {statusLabel(status, muted)}
