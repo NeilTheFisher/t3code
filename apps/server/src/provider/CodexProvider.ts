@@ -485,6 +485,7 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
   readonly skipNativeUsage?: boolean;
 }) {
   const { client, initialize } = yield* withCodexAppServerClient(input);
+  const resolvedHomePath = input.homePath ? expandHomePath(input.homePath) : undefined;
 
   // Extract the version string after the first '/' in userAgent, up to the next space or the end
   const versionMatch = initialize.userAgent.match(/\/([^\s]+)/);

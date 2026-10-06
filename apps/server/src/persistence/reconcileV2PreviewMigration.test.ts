@@ -37,6 +37,8 @@ describe("V2 preview upgrade", () => {
         [55, "PullRequestFilesViewed"],
         [56, "ProjectionThreadsAutoSettleDisabledAt"],
         [58, "RemoveRedundantProjectionIndexes"],
+        [59, "ScheduledTaskWebhooks"],
+        [60, "WebhookRelayDeliveries"],
       ]);
       assert.deepStrictEqual(yield* runMigrations(), []);
       assert.deepStrictEqual(yield* sql`SELECT * FROM orchestration_v2_legacy_imports`, imports);
@@ -116,6 +118,8 @@ describe("V2 preview upgrade", () => {
         [55, "PullRequestFilesViewed"],
         [56, "ProjectionThreadsAutoSettleDisabledAt"],
         [58, "RemoveRedundantProjectionIndexes"],
+        [59, "ScheduledTaskWebhooks"],
+        [60, "WebhookRelayDeliveries"],
       ]);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
