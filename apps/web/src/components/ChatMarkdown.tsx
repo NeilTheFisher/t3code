@@ -48,6 +48,7 @@ import {
   AuthPreviewOperateScope,
   type EditorId,
   type EnvironmentId,
+  type MessageId,
   type ServerConfig,
   type ScopedThreadRef,
   type ServerProviderSkill,
@@ -93,6 +94,9 @@ import { parseThreadLinkHref } from "@t3tools/shared/threadLinks";
 import { AssistantCitationEmbed } from "./chat/AssistantCitationChip";
 import { MarkdownThreadLink } from "./chat/MarkdownThreadLink";
 import { artifactTemplateFromHastProperties } from "@t3tools/shared/codexArtifactTemplates";
+import { mathKind } from "@t3tools/shared/markdownMath";
+import remarkMath from "remark-math";
+import { TtsParagraphHighlight } from "./chat/TtsParagraphHighlight";
 import {
   decodeMarkdownLinkEscapes,
   renderCodexInlineDirectivesAsMarkdown,
@@ -269,6 +273,9 @@ interface ChatMarkdownProps {
   /** The change request's repository, when it can differ from the checkout at `cwd`. */
   sourceControlMediaRepository?: string | undefined;
   headingLevelOffset?: number | undefined;
+  /** Assistant message this markdown belongs to, so the paragraph being spoken
+      by TTS can be highlighted. Omit for markdown that is not spoken. */
+  ttsMessageId?: MessageId | undefined;
 }
 
 export interface ChatMarkdownContextReference {
@@ -2082,6 +2089,7 @@ function ChatMarkdown({
   parseRawHtml = true,
   extensions = NO_EXTENSIONS,
   renderInsights = false,
+  ttsMessageId,
   ...props
 }: ChatMarkdownProps) {
   const { isStreaming, streamingId } = props;
@@ -2139,6 +2147,7 @@ function ChatMarkdown({
           />
         ))}
       </ChatMarkdownRendererContext>
+      {ttsMessageId ? <TtsParagraphHighlight messageId={ttsMessageId} /> : null}
       {localMediaPreview ? (
         <ExpandedImageDialog preview={localMediaPreview} onClose={closeLocalMediaPreview} />
       ) : null}
