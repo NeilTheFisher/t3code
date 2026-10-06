@@ -1392,6 +1392,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     />
   );
 
+  const { markThreadUnread } = useThreadActions();
+
   const handleClick = useCallback(
     (event: ReactMouseEvent) => {
       onThreadClick(event, threadRef);
@@ -1422,6 +1424,24 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       onThreadActivate(threadRef);
     },
     [onThreadActivate, threadRef],
+  );
+  // Middle click is the row's mark-unread gesture, so it never opens a
+  // background tab and never starts the browser's middle-click autoscroll.
+  const handleRowMouseDown = useCallback((event: ReactMouseEvent) => {
+    if (event.button !== 1) return;
+    event.preventDefault();
+  }, []);
+  const handleRowAuxClick = useCallback(
+    (event: ReactMouseEvent) => {
+      if (event.button !== 1) return;
+      // A middle click on a nested link is still a request to open it in a
+      // background tab, so only the row's own chrome is a mark-unread gesture.
+      if (isSidebarNestedLinkClick(event.target)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      markThreadUnread(threadRef);
+    },
+    [markThreadUnread, threadRef],
   );
   const handleDoubleClick = useCallback(
     (event: ReactMouseEvent) => {
@@ -1816,6 +1836,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 onDoubleClick={handleDoubleClick}
                 onKeyDown={handleKeyDown}
                 onContextMenu={handleContextMenu}
+                onMouseDown={handleRowMouseDown}
+                onAuxClick={handleRowAuxClick}
               />
             }
           >
@@ -1981,6 +2003,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               onDoubleClick={handleDoubleClick}
               onKeyDown={handleKeyDown}
               onContextMenu={handleContextMenu}
+              onMouseDown={handleRowMouseDown}
+              onAuxClick={handleRowAuxClick}
             />
           }
         >
