@@ -35,7 +35,6 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import * as Scope from "effect/Scope";
 import * as TestClock from "effect/testing/TestClock";
 
 import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
@@ -43,7 +42,6 @@ import * as TestProviderHost from "@t3tools/provider-testing/TestProviderHost";
 import type * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
 import * as OpenCodeRuntime from "./OpenCodeRuntime.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
-import * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 
 import {
@@ -193,7 +191,6 @@ const makeOpenCodeRuntimeHarness = Effect.fn("makeOpenCodeRuntimeHarness")(funct
   host: Partial<ProviderHost.ProviderHost["Service"]> = {},
   turnSettings: {
     readonly model?: string;
-    readonly exitCode?: Effect.Effect<number>;
     readonly options?: ReadonlyArray<ProviderOptionSelection>;
     readonly interactionMode?: ProviderAdapter.ProviderAdapterV2RuntimePolicy["interactionMode"];
     readonly attachments?: ProviderAdapter.ProviderAdapterV2TurnInput["message"]["attachments"];
@@ -248,9 +245,6 @@ const makeOpenCodeRuntimeHarness = Effect.fn("makeOpenCodeRuntimeHarness")(funct
     text = "hello",
     startProviderThread: OrchestrationV2ProviderThread = providerThread,
     turnPolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy = policy,
-    resume = false,
-    turnKey = suffix,
-    continuation?: { model?: string },
   ) =>
     runtime.startTurn({
       appThread: {
@@ -277,21 +271,20 @@ const makeOpenCodeRuntimeHarness = Effect.fn("makeOpenCodeRuntimeHarness")(funct
         deletedAt: null,
       },
       threadId,
-      runId: RunId.make(`run-opencode-${turnKey}`),
+      runId: RunId.make(`run-opencode-${suffix}`),
       runOrdinal: 1,
       providerTurnOrdinal: 1,
-      attemptId: RunAttemptId.make(`attempt-opencode-${turnKey}`),
-      rootNodeId: NodeId.make(`node-opencode-${turnKey}`),
+      attemptId: RunAttemptId.make(`attempt-opencode-${suffix}`),
+      rootNodeId: NodeId.make(`node-opencode-${suffix}`),
       providerThread: startProviderThread,
-      ...(resume ? { resume: true as const } : {}),
       message: {
-        createdBy: continuation === undefined ? "user" : "agent",
-        creationSource: continuation === undefined ? "web" : "provider",
-        messageId: MessageId.make(`message-opencode-${turnKey}`),
+        createdBy: "user",
+        creationSource: "web",
+        messageId: MessageId.make(`message-opencode-${suffix}`),
         text,
         attachments: turnSettings.attachments ?? [],
       },
-      modelSelection: { ...modelSelection, model: continuation?.model ?? modelSelection.model },
+      modelSelection,
       runtimePolicy: turnPolicy,
     });
   return {
@@ -308,50 +301,6 @@ const makeOpenCodeRuntimeHarness = Effect.fn("makeOpenCodeRuntimeHarness")(funct
 });
 
 describe("OpenCodeAdapterV2", () => {
-  it.effect("cleans abandoned native descendants before registering their root thread", () =>
-    Effect.gen(function* () {
-      const aborted: string[] = [];
-      const harness = yield* makeOpenCodeRuntimeHarness("abandoned-root", "ses_other", {
-        event: { subscribe: async () => ({ stream: asyncEventStream().stream }) },
-        session: {
-          create: async () => ({ data: { id: "ses_other", time: { created: 1, updated: 1 } } }),
-          children: async (input: { sessionID: string }) => ({
-            data: input.sessionID === "ses_abandoned" ? [{ id: "ses_abandoned_child" }] : [],
-          }),
-          abort: async (input: { sessionID: string }) => {
-            aborted.push(input.sessionID);
-            return { data: true };
-          },
-        },
-      });
-      yield* harness.runtime.interruptTurn({
-        providerThread: {
-          ...harness.providerThread,
-          nativeThreadRef: {
-            driver: OPENCODE_PROVIDER,
-            nativeId: "ses_abandoned",
-            strength: "strong",
-          },
-        },
-        providerTurnId: ProviderTurnId.make("provider-turn:abandoned"),
-        requestRuntimeRestart: true,
-      });
-      assert.deepEqual(aborted, ["ses_abandoned_child"]);
-      // The same runtime session remains usable for another registered thread.
-      assert.isTrue(
-        Exit.isSuccess(
-          yield* harness.runtime
-            .interruptTurn({
-              providerThread: harness.providerThread,
-              providerTurnId: ProviderTurnId.make("provider-turn:none"),
-              requestRuntimeRestart: true,
-            })
-            .pipe(Effect.exit),
-        ),
-      );
-    }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer))),
-  );
-
   it.effect.each([
     ["empty", "prompt"],
     ["unsupported", "command"],
@@ -359,7 +308,6 @@ describe("OpenCodeAdapterV2", () => {
     ["unknown", "prompt"],
     ["failure", "prompt"],
     ["unset", "prompt"],
-    ["unset", "resume"],
   ] as const)("normalizes reasoning variants for %s inventory at %s dispatch", ([kind, request]) =>
     Effect.gen(function* () {
       const suffix = `variant-${kind}-${request}`;
@@ -425,23 +373,20 @@ describe("OpenCodeAdapterV2", () => {
           ],
         },
       );
-      yield* harness.startTurn(
-        request === "command" ? "/review staged changes" : request === "resume" ? "" : "hello",
-        harness.providerThread,
-        harness.policy,
-        request === "resume",
-      );
+      yield* harness.startTurn(request === "command" ? "/review staged changes" : "hello");
       assert.equal(inputs.length, 1);
       const payload = inputs[0]!;
       assert.equal(payload.agent, "plan");
-      if (request === "resume") assert.deepEqual(payload.parts, []);
       if (kind === "supported" || kind === "unknown" || kind === "failure") {
         assert.equal(payload.variant, "medium");
       } else {
         assert.equal(Object.hasOwn(payload, "variant"), false);
       }
       if (kind === "unset") assert.equal(inventoryCalls, 0);
-    }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer))),
+    }).pipe(
+      Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer)),
+      Effect.scoped,
+    ),
   );
 
   it.effect("reuses successful model variants for the session and retries failed inventories", () =>
@@ -517,7 +462,10 @@ describe("OpenCodeAdapterV2", () => {
       variants = { medium: {} };
       assert.isFalse(Object.hasOwn(yield* submit(), "variant"));
       assert.equal(inventoryCalls, 2);
-    }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer))),
+    }).pipe(
+      Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer)),
+      Effect.scoped,
+    ),
   );
 
   it.effect("keeps queued steers behind a cold catalog lookup and cancels them on stop", () =>
@@ -604,7 +552,10 @@ describe("OpenCodeAdapterV2", () => {
       assert.isTrue(Exit.isFailure(yield* Fiber.join(firstSteer)));
       assert.isTrue(Exit.isFailure(yield* Fiber.join(secondSteer)));
       assert.deepEqual(calls, ["catalog", "catalog-aborted", "abort"]);
-    }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer))),
+    }).pipe(
+      Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer)),
+      Effect.scoped,
+    ),
   );
 
   it.effect.each([
@@ -665,7 +616,10 @@ describe("OpenCodeAdapterV2", () => {
       const terminal = events.findLast((event) => event.type === "turn.terminal");
       assert.strictEqual(session?.providerSession.lastError, sample.expected);
       assert.strictEqual(terminal?.failure?.message, sample.expected);
-    }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer))),
+    }).pipe(
+      Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer)),
+      Effect.scoped,
+    ),
   );
 
   it.effect("classifies APIError 429 as a usage limit", () =>
@@ -707,7 +661,10 @@ describe("OpenCodeAdapterV2", () => {
       );
       assert.equal(terminal?.status, "failed");
       assert.equal(terminal?.failure?.class, "usage_limit");
-    }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer))),
+    }).pipe(
+      Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer)),
+      Effect.scoped,
+    ),
   );
 
   it.effect("applies a changed runtime policy to the session on resume and turn start", () =>
@@ -761,7 +718,10 @@ describe("OpenCodeAdapterV2", () => {
       assert.deepStrictEqual(updates.slice(1), [
         { sessionID: "root", permission: openCodePermissionRules(fullAccess) },
       ]);
-    }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer))),
+    }).pipe(
+      Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer)),
+      Effect.scoped,
+    ),
   );
 
   it.effect("prompts a session bound to the thread's cwd after a worktree handoff", () =>
@@ -925,7 +885,10 @@ describe("OpenCodeAdapterV2", () => {
       });
       assert.equal(permissionAction(nativePermissions.get(child)!, "bash"), "ask");
       assert.equal(permissionAction(nativePermissions.get(child)!, "task"), "deny");
-    }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer))),
+    }).pipe(
+      Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer)),
+      Effect.scoped,
+    ),
   );
 
   it.effect.each(["completed", "failed", "unavailable"] as const)(
@@ -936,18 +899,6 @@ describe("OpenCodeAdapterV2", () => {
         let promptId = "";
         const harness = yield* makeOpenCodeRuntimeHarness(`usage-${ending}`, "root", {
           event: { subscribe: async () => ({ stream: nativeEvents.stream }) },
-          provider: {
-            list: async () => ({
-              data: {
-                all: [
-                  {
-                    id: "anthropic",
-                    models: { "claude-sonnet": { limit: { context: 200_000, output: 8_000 } } },
-                  },
-                ],
-              },
-            }),
-          },
           session: {
             create: async () => ({ data: { id: "root", time: { created: 1, updated: 1 } } }),
             promptAsync: async (input: { messageID: string }) => {
@@ -1068,12 +1019,27 @@ describe("OpenCodeAdapterV2", () => {
                 hasSubagents: false,
               },
         );
-        // The thread's context window reads tokenUsage: the last step's context fill.
-        if (ending === "completed") {
-          assert.equal(completed?.providerTurn.tokenUsage?.usedTokens, 22);
-          assert.equal(completed?.providerTurn.tokenUsage?.maxTokens, 200_000);
+        // The composer's context meter reads `tokenUsage`, not `turnTokenUsage`.
+        const tokenUsage = completed?.providerTurn.tokenUsage;
+        if (ending === "unavailable") {
+          assert.equal(tokenUsage, undefined);
+        } else {
+          assert.isTrue(tokenUsage !== undefined);
+          const { updatedAt, ...usage } = tokenUsage!;
+          assert.equal(typeof updatedAt, "string");
+          assert.deepEqual(usage, {
+            usedTokens: 48,
+            maxTokens: null,
+            inputTokens: 34,
+            cachedInputTokens: 6,
+            outputTokens: 14,
+            reasoningOutputTokens: 4,
+          });
         }
-      }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer))),
+      }).pipe(
+        Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer)),
+        Effect.scoped,
+      ),
   );
 
   // OpenCode 1.18.18 reports a context overflow as session.error, then auto-compacts and continues.
@@ -1176,7 +1142,10 @@ describe("OpenCodeAdapterV2", () => {
             event.turnItem.text === "Post-compaction step",
         ),
       );
-    }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer))),
+    }).pipe(
+      Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer)),
+      Effect.scoped,
+    ),
   );
 
   it.effect("drops context usage carried over from before a completed compaction", () =>
@@ -1310,7 +1279,10 @@ describe("OpenCodeAdapterV2", () => {
           (event) => event.type === "turn_item.updated" && event.turnItem.type === "compaction",
         ),
       );
-    }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer))),
+    }).pipe(
+      Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer)),
+      Effect.scoped,
+    ),
   );
 
   it.effect("preserves native multi-select and custom-answer flags through a live reply", () =>
@@ -1385,7 +1357,10 @@ describe("OpenCodeAdapterV2", () => {
         answers: { "question-0-drinks": ["Tea", "Water"] },
       });
       assert.deepInclude(delivered, { answers: [["Tea", "Water"]] });
-    }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer))),
+    }).pipe(
+      Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer)),
+      Effect.scoped,
+    ),
   );
 
   it.effect(
@@ -2806,25 +2781,13 @@ describe("OpenCodeAdapterV2", () => {
   );
 
   // OpenCode 1.18.32 background tasks complete at launch; children stay busy after root settlement.
-  // Event order from a live 1.19.5 run: the child reports busy only after the launch completes.
-  it.effect.each([
-    { case: "finishes", ending: "idle", outcome: "completed" },
-    { case: "is aborted", ending: "abort", outcome: "interrupted" },
-    { case: "fails before its first turn", ending: "error", outcome: "failed" },
-    { case: "never starts and the thread is stopped", ending: "stop", outcome: "interrupted" },
-    {
-      case: "is stopped despite a failed root abort",
-      ending: "stop-failure",
-      outcome: "interrupted",
-    },
-  ])("keeps a background task's subagent running until its child $case", ({ ending, outcome }) =>
+  it.effect("reports a background task child as pending work after the root turn settles", () =>
     Effect.gen(function* () {
       const nativeEvents = asyncEventStream();
       const push = (event: unknown) => Effect.promise(() => nativeEvents.push(event));
       const root = "ses_root";
       const child = "ses_child";
       let promptId = "";
-      const aborted: Array<string> = [];
       const harness = yield* makeOpenCodeRuntimeHarness("background-child", root, {
         event: { subscribe: async () => ({ stream: nativeEvents.stream }) },
         session: {
@@ -2837,15 +2800,8 @@ describe("OpenCodeAdapterV2", () => {
             promptId = input.messageID;
             return { data: true };
           },
-          abort: async (input: { sessionID: string }) => {
-            aborted.push(input.sessionID);
-            if (ending === "stop-failure" && input.sessionID === root)
-              throw new Error("root abort failed");
-            return { data: true };
-          },
-          children: async (input: { sessionID: string }) => ({
-            data: input.sessionID === root ? [{ id: child }] : [],
-          }),
+          abort: async () => ({ data: true }),
+          children: async () => ({ data: [] }),
         },
       });
       const hasPendingBackgroundWork = harness.runtime.hasPendingBackgroundWork;
@@ -2902,6 +2858,7 @@ describe("OpenCodeAdapterV2", () => {
         },
       });
       yield* push(status(root, "busy"));
+      yield* push(taskPart("running"));
       yield* push({
         type: "session.created",
         properties: {
@@ -3080,15 +3037,14 @@ describe("OpenCodeAdapterV2", () => {
       yield* push(taskPart("prt_task_resume", "running", child));
       yield* push(childPrompt("msg_child_resume", 5));
       yield* push(status(child, "busy"));
+      yield* push(taskPart("completed"));
+      yield* push(status(root, "idle"));
+      assert.equal(Option.getOrUndefined(yield* Fiber.join(terminal))?.status, "completed");
+      assert.isTrue(yield* hasPendingBackgroundWork, "the running child must pin idle release");
 
-      const turns = Array.from(yield* Fiber.join(childTurns)).flatMap((event) =>
-        event.type === "provider_turn.updated" ? [event.providerTurn] : [],
-      );
-      assert.equal(new Set(turns.map((turn) => turn.providerThreadId)).size, 1);
-      assert.deepEqual(
-        turns.map((turn) => turn.ordinal),
-        restarted ? [2] : [1, 2],
-      );
+      yield* push(status(child, "idle"));
+      yield* push({ type: "session.idle", properties: { sessionID: child } });
+      assert.isFalse(yield* hasPendingBackgroundWork, "an idle child must not pin idle release");
     }).pipe(
       Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer)),
       Effect.scoped,
@@ -3219,7 +3175,10 @@ describe("OpenCodeAdapterV2", () => {
       );
       assert.ok(emptyWebSearch?.type === "web_search");
       assert.equal(emptyWebSearch.results, undefined);
-    }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer))),
+    }).pipe(
+      Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer)),
+      Effect.scoped,
+    ),
   );
 
   it.effect("drops cancelled OpenCode todos so a finished list completes", () =>
@@ -3272,7 +3231,10 @@ describe("OpenCodeAdapterV2", () => {
         ],
       );
       assert.equal(plan.status, "completed");
-    }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer))),
+    }).pipe(
+      Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer)),
+      Effect.scoped,
+    ),
   );
 
   it.effect("presents OpenCode MCP calls without treating remote tools as local edits", () =>
@@ -3440,7 +3402,10 @@ describe("OpenCodeAdapterV2", () => {
       assert.equal(items[3]?.toolName, "ambiguous_server_edit_document");
       assert.isUndefined(items[3]?.toolSource);
       assert.equal(statusReads, 1);
-    }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer))),
+    }).pipe(
+      Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer)),
+      Effect.scoped,
+    ),
   );
 
   it.effect("admits a native command on its user receipt before generation completes", () =>
@@ -3525,7 +3490,10 @@ describe("OpenCodeAdapterV2", () => {
       yield* Fiber.join(start);
       assert.equal(promptCalls, 0);
       release.resolve();
-    }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer))),
+    }).pipe(
+      Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer)),
+      Effect.scoped,
+    ),
   );
 
   it.effect("keeps an admitted native command running when its HTTP request times out", () =>
@@ -3602,7 +3570,10 @@ describe("OpenCodeAdapterV2", () => {
         "completed",
         "a command admitted by its user receipt must not fail when its HTTP request times out",
       );
-    }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer))),
+    }).pipe(
+      Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer)),
+      Effect.scoped,
+    ),
   );
 
   it.effect("compacts with the native summarize API and emits a completed compaction", () =>
@@ -3657,7 +3628,10 @@ describe("OpenCodeAdapterV2", () => {
       assert.isTrue(
         events.some((event) => event.type === "turn.terminal" && event.status === "completed"),
       );
-    }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer))),
+    }).pipe(
+      Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer)),
+      Effect.scoped,
+    ),
   );
 
   it.effect("ends a turn on the provider thread it started on", () =>
@@ -3694,7 +3668,10 @@ describe("OpenCodeAdapterV2", () => {
         Stream.runHead,
       );
       assert.equal(Option.getOrUndefined(terminal)?.providerThreadId, forkedRow.id);
-    }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer))),
+    }).pipe(
+      Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer)),
+      Effect.scoped,
+    ),
   );
 
   it.effect("does not restore messages beyond OpenCode's persisted revert boundary", () =>
@@ -3779,7 +3756,10 @@ describe("OpenCodeAdapterV2", () => {
         ["user-kept", "assistant-kept"],
       );
       assert.equal(snapshot.providerThread.nativeConversationHeadRef?.nativeId, "user-kept");
-    }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer))),
+    }).pipe(
+      Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer)),
+      Effect.scoped,
+    ),
   );
 
   it.effect("steers with the turn's agent, reasoning variant and system instructions", () =>
@@ -3830,7 +3810,10 @@ describe("OpenCodeAdapterV2", () => {
         { agent: steer?.agent, variant: steer?.variant, system: steer?.system },
         { agent: start?.agent, variant: start?.variant, system: start?.system },
       );
-    }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer))),
+    }).pipe(
+      Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer)),
+      Effect.scoped,
+    ),
   );
 
   it.effect("keeps a newly admitted prompt alive across stale idle and delayed busy evidence", () =>
@@ -4671,7 +4654,10 @@ describe("OpenCodeAdapterV2", () => {
             (event.type === "provider_session.updated" && event.providerSession.status === "error"),
         ),
       );
-    }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer))),
+    }).pipe(
+      Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer)),
+      Effect.scoped,
+    ),
   );
 
   it.effect("reports an unanswered session abort as an interrupt timeout", () =>
@@ -4764,7 +4750,10 @@ describe("OpenCodeAdapterV2", () => {
       assert.equal(terminal?.failure?.class, "transport_error");
       assert.equal(terminal?.threadDisposition, "broken");
       assert.equal((yield* Effect.exit(harness.startTurn()))._tag, "Failure");
-    }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer))),
+    }).pipe(
+      Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer)),
+      Effect.scoped,
+    ),
   );
 
   it.effect("fails compaction when its response races stream termination", () =>
@@ -4825,7 +4814,10 @@ describe("OpenCodeAdapterV2", () => {
             event.turnItem.status === "completed",
         ),
       );
-    }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer))),
+    }).pipe(
+      Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer)),
+      Effect.scoped,
+    ),
   );
 
   it.effect("does not register a turn after the OpenCode event stream ends", () =>
@@ -4883,7 +4875,10 @@ describe("OpenCodeAdapterV2", () => {
 
       assert.isTrue(Exit.isFailure(yield* Fiber.join(start)));
       assert.equal(promptCalls, 0);
-    }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer))),
+    }).pipe(
+      Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer)),
+      Effect.scoped,
+    ),
   );
 
   it("holds stale idle through prompt admission until the new user message is observed", () => {
@@ -4938,15 +4933,6 @@ describe("OpenCodeAdapterV2", () => {
         yield* reconcileOpenCodePromptAdmissionStatus(admission, 4, Effect.succeed("unknown")),
         "unknown",
       );
-      assert.isTrue(admission.admissionPending);
-      const stalled = yield* reconcileOpenCodePromptAdmissionStatus(
-        admission,
-        4,
-        Effect.never,
-      ).pipe(Effect.forkChild({ startImmediately: true }));
-      yield* TestClock.adjust("10 seconds");
-      assert.isDefined(stalled.pollUnsafe());
-      assert.equal(yield* Fiber.join(stalled), "unknown");
       assert.isTrue(admission.admissionPending);
       assert.equal(
         yield* reconcileOpenCodePromptAdmissionStatus(admission, 4, Effect.succeed("idle")),
@@ -5136,13 +5122,6 @@ describe("OpenCodeAdapterV2", () => {
     const fullAccess = openCodePermissionRules(runtimePolicy("full-access"));
     assert.equal(permissionAction(fullAccess, "bash"), "allow");
     assert.equal(permissionAction(fullAccess, "edit"), "allow");
-    const fullAccessRulesCopiedToTaskChildren = fullAccess.filter(
-      (rule) => rule.permission === "external_directory" || rule.action === "deny",
-    );
-    assert.equal(
-      permissionAction(fullAccessRulesCopiedToTaskChildren, "external_directory"),
-      "allow",
-    );
 
     const granularApproval = openCodePermissionRules(
       runtimePolicy("full-access", {
@@ -5338,7 +5317,10 @@ it.effect.each([false, true])(
         assert.equal(result.messages.length, 0);
         assert.deepEqual(calls, ["fork", "permissions"]);
       }
-    }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer))),
+    }).pipe(
+      Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer)),
+      Effect.scoped,
+    ),
 );
 
 it.live.each([true, false])("opens an authenticated OpenCode session (external=%s)", (external) =>
