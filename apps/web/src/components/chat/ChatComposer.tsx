@@ -6254,9 +6254,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         return readComposerSnapshotStable();
       },
       replaceTextRange: (input) =>
-        applyPromptReplacement(input.rangeStart, input.rangeEnd, input.replacement, {
-          ...(input.expectedText !== undefined ? { expectedText: input.expectedText } : {}),
-        }),
+        applyPromptReplacement(
+          input.rangeStart,
+          input.rangeEnd,
+          input.replacement,
+          input.expectedText !== undefined ? { expectedText: input.expectedText } : {},
+        ),
       resetCursorState: (options?: {
         cursor?: number;
         prompt?: string;

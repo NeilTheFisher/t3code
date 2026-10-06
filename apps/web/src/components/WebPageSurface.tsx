@@ -73,7 +73,7 @@ export function WebPageSurface(props: { threadRef: ScopedThreadRef; url: string 
             <TooltipPopup side="bottom">Open in new tab</TooltipPopup>
           </Tooltip>
         </form>
-        <p className="mt-1 px-0.5 text-[11px] leading-snug text-muted-foreground">
+        <p className="mt-1 px-0.5 text-2xs leading-snug text-muted-foreground">
           If the page stays blank, the site may block embedding; local dev servers usually work.
         </p>
       </div>
