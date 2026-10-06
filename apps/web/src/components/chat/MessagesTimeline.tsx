@@ -79,6 +79,7 @@ import {
   useContext,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent,
@@ -194,6 +195,7 @@ import {
 } from "./timelineScrollAnchoring";
 import { MessageCopyButton } from "./MessageCopyButton";
 import { promptLinkFor } from "../promptLinks/copyPromptLink";
+import { MessagePlayButton } from "./MessagePlayButton";
 import { PierreEntryIcon } from "./PierreEntryIcon";
 import { WorkspaceEntryIcon, WorkspaceEntryTooltip } from "./WorkspaceEntryIcon";
 import { AssistantSelectionToolbar } from "./AssistantSelectionToolbar";
@@ -210,6 +212,7 @@ import {
   type MessagesTimelineRowsProjection,
   liveWorkEntryLabel,
   resolveAssistantMessageCopyState,
+  resolveAssistantMessagePlayState,
   resolveTimelineIsAtEnd,
   resolveTimelineMinimapHasPersistentGutter,
   resolveTimelineMinimapCurrentIndex,
@@ -319,6 +322,8 @@ interface TimelineRowSharedState {
   citationRequest: AssistantCitationTarget | null;
   listRef: React.RefObject<LegendListRef | null>;
   timestampFormat: TimestampFormat;
+  /** Whether assistant-message TTS playback controls are available. */
+  ttsEnabled: boolean;
   routeThreadKey: string;
   threadRef: ScopedThreadRef | null;
   markdownCwd: string | undefined;
@@ -505,6 +510,8 @@ interface MessagesTimelineProps {
   markdownCwd: string | undefined;
   resolvedTheme: "light" | "dark";
   timestampFormat: TimestampFormat;
+  /** Whether assistant-message TTS playback controls are shown. */
+  ttsEnabled?: boolean;
   workspaceRoot: string | undefined;
   skills?: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   runs: ReadonlyArray<HandoffTimelineRun>;
@@ -605,6 +612,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   markdownCwd,
   resolvedTheme,
   timestampFormat,
+  ttsEnabled = false,
   workspaceRoot,
   skills = EMPTY_TIMELINE_SKILLS,
   runs: runsProp,
@@ -1287,44 +1295,87 @@ const ConversationTimeline = memo(function ConversationTimeline({
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Rows and chat width resize the content without resizing the viewport.
   }, [timelineViewportElement, rows.length, reportContentOverflow, chatWidth]);
 
-  const sharedState: TimelineRowSharedState = {
-    citationRequest: readyCitationRequest,
-    listRef,
-    timestampFormat,
-    routeThreadKey,
-    threadRef: citationThreadRef,
-    markdownCwd,
-    resolvedTheme,
-    workspaceRoot,
-    skills,
-    runs,
-    activeThreadEnvironmentId,
-    onRevertToTurnCount,
-    onRunShellCommand,
-    findActive,
-    onImageExpand,
-    onFileOpen,
-    onUseArtifactTemplate,
-    onSendAppMessage,
-    onAppFullscreenChange,
-    onFileDownload,
-    openPullRequest,
-    onOpenTurnDiff,
-    onOpenThread,
-    workflowOpening,
-    onForkFromRun,
-    onRollbackCheckpoint,
-    onToggleTurnFold,
-    onToggleAttemptFold,
-    onToggleWorkGroup,
-    onToggleWorkEntry: suspendEndScrollMaintenanceForDisclosure,
-    onCancelWorktreeSetup: onCancelWorktreeSetup ?? null,
-    retryableWorkspacePreparationRunIds,
-    onRetryWorkspacePreparation: onRetryWorkspacePreparation ?? null,
-    onWorktreeSetupWorkLocally: onWorktreeSetupWorkLocally ?? null,
-    onOpenWorktreeSetupTerminal: onOpenWorktreeSetupTerminal ?? null,
-    workGroupViewState,
-  };
+  const sharedState = useMemo<TimelineRowSharedState>(
+    () => ({
+      citationRequest: readyCitationRequest,
+      listRef,
+      timestampFormat,
+      ttsEnabled,
+      routeThreadKey,
+      // Keep Markdown callbacks memoized during unrelated activity updates.
+      threadRef: citationThreadRef,
+      markdownCwd,
+      resolvedTheme,
+      workspaceRoot,
+      skills,
+      runs,
+      activeThreadEnvironmentId,
+      onRevertToTurnCount,
+      onRunShellCommand,
+      findActive,
+      onImageExpand,
+      onFileOpen,
+      onUseArtifactTemplate,
+      onSendAppMessage,
+      onAppFullscreenChange,
+      onFileDownload,
+      openPullRequest,
+      onOpenTurnDiff,
+      onOpenThread,
+      workflowOpening,
+      onForkFromRun,
+      onRollbackCheckpoint,
+      onToggleTurnFold,
+      onToggleAttemptFold,
+      onToggleWorkGroup,
+      onToggleWorkEntry: suspendEndScrollMaintenanceForDisclosure,
+      onCancelWorktreeSetup: onCancelWorktreeSetup ?? null,
+      retryableWorkspacePreparationRunIds,
+      onRetryWorkspacePreparation: onRetryWorkspacePreparation ?? null,
+      onWorktreeSetupWorkLocally: onWorktreeSetupWorkLocally ?? null,
+      onOpenWorktreeSetupTerminal: onOpenWorktreeSetupTerminal ?? null,
+      workGroupViewState,
+    }),
+    [
+      readyCitationRequest,
+      listRef,
+      timestampFormat,
+      ttsEnabled,
+      routeThreadKey,
+      citationThreadRef,
+      markdownCwd,
+      resolvedTheme,
+      workspaceRoot,
+      skills,
+      runs,
+      activeThreadEnvironmentId,
+      onRevertToTurnCount,
+      onRunShellCommand,
+      findActive,
+      onImageExpand,
+      onFileOpen,
+      onUseArtifactTemplate,
+      onSendAppMessage,
+      onAppFullscreenChange,
+      onFileDownload,
+      openPullRequest,
+      onOpenTurnDiff,
+      workflowOpening,
+      onOpenThread,
+      onForkFromRun,
+      onRollbackCheckpoint,
+      onToggleTurnFold,
+      onToggleAttemptFold,
+      onToggleWorkGroup,
+      suspendEndScrollMaintenanceForDisclosure,
+      onCancelWorktreeSetup,
+      retryableWorkspacePreparationRunIds,
+      onRetryWorkspacePreparation,
+      onWorktreeSetupWorkLocally,
+      onOpenWorktreeSetupTerminal,
+      workGroupViewState,
+    ],
+  );
   const compactionAwaitingRow =
     isCompacting && !rows.some((row) => row.kind === "context-compaction" && row.active);
   const backgroundWorktreeSetup =
@@ -2844,17 +2895,29 @@ function AssistantCopyButton({
   showCopyButton: boolean;
   streaming: boolean;
 }) {
-  const assistantCopyState = resolveAssistantMessageCopyState({
+  const ctx = use(TimelineRowCtx);
+  const source = {
     text: message.text ?? null,
     showCopyButton,
     streaming,
-  });
+  };
+  const assistantCopyState = resolveAssistantMessageCopyState(source);
+  const playState = resolveAssistantMessagePlayState({ ...source, ttsEnabled: ctx.ttsEnabled });
 
-  if (!assistantCopyState.visible) {
+  if (!assistantCopyState.visible && !playState.visible) {
     return null;
   }
 
-  return <MessageCopyButton text={assistantCopyState.text ?? ""} variant="ghost" />;
+  return (
+    <>
+      {playState.visible ? (
+        <MessagePlayButton messageId={message.id} text={playState.text ?? ""} variant="ghost" />
+      ) : null}
+      {assistantCopyState.visible ? (
+        <MessageCopyButton text={assistantCopyState.text ?? ""} variant="ghost" />
+      ) : null}
+    </>
+  );
 }
 
 function ProposedPlanTimelineRow({
