@@ -62,7 +62,7 @@ export function ProviderUsageRows(props: {
               />
             </div>
             {resetLabel ? (
-              <div className="text-[11px] text-muted-foreground/70">Resets at {resetLabel}</div>
+              <div className="text-2xs text-muted-foreground/70">Resets at {resetLabel}</div>
             ) : null}
           </div>
         );
@@ -78,7 +78,7 @@ export function ProviderUsageSummary(props: { readonly usageLimits: ServerProvid
     remainingPercent: Math.max(0, Math.round(100 - window.usedPercent)),
   }));
   return (
-    <p className="min-w-0 text-[11px] text-muted-foreground/80">
+    <p className="min-w-0 text-2xs text-muted-foreground/80">
       {summaryItems.map((item, index) => (
         <span key={item.key} className="whitespace-nowrap">
           {index > 0 ? <span className="mx-1.5 text-muted-foreground/40">·</span> : null}
