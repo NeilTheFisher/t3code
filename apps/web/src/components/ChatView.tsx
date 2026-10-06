@@ -3775,6 +3775,7 @@ export default function ChatView(props: ChatViewProps) {
                   markdownCwd={gitCwd ?? undefined}
                   resolvedTheme={resolvedTheme}
                   timestampFormat={timestampFormat}
+                  ttsEnabled={settings.tts.enabled}
                   workspaceRoot={activeWorkspaceRoot}
                   skills={timelineSkills}
                   anchorMessageId={timelineAnchorMessageId}
