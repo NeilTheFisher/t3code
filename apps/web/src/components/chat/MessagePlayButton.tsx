@@ -5,7 +5,7 @@
  */
 import { memo, useEffect, useRef } from "react";
 import { Loader2Icon, Volume2Icon, VolumeXIcon } from "lucide-react";
-import { type MessageId } from "@t3tools/contracts";
+import { type MessageId, type ScopedThreadRef } from "@t3tools/contracts";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
@@ -16,12 +16,14 @@ import { stackedThreadToast, toastManager, type ToastId } from "../ui/toast";
 export const MessagePlayButton = memo(function MessagePlayButton({
   messageId,
   text,
+  threadRef,
   size = "xs",
   variant = "outline",
   className,
 }: {
   messageId: MessageId;
   text: string;
+  threadRef: ScopedThreadRef | null;
   size?: "xs" | "icon-xs";
   variant?: "outline" | "ghost";
   className?: string;
@@ -90,7 +92,7 @@ export const MessagePlayButton = memo(function MessagePlayButton({
       stop();
       return;
     }
-    void play(messageId, trimmed).catch(() => {
+    void play(messageId, trimmed, threadRef).catch(() => {
       // Error already surfaced via the store + effect above.
     });
   };
