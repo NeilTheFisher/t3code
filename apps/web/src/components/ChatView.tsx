@@ -183,6 +183,8 @@ import {
   derivePendingUserInputs,
   derivePhase,
   deriveTimelineEntriesFromVisibleTurnItemsWithState,
+  mergeModelChangeNotices,
+  deriveModelChangeNotices,
   selectHandoffImageResources,
   type TimelineEntriesProjection,
   deriveActivePlanState,
@@ -3907,7 +3909,22 @@ export default function ChatView(props: ChatViewProps) {
       ),
     [optimisticUserMessages],
   );
-  const timelineEntries = isServerThread ? serverTimelineEntries : draftTimelineEntries;
+  const modelChangeNotices = useMemo(
+    () =>
+      serverProjection === null
+        ? []
+        : deriveModelChangeNotices(serverProjection.runs, (instanceId, model) => {
+            const provider = providerStatuses.find((status) => status.instanceId === instanceId);
+            const matched = provider?.models.find((candidate) => candidate.slug === model);
+            return matched ? getTriggerDisplayModelName(matched) : null;
+          }),
+    [serverProjection, providerStatuses],
+  );
+  const serverTimelineEntriesWithNotices = useMemo(
+    () => mergeModelChangeNotices(serverTimelineEntries, modelChangeNotices),
+    [serverTimelineEntries, modelChangeNotices],
+  );
+  const timelineEntries = isServerThread ? serverTimelineEntriesWithNotices : draftTimelineEntries;
   const timelineMessages = useMemo(
     () => timelineEntries.flatMap((entry) => (entry.kind === "message" ? [entry.message] : [])),
     [timelineEntries],
