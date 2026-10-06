@@ -2635,12 +2635,39 @@ export default function ChatView(props: ChatViewProps) {
     isConnecting ||
     isCompacting ||
     runlessWorkStartedAt !== null;
-  const activeContextWindow = deriveLatestContextWindowSnapshot(
-    serverVisibleTurnItems ?? [],
+  // Some providers (OpenCode 1.x) report live usage without a window size, so
+  // fill maxTokens from the active model's provider metadata to draw the ring.
+  const activeModelContextWindowTokens = useMemo(() => {
+    if (selectedProviderEntry == null) return null;
+    const slug = resolveSelectableModel(
+      selectedProviderEntry.driverKind,
+      reportedModelSelection?.model ?? activeThread?.modelSelection.model,
+      selectedProviderEntry.models,
+    );
+    if (slug === null) return null;
+    return (
+      selectedProviderEntry.models.find((model) => model.slug === slug)?.contextWindowTokens ?? null
+    );
+  }, [activeThread?.modelSelection.model, reportedModelSelection, selectedProviderEntry]);
+  const activeContextWindow = useMemo(() => {
+    const liveUsage =
+      activeThreadLiveTokenUsage !== null &&
+      activeThreadLiveTokenUsage.maxTokens == null &&
+      activeModelContextWindowTokens !== null
+        ? { ...activeThreadLiveTokenUsage, maxTokens: activeModelContextWindowTokens }
+        : activeThreadLiveTokenUsage;
+    return deriveLatestContextWindowSnapshot(
+      serverVisibleTurnItems ?? [],
+      liveUsage,
+      activeProviderThread,
+    );
+  }, [
     activeThreadLiveTokenUsage,
+    activeModelContextWindowTokens,
+    serverVisibleTurnItems,
     activeProviderThread,
-  );
-  const pendingBackgroundTasks = (() => {
+  ]);
+  const pendingBackgroundTasks = useMemo(() => {
     if (serverProjection === null || serverProjection === undefined) {
       return [];
     }
