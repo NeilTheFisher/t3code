@@ -1,13 +1,16 @@
 import { resolveThreadWorkingStartedAt } from "@t3tools/client-runtime/state/models";
 import {
   type AssetResource,
+  type MessageId,
   type OrchestrationV2ExecutionNode,
   type OrchestrationV2PlanArtifact,
   type OrchestrationV2ProjectedTurnItem,
+  type OrchestrationV2Run,
   type OrchestrationV2RunAttempt,
   type OrchestrationV2ThreadProjection,
   type OrchestrationV2TurnItem,
   type PlanId,
+  type ProviderInstanceId,
   type RunId,
   type ToolActivitySurface,
   type ToolActivityIcon,
@@ -823,6 +826,104 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
   }
 
   return entries;
+}
+
+/** A mid-thread switch between the models two consecutive runs were sent with. */
+export interface ModelChangeNotice {
+  readonly id: string;
+  readonly createdAt: string;
+  readonly runId: RunId;
+  /** User message that opened the run the switch applies to. */
+  readonly userMessageId: MessageId;
+  readonly fromInstanceId: ProviderInstanceId;
+  readonly fromModel: string;
+  readonly toInstanceId: ProviderInstanceId;
+  readonly toModel: string;
+  readonly summary: string;
+}
+
+/**
+ * Derives "Switched from X to Y" notices from consecutive runs. Runs are the
+ * only v2 record of the model a turn was sent with, so a switch is visible
+ * exactly where two consecutive runs differ in provider instance or model.
+ * `modelLabel` resolves a selection to a display name; without it the raw
+ * model id is used.
+ */
+export function deriveModelChangeNotices(
+  runs: ReadonlyArray<OrchestrationV2Run>,
+  modelLabel?: (instanceId: ProviderInstanceId, model: string) => string | null,
+): ModelChangeNotice[] {
+  const ordered = [...runs].toSorted(
+    (left, right) =>
+      left.ordinal - right.ordinal ||
+      DateTime.formatIso(left.requestedAt).localeCompare(DateTime.formatIso(right.requestedAt)) ||
+      left.id.localeCompare(right.id),
+  );
+  const notices: ModelChangeNotice[] = [];
+  for (let index = 1; index < ordered.length; index += 1) {
+    const previous = ordered[index - 1]!;
+    const run = ordered[index]!;
+    const from = previous.modelSelection;
+    const to = run.modelSelection;
+    if (from.instanceId === to.instanceId && from.model === to.model) continue;
+    const fromLabel = modelLabel?.(from.instanceId, from.model) ?? from.model;
+    const toLabel = modelLabel?.(to.instanceId, to.model) ?? to.model;
+    notices.push({
+      id: `model-change:${run.id}`,
+      createdAt: DateTime.formatIso(run.requestedAt),
+      runId: run.id,
+      userMessageId: run.userMessageId,
+      fromInstanceId: from.instanceId,
+      fromModel: from.model,
+      toInstanceId: to.instanceId,
+      toModel: to.model,
+      summary:
+        fromLabel.length > 0 && toLabel.length > 0 && fromLabel !== toLabel
+          ? `Switched from ${fromLabel} to ${toLabel}`
+          : `Switched to ${toLabel}`,
+    });
+  }
+  return notices;
+}
+
+/**
+ * Inserts each notice immediately above the user message that started its run,
+ * so the row reads as the boundary before the turn it applies to.
+ */
+export function mergeModelChangeNotices(
+  entries: ReadonlyArray<TimelineEntry>,
+  notices: ReadonlyArray<ModelChangeNotice>,
+): TimelineEntry[] {
+  if (notices.length === 0) return [...entries];
+  const noticeByMessageId = new Map(
+    notices.map((notice) => [notice.userMessageId, notice] as const),
+  );
+  const merged: TimelineEntry[] = [];
+  for (const entry of entries) {
+    if (entry.kind === "message" && entry.message.role === "user") {
+      const notice = noticeByMessageId.get(entry.message.id);
+      if (notice !== undefined) merged.push(modelChangeNoticeEntry(notice));
+    }
+    merged.push(entry);
+  }
+  return merged;
+}
+
+/** Reuses the standalone `system_notice` work row so no new timeline kind is needed. */
+function modelChangeNoticeEntry(notice: ModelChangeNotice): TimelineEntry {
+  return {
+    id: notice.id,
+    kind: "work",
+    createdAt: notice.createdAt,
+    entry: {
+      id: notice.id,
+      createdAt: notice.createdAt,
+      runId: notice.runId,
+      label: notice.summary,
+      tone: "info",
+      itemType: "system_notice",
+    },
+  };
 }
 
 type AttachmentResource = Extract<AssetResource, { readonly _tag: "attachment" }>;

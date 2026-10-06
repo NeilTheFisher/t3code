@@ -14,8 +14,10 @@ import {
   TurnItemId,
   type OrchestrationV2ProjectedTurnItem,
   type OrchestrationV2ExecutionNode,
+  type OrchestrationV2Run,
   type OrchestrationV2RunAttempt,
   type OrchestrationV2TurnItem,
+  type ModelSelection,
 } from "@t3tools/contracts";
 import type { ThreadRuntimeSummary } from "@t3tools/client-runtime/state/shell";
 import { deriveMessagesTimelineRows } from "./components/chat/MessagesTimeline.logic";
@@ -29,6 +31,8 @@ import {
   deriveTimelineEntriesFromVisibleTurnItemsWithState,
   deriveRevertTurnCountByUserMessageId,
   derivePhase,
+  deriveModelChangeNotices,
+  mergeModelChangeNotices,
   findLatestProposedPlan,
   isLatestRunSettled,
   selectHandoffImageResources,
@@ -1899,4 +1903,159 @@ it("renders automatic completion as a work entry instead of a user bubble", () =
       ],
     })[0]?.kind,
   ).toBe("message");
+});
+
+describe("model change notices", () => {
+  const threadId = ThreadId.make("thread-model-change");
+
+  const makeRun = (
+    id: string,
+    ordinal: number,
+    modelSelection: ModelSelection,
+    userMessageId: string,
+    requestedAt: string,
+  ): OrchestrationV2Run => ({
+    id: RunId.make(id),
+    threadId,
+    ordinal,
+    providerInstanceId: modelSelection.instanceId,
+    modelSelection,
+    providerThreadId: null,
+    userMessageId: MessageId.make(userMessageId),
+    rootNodeId: null,
+    activeAttemptId: null,
+    status: "completed",
+    requestedAt: DateTime.makeUnsafe(requestedAt),
+    startedAt: DateTime.makeUnsafe(requestedAt),
+    completedAt: DateTime.makeUnsafe(requestedAt),
+    checkpointId: null,
+    contextHandoffId: null,
+  });
+
+  const codexSelection: ModelSelection = {
+    instanceId: ProviderInstanceId.make("codex"),
+    model: "gpt-5.4",
+  };
+  const claudeSelection: ModelSelection = {
+    instanceId: ProviderInstanceId.make("claude"),
+    model: "claude-sonnet-4-6",
+  };
+
+  it("derives a notice for each model change between consecutive runs", () => {
+    const notices = deriveModelChangeNotices([
+      makeRun("run-1", 1, codexSelection, "msg-1", "2026-01-01T00:00:00.000Z"),
+      makeRun("run-2", 2, codexSelection, "msg-2", "2026-01-01T00:01:00.000Z"),
+      makeRun("run-3", 3, claudeSelection, "msg-3", "2026-01-01T00:02:00.000Z"),
+    ]);
+
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toMatchObject({
+      id: "model-change:run-3",
+      runId: RunId.make("run-3"),
+      userMessageId: MessageId.make("msg-3"),
+      fromModel: "gpt-5.4",
+      toModel: "claude-sonnet-4-6",
+      summary: "Switched from gpt-5.4 to claude-sonnet-4-6",
+    });
+  });
+
+  it("treats a provider instance change with the same model as a switch", () => {
+    const otherCodex: ModelSelection = {
+      instanceId: ProviderInstanceId.make("codex-work"),
+      model: "gpt-5.4",
+    };
+    const notices = deriveModelChangeNotices([
+      makeRun("run-1", 1, codexSelection, "msg-1", "2026-01-01T00:00:00.000Z"),
+      makeRun("run-2", 2, otherCodex, "msg-2", "2026-01-01T00:01:00.000Z"),
+    ]);
+
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toMatchObject({
+      fromInstanceId: ProviderInstanceId.make("codex"),
+      toInstanceId: ProviderInstanceId.make("codex-work"),
+    });
+  });
+
+  it("orders runs by ordinal rather than input order", () => {
+    const notices = deriveModelChangeNotices([
+      makeRun("run-2", 2, claudeSelection, "msg-2", "2026-01-01T00:01:00.000Z"),
+      makeRun("run-1", 1, codexSelection, "msg-1", "2026-01-01T00:00:00.000Z"),
+    ]);
+
+    expect(notices.map((notice) => notice.id)).toEqual(["model-change:run-2"]);
+  });
+
+  it("uses the display-name resolver when provided", () => {
+    const notices = deriveModelChangeNotices(
+      [
+        makeRun("run-1", 1, codexSelection, "msg-1", "2026-01-01T00:00:00.000Z"),
+        makeRun("run-2", 2, claudeSelection, "msg-2", "2026-01-01T00:01:00.000Z"),
+      ],
+      (_instanceId, model) => (model === "gpt-5.4" ? "GPT-5.4" : "Claude Sonnet 4.6"),
+    );
+
+    expect(notices[0]?.summary).toBe("Switched from GPT-5.4 to Claude Sonnet 4.6");
+  });
+
+  it("inserts the notice directly above the user message that started the run", () => {
+    const userEntry = (id: string): TimelineEntry => ({
+      id,
+      kind: "message",
+      createdAt: "2026-01-01T00:01:00.000Z",
+      message: {
+        id: MessageId.make(id),
+        role: "user",
+        text: "Switch it up",
+        runId: RunId.make("run-2"),
+        streaming: false,
+        createdAt: "2026-01-01T00:01:00.000Z",
+        updatedAt: "2026-01-01T00:01:00.000Z",
+      },
+    });
+    const assistantEntry: TimelineEntry = {
+      id: "assistant-1",
+      kind: "message",
+      createdAt: "2026-01-01T00:00:30.000Z",
+      message: {
+        id: MessageId.make("assistant-1"),
+        role: "assistant",
+        text: "Done",
+        runId: RunId.make("run-1"),
+        streaming: false,
+        createdAt: "2026-01-01T00:00:30.000Z",
+        updatedAt: "2026-01-01T00:00:30.000Z",
+      },
+    };
+    const notices = deriveModelChangeNotices([
+      makeRun("run-1", 1, codexSelection, "msg-1", "2026-01-01T00:00:00.000Z"),
+      makeRun("run-2", 2, claudeSelection, "msg-2", "2026-01-01T00:01:00.000Z"),
+    ]);
+
+    const merged = mergeModelChangeNotices([assistantEntry, userEntry("msg-2")], notices);
+
+    expect(merged.map((entry) => entry.id)).toEqual(["assistant-1", "model-change:run-2", "msg-2"]);
+    expect(merged[1]).toMatchObject({
+      kind: "work",
+      entry: { itemType: "system_notice", tone: "info", label: notices[0]!.summary },
+    });
+  });
+
+  it("returns the entries unchanged when there are no notices", () => {
+    const entry = {
+      id: "msg-1",
+      kind: "message",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      message: {
+        id: MessageId.make("msg-1"),
+        role: "user",
+        text: "hi",
+        runId: null,
+        streaming: false,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      },
+    } satisfies TimelineEntry;
+
+    expect(mergeModelChangeNotices([entry], [])).toEqual([entry]);
+  });
 });
