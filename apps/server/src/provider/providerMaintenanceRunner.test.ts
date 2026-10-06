@@ -182,6 +182,11 @@ function makeRegistry(
       Array.isArray(initialProviders) ? initialProviders : [initialProviders],
     );
     const updateStatesRef = yield* Ref.make<ReadonlyArray<ServerProviderUpdateState>>([]);
+    // Resolved the first time the given status is recorded, so tests await a state
+    // instead of spinning on `yieldNow`.
+    const statusWaiters = yield* Ref.make(
+      new Map<ServerProviderUpdateState["status"], Array<Deferred.Deferred<void>>>(),
+    );
 
     const setProviderMaintenanceActionState = Effect.fn(
       "providerMaintenanceRunner.test.setProviderMaintenanceActionState",
@@ -193,6 +198,10 @@ function makeRegistry(
       const updateState = input.state;
       if (updateState) {
         yield* Ref.update(updateStatesRef, (states) => [...states, updateState]);
+        const waiters = yield* Ref.get(statusWaiters);
+        for (const waiter of waiters.get(updateState.status) ?? []) {
+          yield* Deferred.succeed(waiter, undefined);
+        }
       }
       return yield* Ref.updateAndGet(providersRef, (providers) =>
         providers.map((candidate) => {
@@ -241,6 +250,15 @@ function makeRegistry(
       registry,
       providersRef,
       updateStatesRef,
+      waitForStatus: (status: ServerProviderUpdateState["status"]) =>
+        Effect.gen(function* () {
+          const waiter = yield* Deferred.make<void>();
+          yield* Ref.update(statusWaiters, (byStatus) => {
+            const current = byStatus.get(status) ?? [];
+            return new Map(byStatus).set(status, [...current, waiter]);
+          });
+          return yield* Deferred.await(waiter);
+        }),
     };
   });
 }
@@ -972,7 +990,7 @@ describe("providerMaintenanceRunner", () => {
     });
     const calls: Array<string> = [];
     return Effect.gen(function* () {
-      const { registry } = yield* makeRegistry([baseProvider, baseOpenCodeProvider]);
+      const { registry, waitForStatus } = yield* makeRegistry([baseProvider, baseOpenCodeProvider]);
       const updater = yield* makeTestRunner({
         ...registry,
         getProviderMaintenanceCapabilitiesForInstance: (_instanceId, provider) =>
@@ -993,18 +1011,10 @@ describe("providerMaintenanceRunner", () => {
       const first = yield* updater.updateProvider(CODEX_DRIVER).pipe(Effect.forkScoped);
       yield* Effect.promise(() => firstStarted);
 
+      const queued = waitForStatus("queued");
       const second = yield* updater.updateProvider(OPENCODE_DRIVER).pipe(Effect.forkScoped);
-      let providersWhileQueued: ReadonlyArray<ServerProvider> = [];
-      for (let attempt = 0; attempt < 20; attempt += 1) {
-        providersWhileQueued = yield* registry.getProviders;
-        const queuedStatus = providersWhileQueued.find(
-          (provider) => provider.instanceId === OPENCODE_INSTANCE_ID,
-        )?.updateState?.status;
-        if (queuedStatus === "queued") {
-          break;
-        }
-        yield* Effect.yieldNow;
-      }
+      yield* queued;
+      const providersWhileQueued: ReadonlyArray<ServerProvider> = yield* registry.getProviders;
       assert.deepStrictEqual(calls, ["install -g @openai/codex@latest"]);
       assert.strictEqual(
         providersWhileQueued.find((provider) => provider.instanceId === OPENCODE_INSTANCE_ID)
@@ -1053,7 +1063,7 @@ describe("providerMaintenanceRunner", () => {
     });
     const calls: Array<string> = [];
     return Effect.gen(function* () {
-      const { registry } = yield* makeRegistry([baseProvider, baseOpenCodeProvider]);
+      const { registry, waitForStatus } = yield* makeRegistry([baseProvider, baseOpenCodeProvider]);
       const updater = yield* makeTestRunner({
         ...registry,
         getProviderMaintenanceCapabilitiesForInstance: (_instanceId, provider) =>
@@ -1074,18 +1084,10 @@ describe("providerMaintenanceRunner", () => {
       const first = yield* updater.updateProvider(CODEX_DRIVER).pipe(Effect.forkScoped);
       yield* Effect.promise(() => firstStarted);
 
+      const queued = waitForStatus("queued");
       const second = yield* updater.updateProvider(OPENCODE_DRIVER).pipe(Effect.forkScoped);
-      let providersWhileQueued: ReadonlyArray<ServerProvider> = [];
-      for (let attempt = 0; attempt < 20; attempt += 1) {
-        providersWhileQueued = yield* registry.getProviders;
-        const queuedStatus = providersWhileQueued.find(
-          (provider) => provider.instanceId === OPENCODE_INSTANCE_ID,
-        )?.updateState?.status;
-        if (queuedStatus === "queued") {
-          break;
-        }
-        yield* Effect.yieldNow;
-      }
+      yield* queued;
+      const providersWhileQueued: ReadonlyArray<ServerProvider> = yield* registry.getProviders;
       assert.strictEqual(
         providersWhileQueued.find((provider) => provider.instanceId === OPENCODE_INSTANCE_ID)
           ?.updateState?.status,
