@@ -44,6 +44,7 @@ import {
   AuthPreviewOperateScope,
   type EditorId,
   type EnvironmentId,
+  type MessageId,
   type ServerConfig,
   type ScopedThreadRef,
   type ServerProviderSkill,
@@ -97,6 +98,7 @@ import { AssistantCitationChip } from "./chat/AssistantCitationChip";
 import { MarkdownThreadLink } from "./chat/MarkdownThreadLink";
 import { mathKind } from "@t3tools/shared/markdownMath";
 import remarkMath from "remark-math";
+import { TtsParagraphHighlight } from "./chat/TtsParagraphHighlight";
 import {
   artifactTemplateFromHastProperties,
   renderCodexInlineDirectivesAsMarkdown,
@@ -244,6 +246,9 @@ interface ChatMarkdownProps {
       `cwd`'s; without it a private repository's uploads load unauthenticated and 404. */
   sourceControlMedia?: boolean | undefined;
   headingLevelOffset?: number | undefined;
+  /** Assistant message this markdown belongs to, so the paragraph being spoken
+      by TTS can be highlighted. Omit for markdown that is not spoken. */
+  ttsMessageId?: MessageId | undefined;
 }
 
 export interface ChatMarkdownContextReference {
@@ -1629,6 +1634,7 @@ function ChatMarkdown({
   lineBreaks = false,
   parseRawHtml = true,
   extraRemarkPlugins = EMPTY_REMARK_PLUGINS,
+  ttsMessageId,
   ...props
 }: ChatMarkdownProps) {
   const {
@@ -1684,6 +1690,7 @@ function ChatMarkdown({
           </ReactMarkdown>
         </ChatMarkdownTextContext>
       </ChatMarkdownRendererContext>
+      {ttsMessageId ? <TtsParagraphHighlight messageId={ttsMessageId} /> : null}
       {localMediaPreview ? (
         <ExpandedImageDialog preview={localMediaPreview} onClose={closeLocalMediaPreview} />
       ) : null}
