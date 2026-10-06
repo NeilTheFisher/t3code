@@ -1776,40 +1776,75 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     />
   );
 
-  const handleClick = (event: ReactMouseEvent) => {
-    onThreadClick(event, threadRef);
-  };
-  const handleAcknowledgeWokeClick = (event: ReactMouseEvent) => {
+  const { markThreadUnread } = useThreadActions();
+
+  const handleClick = useCallback(
+    (event: ReactMouseEvent) => {
+      onThreadClick(event, threadRef);
+    },
+    [onThreadClick, threadRef],
+  );
+  const handleAcknowledgeWokeClick = useCallback(
+    (event: ReactMouseEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (props.wokeAt === null) return;
+      onAcknowledgeWoke(threadRef, props.wokeAt);
+    },
+    [onAcknowledgeWoke, props.wokeAt, threadRef],
+  );
+  const handleContextMenu = useCallback(
+    (event: ReactMouseEvent) => {
+      event.preventDefault();
+      onContextMenu(threadRef, { x: event.clientX, y: event.clientY });
+    },
+    [onContextMenu, threadRef],
+  );
+  const handleKeyDown = useCallback(
+    (event: ReactKeyboardEvent) => {
+      if (event.target !== event.currentTarget) return;
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      onThreadActivate(threadRef);
+    },
+    [onThreadActivate, threadRef],
+  );
+  // Middle click is the row's mark-unread gesture, so it never opens a
+  // background tab and never starts the browser's middle-click autoscroll.
+  const handleRowMouseDown = useCallback((event: ReactMouseEvent) => {
+    if (event.button !== 1) return;
     event.preventDefault();
-    event.stopPropagation();
-    if (props.wokeAt === null) return;
-    onAcknowledgeWoke(threadRef, props.wokeAt);
-  };
-  const handleContextMenu = (event: ReactMouseEvent) => {
-    event.preventDefault();
-    onContextMenu(threadRef, { x: event.clientX, y: event.clientY });
-  };
-  const handleKeyDown = (event: ReactKeyboardEvent) => {
-    if (event.target !== event.currentTarget) return;
-    if (event.key !== "Enter" && event.key !== " ") return;
-    event.preventDefault();
-    onThreadActivate(threadRef);
-  };
-  const handleDoubleClick = (event: ReactMouseEvent) => {
-    if (
-      !readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope) ||
-      isRenaming ||
-      event.metaKey ||
-      event.ctrlKey ||
-      event.shiftKey ||
-      event.altKey
-    ) {
-      return;
-    }
-    if ((event.target as HTMLElement).closest("button, a, input")) return;
-    event.preventDefault();
-    onStartRename(threadRef, thread.title);
-  };
+  }, []);
+  const handleRowAuxClick = useCallback(
+    (event: ReactMouseEvent) => {
+      if (event.button !== 1) return;
+      // A middle click on a nested link is still a request to open it in a
+      // background tab, so only the row's own chrome is a mark-unread gesture.
+      if (isSidebarNestedLinkClick(event.target)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      markThreadUnread(threadRef);
+    },
+    [markThreadUnread, threadRef],
+  );
+  const handleDoubleClick = useCallback(
+    (event: ReactMouseEvent) => {
+      if (
+        !readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope) ||
+        isRenaming ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      ) {
+        return;
+      }
+      if ((event.target as HTMLElement).closest("button, a, input")) return;
+      event.preventDefault();
+      onStartRename(threadRef, thread.title);
+    },
+    [isRenaming, onStartRename, thread.title, threadRef],
+  );
   const [isFileDragOver, setIsFileDragOver] = useState(false);
   const fileDropHandlers = onFileDropThreads
     ? makeWorkspaceFileDropHandlers({
@@ -2132,6 +2167,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 onDoubleClick={handleDoubleClick}
                 onKeyDown={handleKeyDown}
                 onContextMenu={handleContextMenu}
+                onMouseDown={handleRowMouseDown}
+                onAuxClick={handleRowAuxClick}
               />
             }
           >
@@ -2291,6 +2328,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               onDoubleClick={handleDoubleClick}
               onKeyDown={handleKeyDown}
               onContextMenu={handleContextMenu}
+              onMouseDown={handleRowMouseDown}
+              onAuxClick={handleRowAuxClick}
             />
           }
         >
