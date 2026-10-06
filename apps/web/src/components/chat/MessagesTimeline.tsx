@@ -2912,7 +2912,12 @@ function AssistantCopyButton({
   return (
     <>
       {playState.visible ? (
-        <MessagePlayButton messageId={message.id} text={playState.text ?? ""} variant="ghost" />
+        <MessagePlayButton
+          messageId={message.id}
+          text={playState.text ?? ""}
+          threadRef={ctx.threadRef}
+          variant="ghost"
+        />
       ) : null}
       {assistantCopyState.visible ? (
         <MessageCopyButton text={assistantCopyState.text ?? ""} variant="ghost" />
