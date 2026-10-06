@@ -127,7 +127,7 @@ export const ModelListRow = memo(function ModelListRow(props: {
               ) : null}
               {capabilityLabels.length > 0 ? (
                 <div className="border-t border-border/60 pt-1.5">
-                  <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
+                  <div className="mb-1 text-3xs font-medium uppercase tracking-wide text-muted-foreground/70">
                     Capabilities
                   </div>
                   <div className="flex flex-wrap gap-x-3 gap-y-1">

@@ -98,7 +98,7 @@ export function OpenCodeGoCredentialsDialog({
               autoComplete="off"
               spellCheck={false}
             />
-            <span className="text-[11px] text-muted-foreground">
+            <span className="text-2xs text-muted-foreground">
               Found in your opencode.ai workspace URL.
             </span>
           </label>
@@ -114,7 +114,7 @@ export function OpenCodeGoCredentialsDialog({
               autoComplete="new-password"
               spellCheck={false}
             />
-            <span className="text-[11px] text-muted-foreground">
+            <span className="text-2xs text-muted-foreground">
               {saved.goAuthCookie
                 ? "A cookie is saved. Enter a new one only when it expires."
                 : "Paste the auth cookie from opencode.ai."}
