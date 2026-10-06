@@ -375,6 +375,23 @@ describe("OpenCodeAdapterV2", () => {
                 hasSubagents: false,
               },
         );
+        // The composer's context meter reads `tokenUsage`, not `turnTokenUsage`.
+        const tokenUsage = completed?.providerTurn.tokenUsage;
+        if (ending === "unavailable") {
+          assert.equal(tokenUsage, undefined);
+        } else {
+          assert.isTrue(tokenUsage !== undefined);
+          const { updatedAt, ...usage } = tokenUsage!;
+          assert.equal(typeof updatedAt, "string");
+          assert.deepEqual(usage, {
+            usedTokens: 48,
+            maxTokens: null,
+            inputTokens: 34,
+            cachedInputTokens: 6,
+            outputTokens: 14,
+            reasoningOutputTokens: 4,
+          });
+        }
       }).pipe(Effect.provide(IdAllocator.layer), Effect.scoped),
   );
 

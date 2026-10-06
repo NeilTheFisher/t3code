@@ -1162,6 +1162,24 @@ export function makeOpenCodeAdapterV2(
             ...(completedAt === null
               ? {}
               : {
+                  // Live context usage for the composer meter (#8144). The
+                  // v1 OpenCode SDK reports only per-turn totals, so mirror
+                  // the v2 adapter's input+output split here. The model's
+                  // context window is not known to this adapter, so the meter
+                  // falls back to its used-token count when maxTokens is null.
+                  ...(turn.usage.partIds.size === 0
+                    ? {}
+                    : {
+                        tokenUsage: {
+                          usedTokens: turn.usage.inputTokens + turn.usage.outputTokens,
+                          maxTokens: null,
+                          inputTokens: turn.usage.inputTokens,
+                          cachedInputTokens: turn.usage.cachedInputTokens,
+                          outputTokens: turn.usage.outputTokens,
+                          reasoningOutputTokens: turn.usage.reasoningTokens,
+                          updatedAt: DateTime.formatIso(completedAt),
+                        },
+                      }),
                   turnTokenUsage:
                     turn.usage.partIds.size === 0
                       ? {

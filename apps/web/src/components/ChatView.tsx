@@ -3553,17 +3553,40 @@ export default function ChatView(props: ChatViewProps) {
     isConnecting ||
     isCompacting ||
     runlessWorkStartedAt !== null;
-  const activeContextWindow = useMemo(
-    () =>
-      deriveLatestContextWindowSnapshot(
-        serverVisibleTurnItems ?? [],
-        activeThreadLiveTokenUsage,
-        serverProjection?.providerThreads.find(
-          (thread) => thread.id === serverProjection.thread.activeProviderThreadId,
-        ),
+  // Some providers (OpenCode 1.x) report live usage without a window size, so
+  // fill maxTokens from the active model's provider metadata to draw the ring.
+  const activeModelContextWindowTokens = useMemo(() => {
+    if (selectedProviderEntry == null) return null;
+    const slug = resolveSelectableModel(
+      selectedProviderEntry.driverKind,
+      reportedModelSelection?.model ?? activeThread?.modelSelection.model,
+      selectedProviderEntry.models,
+    );
+    if (slug === null) return null;
+    return (
+      selectedProviderEntry.models.find((model) => model.slug === slug)?.contextWindowTokens ?? null
+    );
+  }, [activeThread?.modelSelection.model, reportedModelSelection, selectedProviderEntry]);
+  const activeContextWindow = useMemo(() => {
+    const liveUsage =
+      activeThreadLiveTokenUsage !== null &&
+      activeThreadLiveTokenUsage.maxTokens == null &&
+      activeModelContextWindowTokens !== null
+        ? { ...activeThreadLiveTokenUsage, maxTokens: activeModelContextWindowTokens }
+        : activeThreadLiveTokenUsage;
+    return deriveLatestContextWindowSnapshot(
+      serverVisibleTurnItems ?? [],
+      liveUsage,
+      serverProjection?.providerThreads.find(
+        (thread) => thread.id === serverProjection.thread.activeProviderThreadId,
       ),
-    [activeThreadLiveTokenUsage, serverVisibleTurnItems, serverProjection],
-  );
+    );
+  }, [
+    activeThreadLiveTokenUsage,
+    activeModelContextWindowTokens,
+    serverVisibleTurnItems,
+    serverProjection,
+  ]);
   const pendingBackgroundTasks = useMemo(() => {
     if (serverProjection === null || serverProjection === undefined) {
       return [];
