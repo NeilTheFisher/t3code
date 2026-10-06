@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { type MessageId } from "@t3tools/contracts";
+import { type MessageId, type ScopedThreadRef } from "@t3tools/contracts";
 
 /**
  * Mirrors the TTS player's status so any number of play buttons and the global
@@ -23,14 +23,18 @@ interface AudioPlayerState {
   rate: number;
   /** Excerpt of the synthesized text for display in the mini-player. */
   title: string | null;
+  /** Thread the active narration belongs to, for mini-player navigation. */
+  threadRef: ScopedThreadRef | null;
   /** Index of the paragraph currently being spoken, for message highlighting. */
   activeParagraph: number | null;
   /** Normalized opening words of the active paragraph, for DOM matching. */
   activeParagraphCue: string | null;
+  /** Bumped by the mini-player to ask the highlight to reveal the active block. */
+  scrollToActiveRequest: number;
 }
 
 interface AudioPlayerActions {
-  setLoading: (id: MessageId, title: string) => void;
+  setLoading: (id: MessageId, title: string, threadRef: ScopedThreadRef | null) => void;
   setWaking: (id: MessageId) => void;
   setPlaying: (id: MessageId) => void;
   setPaused: () => void;
@@ -40,6 +44,7 @@ interface AudioPlayerActions {
   setVolume: (volume: number) => void;
   setRate: (rate: number) => void;
   setActiveParagraph: (index: number | null, cue: string | null) => void;
+  requestScrollToActiveParagraph: () => void;
 }
 export const useAudioPlayerStore = create<AudioPlayerState & AudioPlayerActions>((set) => ({
   status: "idle",
@@ -51,27 +56,48 @@ export const useAudioPlayerStore = create<AudioPlayerState & AudioPlayerActions>
   volume: 1,
   rate: 1,
   title: null,
+  threadRef: null,
   activeParagraph: null,
   activeParagraphCue: null,
-  setLoading: (id, title) =>
+  scrollToActiveRequest: 0,
+  setLoading: (id, title, threadRef) =>
     set({
       status: "loading",
       playingMessageId: id,
       error: null,
       errorMessageId: null,
       title,
+      threadRef,
       activeParagraph: null,
+      activeParagraphCue: null,
     }),
   setWaking: (id) =>
     set({ status: "waking", playingMessageId: id, error: null, errorMessageId: null }),
   setPlaying: (id) =>
     set({ status: "playing", playingMessageId: id, error: null, errorMessageId: null }),
   setPaused: () => set({ status: "paused" }),
-  setIdle: () => set({ status: "idle", playingMessageId: null, activeParagraph: null }),
+  setIdle: () =>
+    set({
+      status: "idle",
+      playingMessageId: null,
+      threadRef: null,
+      activeParagraph: null,
+      activeParagraphCue: null,
+    }),
   setError: (message, id) =>
-    set({ status: "idle", playingMessageId: null, error: message, errorMessageId: id }),
+    set({
+      status: "idle",
+      playingMessageId: null,
+      threadRef: null,
+      error: message,
+      errorMessageId: id,
+      activeParagraph: null,
+      activeParagraphCue: null,
+    }),
   setProgress: (currentTime, duration) => set({ currentTime, duration }),
   setVolume: (volume) => set({ volume }),
   setRate: (rate) => set({ rate }),
   setActiveParagraph: (index, cue) => set({ activeParagraph: index, activeParagraphCue: cue }),
+  requestScrollToActiveParagraph: () =>
+    set((state) => ({ scrollToActiveRequest: state.scrollToActiveRequest + 1 })),
 }));
