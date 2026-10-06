@@ -139,7 +139,7 @@ export function MiniPlayerBar() {
               <RotateCcwIcon className="size-3.5" />
               <span className="sr-only">Back 10 seconds</span>
             </Button>
-            <span className="w-8 text-right text-[10px] tabular-nums text-muted-foreground">
+            <span className="w-8 text-right text-3xs tabular-nums text-muted-foreground">
               {formatTime(scrubValue ?? currentTime)}
             </span>
             <input
@@ -156,7 +156,7 @@ export function MiniPlayerBar() {
               type="range"
               value={scrubValue ?? Math.min(currentTime, duration || currentTime)}
             />
-            <span className="w-8 text-[10px] tabular-nums text-muted-foreground">
+            <span className="w-8 text-3xs tabular-nums text-muted-foreground">
               {formatTime(duration)}
             </span>
             <Button
@@ -211,7 +211,7 @@ export function MiniPlayerBar() {
               />
             }
           >
-            <span className="text-[10px] tabular-nums">{rate}×</span>
+            <span className="text-3xs tabular-nums">{rate}×</span>
           </TooltipTrigger>
           <TooltipPopup>
             <p>Playback speed</p>

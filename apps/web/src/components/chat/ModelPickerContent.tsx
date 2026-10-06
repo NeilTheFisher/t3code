@@ -1027,6 +1027,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                     showProvider={rowsMixProviders || Boolean(model.subProvider)}
                     showNewBadge={model.badge === "new"}
                     unavailable={model.isUnavailable === true}
+                    contextWindowTokens={model.contextWindowTokens}
+                    capabilities={model.capabilities}
                     jumpLabel={modelJumpLabelByKey.get(modelKey) ?? null}
                     disabledReason={disabledReason}
                     onToggleFavorite={toggleFavorite}
