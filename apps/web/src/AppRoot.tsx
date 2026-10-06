@@ -15,7 +15,7 @@ export function AppRoot({ router }: { readonly router: AppRouter }) {
         <RouterProvider router={router} />
         <ElectronBrowserHost />
         <QuitHoldOverlay />
-        <MiniPlayerBar />
+        <MiniPlayerBar router={router} />
       </VoiceSessionProvider>
     </AppAtomRegistryProvider>
   );
