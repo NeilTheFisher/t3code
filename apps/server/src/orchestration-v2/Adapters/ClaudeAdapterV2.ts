@@ -20,7 +20,7 @@ import {
 
 import { isWorkspaceImagePreviewPath } from "@t3tools/shared/filePreview";
 import { normalizeClaudeTurnTokenUsage } from "../../provider/ClaudeTurnTokenUsage.ts";
-import { extractClaudeFileChanges } from "../../provider/Layers/DiffUtils.ts";
+import { extractClaudeFileChanges } from "@t3tools/provider-core/server/DiffUtils";
 import {
   type CanUseTool,
   forkSession as forkClaudeSession,
