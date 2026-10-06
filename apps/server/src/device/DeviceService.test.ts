@@ -1077,6 +1077,7 @@ it.effect.each([
       );
       const host = stubDeviceHost(http);
       const service = yield* DeviceService.makeWithHosts(new Map([[host.id, host]])).pipe(
+        Effect.provide(NodeCrypto.layer),
         Effect.provideService(HttpClient.HttpClient, http),
       );
       yield* service.list;
@@ -1128,6 +1129,7 @@ it.effect("Android shutdown fails when the re-listing reported a failure", () =>
     );
     const host = stubDeviceHost(http);
     const service = yield* DeviceService.makeWithHosts(new Map([[host.id, host]])).pipe(
+      Effect.provide(NodeCrypto.layer),
       Effect.provideService(HttpClient.HttpClient, http),
     );
     const exit = yield* Effect.exit(service.shutdown({ deviceId, platform: "android" }));
@@ -1171,6 +1173,7 @@ it.effect("refresh drops sessions for a device that disconnected", () =>
     );
     const host = stubDeviceHost(http);
     const service = yield* DeviceService.makeWithHosts(new Map([[host.id, host]])).pipe(
+      Effect.provide(NodeCrypto.layer),
       Effect.provideService(HttpClient.HttpClient, http),
     );
     yield* service.list;
@@ -1229,6 +1232,7 @@ it.effect("refresh keeps sessions when the device listing reported a failure", (
     );
     const host = stubDeviceHost(http);
     const service = yield* DeviceService.makeWithHosts(new Map([[host.id, host]])).pipe(
+      Effect.provide(NodeCrypto.layer),
       Effect.provideService(HttpClient.HttpClient, http),
     );
     yield* service.list;
