@@ -18,6 +18,7 @@ import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
 import { useAudioPlayerStore } from "~/audioPlayerStore";
+import type { AppRouter } from "~/router";
 import {
   seekPlayback,
   setPlaybackRate,
@@ -35,17 +36,35 @@ function formatTime(seconds: number): string {
   const s = Math.floor(seconds % 60);
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
-export function MiniPlayerBar() {
+export function MiniPlayerBar({ router }: { router: AppRouter }) {
   const status = useAudioPlayerStore((s) => s.status);
   const currentTime = useAudioPlayerStore((s) => s.currentTime);
   const duration = useAudioPlayerStore((s) => s.duration);
   const volume = useAudioPlayerStore((s) => s.volume);
   const rate = useAudioPlayerStore((s) => s.rate);
   const title = useAudioPlayerStore((s) => s.title);
+  const threadRef = useAudioPlayerStore((s) => s.threadRef);
+  const requestScrollToActiveParagraph = useAudioPlayerStore(
+    (s) => s.requestScrollToActiveParagraph,
+  );
 
   const visible = status !== "idle";
   const isPlaying = status === "playing";
   const isLoading = status === "loading" || status === "waking";
+  const displayTitle = isLoading
+    ? status === "waking"
+      ? "Starting TTS server…"
+      : "Loading…"
+    : (title ?? "Audio");
+
+  const revealThread = useCallback(() => {
+    if (threadRef === null) return;
+    requestScrollToActiveParagraph();
+    void router.navigate({
+      to: "/$environmentId/$threadId",
+      params: { environmentId: threadRef.environmentId, threadId: threadRef.threadId },
+    });
+  }, [requestScrollToActiveParagraph, router, threadRef]);
 
   // The thumb drag stays local for smoothness (a live seek per input event
   // would stop/reschedule sources and stutter the native thumb); the seek is
@@ -121,13 +140,17 @@ export function MiniPlayerBar() {
           )}
         </Button>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-xs text-foreground/80">
-            {isLoading
-              ? status === "waking"
-                ? "Starting TTS server…"
-                : "Loading…"
-              : (title ?? "Audio")}
-          </p>
+          {threadRef !== null ? (
+            <button
+              className="block w-full truncate text-left text-xs text-foreground/80 hover:text-foreground hover:underline"
+              onClick={revealThread}
+              type="button"
+            >
+              {displayTitle}
+            </button>
+          ) : (
+            <p className="truncate text-xs text-foreground/80">{displayTitle}</p>
+          )}
           <div className="flex items-center gap-2">
             <Button
               aria-label="Back 10 seconds"
