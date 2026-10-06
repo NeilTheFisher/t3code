@@ -11633,6 +11633,7 @@ export default function ChatView(props: ChatViewProps) {
                 }
                 resolvedTheme={resolvedTheme}
                 timestampFormat={timestampFormat}
+                ttsEnabled={settings.tts.enabled}
                 workspaceRoot={
                   paintOnlyDisplayedTimeline
                     ? (heldPaintContext?.workspaceRoot ?? undefined)

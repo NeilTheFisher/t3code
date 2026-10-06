@@ -192,6 +192,7 @@ import {
 } from "./timelineScrollAnchoring";
 import { MessageCopyButton } from "./MessageCopyButton";
 import { promptLinkFor } from "../promptLinks/copyPromptLink";
+import { MessagePlayButton } from "./MessagePlayButton";
 import { PierreEntryIcon } from "./PierreEntryIcon";
 import { WorkspaceEntryIcon, WorkspaceEntryTooltip } from "./WorkspaceEntryIcon";
 import { AssistantSelectionToolbar } from "./AssistantSelectionToolbar";
@@ -208,6 +209,7 @@ import {
   type MessagesTimelineRowsProjection,
   liveWorkEntryLabel,
   resolveAssistantMessageCopyState,
+  resolveAssistantMessagePlayState,
   resolveTimelineIsAtEnd,
   resolveTimelineMinimapHasPersistentGutter,
   resolveTimelineMinimapCurrentIndex,
@@ -321,6 +323,8 @@ interface TimelineRowSharedState {
   citationRequest: AssistantCitationTarget | null;
   listRef: React.RefObject<LegendListRef | null>;
   timestampFormat: TimestampFormat;
+  /** Whether assistant-message TTS playback controls are available. */
+  ttsEnabled: boolean;
   routeThreadKey: string;
   threadRef: ScopedThreadRef | null;
   markdownCwd: string | undefined;
@@ -516,6 +520,8 @@ interface MessagesTimelineProps {
   markdownCwd: string | undefined;
   resolvedTheme: "light" | "dark";
   timestampFormat: TimestampFormat;
+  /** Whether assistant-message TTS playback controls are shown. */
+  ttsEnabled?: boolean;
   workspaceRoot: string | undefined;
   skills?: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   providerStatuses: ReadonlyArray<ServerProvider>;
@@ -622,6 +628,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   markdownCwd,
   resolvedTheme,
   timestampFormat,
+  ttsEnabled = false,
   workspaceRoot,
   skills = EMPTY_TIMELINE_SKILLS,
   providerStatuses,
@@ -1357,6 +1364,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
       citationRequest: readyCitationRequest,
       listRef,
       timestampFormat,
+      ttsEnabled,
       routeThreadKey,
       // Keep Markdown callbacks memoized during unrelated activity updates.
       threadRef: citationThreadRef,
@@ -1396,6 +1404,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
       readyCitationRequest,
       listRef,
       timestampFormat,
+      ttsEnabled,
       routeThreadKey,
       citationThreadRef,
       markdownCwd,
@@ -3013,17 +3022,29 @@ function AssistantCopyButton({
   showCopyButton: boolean;
   streaming: boolean;
 }) {
-  const assistantCopyState = resolveAssistantMessageCopyState({
+  const ctx = use(TimelineRowCtx);
+  const source = {
     text: message.text ?? null,
     showCopyButton,
     streaming,
-  });
+  };
+  const assistantCopyState = resolveAssistantMessageCopyState(source);
+  const playState = resolveAssistantMessagePlayState({ ...source, ttsEnabled: ctx.ttsEnabled });
 
-  if (!assistantCopyState.visible) {
+  if (!assistantCopyState.visible && !playState.visible) {
     return null;
   }
 
-  return <MessageCopyButton text={assistantCopyState.text ?? ""} variant="ghost" />;
+  return (
+    <>
+      {playState.visible ? (
+        <MessagePlayButton messageId={message.id} text={playState.text ?? ""} variant="ghost" />
+      ) : null}
+      {assistantCopyState.visible ? (
+        <MessageCopyButton text={assistantCopyState.text ?? ""} variant="ghost" />
+      ) : null}
+    </>
+  );
 }
 
 function ProposedPlanTimelineRow({
