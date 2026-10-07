@@ -1297,6 +1297,12 @@ const PROVIDER_REQUIREMENT: Partial<
     unauthenticated:
       "Bitbucket rejected the configured credentials. Check them in Settings → Source Control.",
   },
+  gerrit: {
+    missing:
+      "Gerrit change requests are read over Secure Shell (`ssh`). Install an SSH client on the T3 Code server that can reach the review host.",
+    unauthenticated:
+      "Gerrit rejected the SSH key. Add a key for the review host that can read the project, then try again.",
+  },
 };
 
 /**

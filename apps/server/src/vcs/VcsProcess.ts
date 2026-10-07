@@ -73,7 +73,10 @@ const classifyNonZeroExit = (command: string, stderr: string): VcsProcessExitFai
     normalized.includes("az devops login") ||
     normalized.includes("please run az login") ||
     normalized.includes("no oauth token") ||
-    normalized.includes("unauthorized")
+    normalized.includes("unauthorized") ||
+    // ssh refuses a key it cannot use this way, which for a review host means the same thing.
+    (command === "ssh" &&
+      (normalized.includes("permission denied") || normalized.includes("publickey")))
   ) {
     return "authentication";
   }
