@@ -1171,6 +1171,23 @@ const make = Effect.gen(function* () {
           operation: "remove-stale-secret",
         });
       }
+      const gerrit = { ...next.gerrit };
+      for (const field of GERRIT_SECRET_FIELDS) {
+        let value = gerrit[field];
+        if (value === SECRET_REDACTED) {
+          // The marker keeps what is saved; a hand-edited plaintext token moves into the store.
+          const inline = current.gerrit[field];
+          if (inline === SECRET_REDACTED || inline.length === 0) continue;
+          value = inline;
+        }
+        const secretName = GERRIT_SECRET_NAMES[field];
+        if (value.length === 0) {
+          changes.push({ kind: "remove", secretName, operation: "remove-secret" });
+          continue;
+        }
+        changes.push({ kind: "write", secretName, value: textEncoder.encode(value) });
+        gerrit[field] = SECRET_REDACTED;
+      }
 
       return {
         settings: {
@@ -1179,6 +1196,7 @@ const make = Effect.gen(function* () {
           usageLimitSources: usageLimitSources as ServerSettings["usageLimitSources"],
           bitbucket,
           github: { ...next.github, tokens },
+          gerrit,
         },
         changes,
       };

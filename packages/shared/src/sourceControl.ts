@@ -307,12 +307,17 @@ export function detectSourceControlProviderFromRemoteUrl(
   }
 
   if (isGerritHost(hostname) || isGerritRemote(remoteUrl)) {
-    // Gerrit is recognised by a `gerrit` DNS label or its conventional SSH port; the web URL is
-    // the hostname alone, because the SSH port is not the port the review UI is served on.
+    // Gerrit is recognised by a `gerrit` DNS label or its conventional SSH port. An HTTP(S)
+    // remote keeps its own origin, because a self-hosted install may serve the review UI on a
+    // non-default port; an SSH remote's port is not the web port, so it is dropped.
+    const trimmed = remoteUrl.trim();
+    const baseUrl = /^https?:/iu.test(trimmed)
+      ? new URL(trimmed).origin
+      : toBaseUrl(parseHostName(host));
     return {
       kind: "gerrit",
       name: "Gerrit",
-      baseUrl: toBaseUrl(parseHostName(host)),
+      baseUrl,
     };
   }
 
