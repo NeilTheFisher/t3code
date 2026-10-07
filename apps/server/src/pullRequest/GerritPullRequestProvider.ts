@@ -145,21 +145,24 @@ function toSummary(change: GerritChange): ProviderChangeRequestSummary {
 }
 
 /**
- * Gerrit's `Verified` votes as checks: one per reviewer who voted, the sign of the vote as the
- * status. Gerrit has no other check-like signal, so a change with no Verified vote reports none.
+ * Gerrit's `Verified` and `Code-Review` votes as checks: one per reviewer per label, the sign of
+ * the vote as the status. Gerrit has no other check-like signal, so a change with neither vote
+ * reports none.
  */
 function gerritChecks(record: GerritQueryChange): ReadonlyArray<PullRequestCheck> {
   const checks: Array<PullRequestCheck> = [];
   const seen = new Set<string>();
   for (const approval of currentPatchSet(record)?.approvals ?? []) {
-    if (approval.type !== VERIFIED_LABEL) continue;
+    if (approval.type !== VERIFIED_LABEL && approval.type !== CODE_REVIEW_LABEL) continue;
     const by = approval.by;
     const login = by?.username ?? by?.email ?? by?.name;
-    if (login === undefined || login === null || login.length === 0 || seen.has(login)) continue;
-    seen.add(login);
+    if (login === undefined || login === null || login.length === 0) continue;
+    const key = `${approval.type}:${login}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
     const value = Number(approval.value ?? 0);
     checks.push({
-      name: login,
+      name: `${login} · ${approval.type}`,
       status: value > 0 ? "success" : value < 0 ? "failure" : "pending",
       description: null,
       url: null,
