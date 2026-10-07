@@ -9,6 +9,7 @@ import { useUiStateStore } from "~/uiStateStore";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { changeRequestActionLabel } from "./changeRequestActionLabels";
 import { resolvePullRequestMergeMethod } from "./pullRequestDetail.logic";
 import { PullRequestGlyph } from "./pullRequestIcons";
 import { pullRequestQuickActions, type EnvironmentPullRequestEntry } from "./pullRequestList.logic";
@@ -19,7 +20,14 @@ import {
 
 type PullRequestSpeedActionEntry = Pick<
   EnvironmentPullRequestEntry,
-  "environmentId" | "projectId" | "host" | "repository" | "number" | "state" | "isDraft"
+  | "environmentId"
+  | "projectId"
+  | "provider"
+  | "host"
+  | "repository"
+  | "number"
+  | "state"
+  | "isDraft"
 > & { readonly stack?: object | undefined };
 
 export interface PullRequestSpeedActionResult<Entry = EnvironmentPullRequestEntry> {
@@ -86,7 +94,7 @@ export function PullRequestSpeedActions<Entry extends PullRequestSpeedActionEntr
       label={`Quick actions for ${terminology.singular} #${entry.number}`}
     >
       {actions.map((action) => {
-        const label = ACTIONS[action].label;
+        const label = changeRequestActionLabel(entry.provider, action) ?? ACTIONS[action].label;
         const Icon = ACTIONS[action].Icon;
         return (
           <Tooltip key={action}>
