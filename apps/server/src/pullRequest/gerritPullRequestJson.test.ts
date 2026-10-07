@@ -87,6 +87,7 @@ describe("decodeGerritQueryOutput", () => {
     const decoded = decodeGerritQueryOutput(
       [JSON.stringify(changeRecord()), stats(true)].join("\n"),
     );
+    expect(Result.isSuccess(decoded)).toBe(true);
     if (!Result.isSuccess(decoded)) return;
     expect(decoded.success.moreChanges).toBe(true);
   });
@@ -95,12 +96,14 @@ describe("decodeGerritQueryOutput", () => {
     const decoded = decodeGerritQueryOutput(
       ["not json", JSON.stringify(changeRecord({ number: 86141 })), stats(false)].join("\n"),
     );
+    expect(Result.isSuccess(decoded)).toBe(true);
     if (!Result.isSuccess(decoded)) return;
     expect(decoded.success.changes.map((change) => change.number)).toEqual([86141]);
   });
 
   it("answers with no changes when Gerrit matched nothing", () => {
     const decoded = decodeGerritQueryOutput(stats(false));
+    expect(Result.isSuccess(decoded)).toBe(true);
     if (!Result.isSuccess(decoded)) return;
     expect(decoded.success.changes).toEqual([]);
   });

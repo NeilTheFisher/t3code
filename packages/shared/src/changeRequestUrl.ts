@@ -214,10 +214,18 @@ export function changeRequestRepositoryUrl(targetUrl: string): string | null {
   const changeRequest = parseChangeRequestUrl(targetUrl);
   if (changeRequest === null) return null;
   const url = new URL(targetUrl);
+  // Gerrit's change route is `/c/{project}/+/{n}`; its project page lives on its own route, so
+  // the `/c/{project}` prefix does not identify it. The project path keeps its own casing.
+  const gerritProject = /^\/c\/(.+?)\/\+\/\d+(?:\/|$)/iu.exec(url.pathname)?.[1];
+  if (gerritProject !== undefined) {
+    url.pathname = `/admin/repos/${gerritProject}`;
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  }
   const repositoryPath =
     /^(.*?)\/-\/merge_requests\/\d+(?:\/|$)/iu.exec(url.pathname)?.[1] ??
-    /^(\/c\/.+?)\/\+\/\d+(?:\/|$)/iu.exec(url.pathname)?.[1] ??
-    /^(.*?)(?:\/pulls?\/\d+|\/-\/merge_requests\/\d+|\/pull-requests\/\d+|\/pullrequest\/\d+)(?:\/|$)/iu.exec(
+    /^(.*?)(?:\/pulls?\/\d+|\/pull-requests\/\d+|\/pullrequest\/\d+)(?:\/|$)/iu.exec(
       url.pathname,
     )?.[1];
   if (!repositoryPath) return null;
