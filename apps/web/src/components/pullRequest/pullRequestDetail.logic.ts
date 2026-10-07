@@ -138,6 +138,13 @@ export function pullRequestCheckoutCommand(
       }
       return `git clone --single-branch --branch ${headBranch} https://bitbucket.org/${headRepositoryNameWithOwner}.git t3code-pr-${number}`;
     }
+    case "gerrit": {
+      // Gerrit addresses a patch set by its `refs/changes/NN/NNNN/P` ref, which is the head
+      // branch the provider reports. A ref anything else would be pasted into a shell verbatim.
+      if (!headBranch.startsWith("refs/changes/") || !safeShellArgument.test(headBranch))
+        return null;
+      return `git fetch origin ${headBranch} && git checkout FETCH_HEAD`;
+    }
     case "unknown":
       return null;
   }

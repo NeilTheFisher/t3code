@@ -93,6 +93,14 @@ describe("pull request checkout commands", () => {
       "maria/t3code",
       "git clone --single-branch --branch feature/checkout https://bitbucket.org/maria/t3code.git t3code-pr-42",
     ],
+    [
+      "gerrit",
+      "refs/changes/40/86140/2",
+      null,
+      "git fetch origin refs/changes/40/86140/2 && git checkout FETCH_HEAD",
+    ],
+    // Gerrit only addresses a patch set by its ref; a branch name is not one.
+    ["gerrit", "feature", null, null],
     ["unknown", "feature", null, null],
   ] as const)("builds the %s command", (provider, branch, repository, expected) => {
     expect(pullRequestCheckoutCommand(provider, 42, branch, repository)).toBe(expected);

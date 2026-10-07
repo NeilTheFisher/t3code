@@ -11,11 +11,14 @@ import * as GitHubGraphQlBudget from "../sourceControl/githubGraphQlBudget.ts";
 import * as SourceControlRateLimit from "../sourceControl/SourceControlRateLimit.ts";
 import * as GitLabCli from "../sourceControl/GitLabCli.ts";
 import * as ForgejoCli from "../sourceControl/ForgejoCli.ts";
+import * as GerritCli from "../sourceControl/GerritCli.ts";
+import * as GerritRestApi from "../sourceControl/GerritRestApi.ts";
 import * as ForgejoPullRequestProvider from "./ForgejoPullRequestProvider.ts";
 import * as AzureDevOpsPullRequestCli from "./AzureDevOpsPullRequestCli.ts";
 import * as AzureDevOpsPullRequestProvider from "./AzureDevOpsPullRequestProvider.ts";
 import * as BitbucketPullRequestApi from "./BitbucketPullRequestApi.ts";
 import * as BitbucketPullRequestProvider from "./BitbucketPullRequestProvider.ts";
+import * as GerritPullRequestProvider from "./GerritPullRequestProvider.ts";
 import * as GitHubPullRequestCli from "./GitHubPullRequestCli.ts";
 import * as GitHubPullRequestProvider from "./GitHubPullRequestProvider.ts";
 import * as GitLabPullRequestCli from "./GitLabPullRequestCli.ts";
@@ -55,6 +58,7 @@ export const make = Effect.map(
     ForgejoPullRequestProvider.make,
     BitbucketPullRequestProvider.make,
     AzureDevOpsPullRequestProvider.make,
+    GerritPullRequestProvider.make,
   ]),
   fromProviders,
 );
@@ -76,4 +80,6 @@ export const layer = Layer.effect(PullRequestProviderRegistry, make).pipe(
   Layer.provide(ForgejoCli.layer),
   Layer.provide(BitbucketPullRequestApi.layer.pipe(Layer.provide(BitbucketApi.layer))),
   Layer.provide(AzureDevOpsPullRequestCli.layer.pipe(Layer.provide(AzureDevOpsCli.layer))),
+  Layer.provide(GerritCli.layer),
+  Layer.provide(GerritRestApi.layer),
 );

@@ -242,6 +242,14 @@ interface BranchHeadContext {
 export function pullRequestRepositoryKey(value: string): string | null {
   try {
     const url = new URL(value);
+    // Gerrit writes a change under `/c/{project}/+/{n}`, so the project path is the repository.
+    const gerrit = /^\/c\/(.+?)\/\+\/\d+(?:\/.*)?$/iu.exec(url.pathname);
+    if (gerrit?.[1] !== undefined) {
+      url.pathname = `/${gerrit[1]}`;
+      url.search = "";
+      url.hash = "";
+      return normalizeGitRemoteUrl(url.toString());
+    }
     const match =
       /^(.*)(?:\/pull\/|\/-\/merge_requests\/|\/pull-requests\/|\/pullrequest\/)\d+(?:\/.*)?$/iu.exec(
         url.pathname,
@@ -716,6 +724,12 @@ export const make = Effect.gen(function* () {
   const path = yield* Path.Path;
 
   const sourceControlProvider = (cwd: string) => sourceControlProviders.resolve({ cwd });
+  /** The detected provider kind, or "unknown" when detection itself fails. */
+  const providerKind = (cwd: string) =>
+    sourceControlProvider(cwd).pipe(
+      Effect.map((provider) => provider.kind),
+      Effect.orElseSucceed(() => "unknown" as const),
+    );
   const serverSettingsService = yield* ServerSettings.ServerSettingsService;
   const threads = yield* ProjectionStore.ProjectionStoreV2;
   const projects = yield* ProjectStore.ProjectStoreV2;
@@ -1590,7 +1604,18 @@ export const make = Effect.gen(function* () {
     }
     const remoteName = yield* findRemoteTrackingRemote(cwd, details.branch, headContext.remoteName);
     if (remoteName === null) {
-      return { headContext, lookup: false };
+      // A Gerrit branch is published by pushing to `refs/for/<target>`, which leaves no
+      // remote-tracking ref; its own name still names the change, so look it up rather than
+      // assuming no change request can exist.
+      if ((yield* providerKind(cwd)) !== "gerrit") {
+        return { headContext, lookup: false };
+      }
+      const ownNameContext = yield* resolveBranchHeadContext(cwd, {
+        branch: details.branch,
+        upstreamRef: null,
+        ...(headContext.remoteName === null ? {} : { remoteName: headContext.remoteName }),
+      });
+      return { headContext: ownNameContext, lookup: true };
     }
     const ownNameContext = yield* resolveBranchHeadContext(cwd, {
       branch: details.branch,
@@ -1620,6 +1645,10 @@ export const make = Effect.gen(function* () {
     if (headContext.headBranch.length === 0) {
       return false;
     }
+    // A Gerrit branch is published by pushing it for review, which leaves no remote-tracking
+    // ref, so this heuristic would hide every Gerrit change; the change is found through the
+    // commit's Change-Id instead.
+    if ((yield* providerKind(cwd)) === "gerrit") return false;
     const matchesRef = (pattern: string) =>
       gitCore
         .execute({

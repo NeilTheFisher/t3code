@@ -63,6 +63,10 @@ export function parseChangeRequestUrl(targetUrl: string): ChangeRequestLink | nu
   // separator is GitLab's own, so the hostname is not asked about.
   const gitlab = /^\/([^/]+(?:\/[^/]+)+)\/-\/merge_requests\/(\d+)(?:\/|$)/u.exec(url.pathname);
   if (gitlab) return claim(host, gitlab);
+  // Gerrit: /c/{project}/+/{n}. The `/+/` separator is Gerrit's own, and a project path is the
+  // full path below the host, so nested projects work the same way GitLab's nested groups do.
+  const gerrit = /^\/c\/(.+?)\/\+\/(\d+)(?:\/|$)/u.exec(url.pathname);
+  if (gerrit) return claim(host, gerrit);
   // Bitbucket Cloud: /{workspace}/{repo}/pull-requests/{n}
   if (isHostOf(host, "bitbucket.org", "bitbucket")) {
     const match = /^\/([^/]+\/[^/]+)\/pull-requests\/(\d+)(?:\/|$)/u.exec(url.pathname);
@@ -113,6 +117,8 @@ export function changeRequestUrlFor(
     }
     case "gitlab":
       return `https://${host}/${repository}/-/merge_requests/${number}`;
+    case "gerrit":
+      return `https://${host}/c/${repository}/+/${number}`;
     case "bitbucket":
       return `https://${host}/${repository}/pull-requests/${number}`;
     case "azure-devops":
@@ -210,6 +216,7 @@ export function changeRequestRepositoryUrl(targetUrl: string): string | null {
   const url = new URL(targetUrl);
   const repositoryPath =
     /^(.*?)\/-\/merge_requests\/\d+(?:\/|$)/iu.exec(url.pathname)?.[1] ??
+    /^(\/c\/.+?)\/\+\/\d+(?:\/|$)/iu.exec(url.pathname)?.[1] ??
     /^(.*?)(?:\/pulls?\/\d+|\/-\/merge_requests\/\d+|\/pull-requests\/\d+|\/pullrequest\/\d+)(?:\/|$)/iu.exec(
       url.pathname,
     )?.[1];

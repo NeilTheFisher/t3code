@@ -31,6 +31,22 @@ describe("source control presentation", () => {
     });
   });
 
+  it("uses change request terminology for Gerrit", () => {
+    expect(getChangeRequestTerminologyForKind("gerrit")).toEqual({
+      shortLabel: "CR",
+      singular: "change request",
+    });
+    expect(
+      resolveChangeRequestPresentation({ kind: "gerrit", name: "Gerrit", baseUrl: "" }),
+    ).toEqual(
+      expect.objectContaining({
+        shortName: "CR",
+        longName: "change request",
+        pluralLongName: "change requests",
+      }),
+    );
+  });
+
   it("falls back to generic change request copy for unknown providers", () => {
     expect(
       resolveChangeRequestPresentation({ kind: "unknown", name: "forge", baseUrl: "" }),
@@ -89,6 +105,32 @@ describe("detectSourceControlProviderFromRemoteUrl", () => {
       detectSourceControlProviderFromRemoteUrl("git@vs-ssh.visualstudio.com:v3/org/project/repo")
         ?.kind,
     ).toBe("azure-devops");
+  });
+
+  it("detects Gerrit by its review host or its default SSH port", () => {
+    expect(
+      detectSourceControlProviderFromRemoteUrl("ssh://git@gerrit.summit-tech.org:29418/Project/Sub")
+        ?.kind,
+    ).toBe("gerrit");
+    expect(
+      detectSourceControlProviderFromRemoteUrl("git@review.example.com:29418/Project/Sub")?.kind,
+    ).toBe("gerrit");
+    // A host named after Gerrit needs no port to be recognised.
+    expect(
+      detectSourceControlProviderFromRemoteUrl(
+        "ssh://git@yul01dvlscm01.summit-tech.org:29418/Project",
+      )?.kind,
+    ).toBe("gerrit");
+    // The web/REST endpoint does not share the SSH port, so the base URL is the hostname alone.
+    expect(
+      detectSourceControlProviderFromRemoteUrl(
+        "ssh://git@gerrit.summit-tech.org:29418/Project/Sub",
+      ),
+    ).toEqual({
+      kind: "gerrit",
+      name: "Gerrit",
+      baseUrl: "https://gerrit.summit-tech.org",
+    });
   });
 
   it("preserves ports while classifying by hostname", () => {
