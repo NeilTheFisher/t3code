@@ -49,6 +49,7 @@ import { GitIcon, JujutsuIcon, type Icon } from "../Icons";
 import { SourceControlHostSettings } from "./SourceControlHostSettings";
 import { GitHubAccountSettings } from "./GitHubAccountSettings";
 import { GitHubTokenSettings } from "./GitHubTokenSettings";
+import { GerritCredentialsSettings } from "./GerritCredentialsSettings";
 import { RedactedSensitiveText } from "./RedactedSensitiveText";
 import { SourceControlWritingSettingsSection } from "./SourceControlWritingSettings";
 import {
@@ -281,6 +282,7 @@ function DiscoveryItemRow({
   const targetsThisRow =
     (item.kind === "git" && searchTargetId === searchableSetting("git-fetch-interval").id) ||
     searchTargetId === sourceControlHostSettingsSearchId(item.kind) ||
+    (item.kind === "gerrit" && searchTargetId === searchableSetting("gerrit-credentials").id) ||
     (item.kind === "github" && searchTargetId === searchableSetting("github-accounts").id);
   if (targetsThisRow && !isExpanded && seenSearchTargetId !== searchTargetId) {
     setIsExpanded(true);
@@ -623,6 +625,14 @@ export function SourceControlSettingsPanel() {
                           />
                         ) : null}
                       </div>
+                    </SettingsSearchTarget>
+                  ) : item.kind === "gerrit" ? (
+                    <SettingsSearchTarget id={searchableSetting("gerrit-credentials").id}>
+                      <GerritCredentialsSettings
+                        key={environmentId}
+                        environmentId={environmentId}
+                        onSaved={handleScan}
+                      />
                     </SettingsSearchTarget>
                   ) : (
                     hostSettingsPanel(item.kind)

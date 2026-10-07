@@ -1,6 +1,9 @@
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
 import * as Schema from "effect/Schema";
 
+/** Characters safe to paste into a shell command without quoting. */
+const SAFE_SHELL_ARGUMENT = /^[A-Za-z0-9._/@+=,-]+$/;
+
 import {
   GitCommandError,
   PullRequestDetail,
@@ -114,6 +117,14 @@ export function pullRequestCheckoutCommand(
   headRepositoryNameWithOwner?: string | null,
   repositoryUrl?: string | null,
 ): string | null {
+  if (provider === "gerrit") {
+    // Gerrit addresses a patch set by its `refs/changes/NN/NNNN/P` ref, which is the head
+    // branch the provider reports. A ref anything else would be pasted into a shell verbatim.
+    if (!headBranch.startsWith("refs/changes/") || !SAFE_SHELL_ARGUMENT.test(headBranch)) {
+      return null;
+    }
+    return `git fetch origin ${headBranch} && git checkout FETCH_HEAD`;
+  }
   return sourceControlClients
     .get(provider)
     .checkoutCommand({ number, headBranch, headRepositoryNameWithOwner, repositoryUrl });

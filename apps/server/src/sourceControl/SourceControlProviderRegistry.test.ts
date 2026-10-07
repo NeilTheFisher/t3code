@@ -40,6 +40,8 @@ import * as GitLabPullRequestCli from "@t3tools/source-control-gitlab/server/Git
 import * as ForgejoCli from "@t3tools/source-control-forgejo/server/ForgejoCli";
 import * as GitCafeApi from "@t3tools/source-control-gitcafe/server/GitCafeApi";
 import * as GitCafeCredentials from "@t3tools/source-control-gitcafe/server/GitCafeCredentials";
+import * as GerritCli from "./GerritCli.ts";
+import * as GerritRestApi from "./GerritRestApi.ts";
 import * as SourceControlProviderRegistry from "./SourceControlProviderRegistry.ts";
 import * as ServerSourceControlHost from "./ServerSourceControlHost.ts";
 
@@ -159,6 +161,8 @@ function makeRegistry(input: {
         Layer.mock(GitCafeCredentials.GitCafeCredentials)({
           cliEnv: () => Effect.succeed({}),
         }),
+        GerritCli.layer.pipe(Layer.provide(layerProcess)),
+        Layer.mock(GerritRestApi.GerritRestApi)({}),
         ServerConfig.layerTest(process.cwd(), {
           prefix: "t3-source-control-registry-test-",
         }).pipe(Layer.provide(NodeServices.layer)),

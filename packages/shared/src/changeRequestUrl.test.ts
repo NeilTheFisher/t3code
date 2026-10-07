@@ -58,7 +58,7 @@ describe("parseChangeRequestUrl", () => {
     );
   });
 
-  it("reads Bitbucket and both Azure DevOps URL forms", () => {
+  it("reads a Bitbucket and both Azure DevOps URL forms", () => {
     expect(parseChangeRequestUrl("https://bitbucket.org/workspace/repo/pull-requests/5")).toEqual({
       host: "bitbucket.org",
       repository: "workspace/repo",
@@ -96,6 +96,21 @@ describe("parseChangeRequestUrl", () => {
         { host: `${host}:9443`, repository, number: 123 },
       ]);
     }
+  it("reads a Gerrit change, keeping the full nested project path", () => {
+    expect(
+      parseChangeRequestUrl(
+        "https://yul01dvlscm01.summit-tech.org/c/summit/web/bin/spotlight/router/+/86140",
+      ),
+    ).toEqual({
+      host: "yul01dvlscm01.summit-tech.org",
+      repository: "summit/web/bin/spotlight/router",
+      number: 86140,
+    });
+    expect(parseChangeRequestUrl("https://review.example.com/c/tools/admin/+/9/files")).toEqual({
+      host: "review.example.com",
+      repository: "tools/admin",
+      number: 9,
+    });
   });
 
   it("survives trailing segments, a trailing slash and a query string", () => {
@@ -185,6 +200,23 @@ describe("siblingPullRequestUrl", () => {
 });
 
 describe("changeRequestUrlFor", () => {
+  it("builds a Gerrit change URL and round-trips through the parser", () => {
+    const url = changeRequestUrlFor(
+      "gerrit",
+      "yul01dvlscm01.summit-tech.org",
+      "summit/web/bin/spotlight/router",
+      86140,
+    );
+    expect(url).toBe(
+      "https://yul01dvlscm01.summit-tech.org/c/summit/web/bin/spotlight/router/+/86140",
+    );
+    expect(parseChangeRequestUrl(url!)).toEqual({
+      host: "yul01dvlscm01.summit-tech.org",
+      repository: "summit/web/bin/spotlight/router",
+      number: 86140,
+    });
+  });
+
   it("preserves the origin when the Forgejo host already contains its port", () => {
     expect(
       changeRequestUrlFor(

@@ -48,6 +48,10 @@ export function parseChangeRequestUrl(targetUrl: string): ChangeRequestLink | nu
       if (match) return claim(host, match);
     }
   }
+  // Gerrit: /c/{project}/+/{n}. The `/+/` separator is Gerrit's own, and a project path is the
+  // full path below the host, so nested projects work the same way GitLab's nested groups do.
+  const gerrit = /^\/c\/(.+?)\/\+\/(\d+)(?:\/|$)/u.exec(url.pathname);
+  if (gerrit) return claim(host, gerrit);
   // Azure DevOps Server can use any hostname; its `_git` pull request route identifies it.
   const azure = /^\/((?:[^/]+\/)*_git\/[^/]+)\/pullrequest\/(\d+)(?:\/|$)/u.exec(url.pathname);
   const link = claim(host, azure);
@@ -94,6 +98,8 @@ export function changeRequestUrlFor(
       return `${remoteWebOrigin(host, remoteUrl)}/${repository}/pulls/${number}`;
     case "gitlab":
       return `https://${host}/${repository}/-/merge_requests/${number}`;
+    case "gerrit":
+      return `https://${host}/c/${repository}/+/${number}`;
     case "bitbucket":
       return `https://${host}/${repository}/pull-requests/${number}`;
     case "azure-devops": {
@@ -190,6 +196,7 @@ export function changeRequestRepositoryUrl(targetUrl: string): string | null {
   const url = new URL(targetUrl);
   const repositoryPath =
     /^(.*?)\/-\/merge_requests\/\d+(?:\/|$)/iu.exec(url.pathname)?.[1] ??
+    /^(\/c\/.+?)\/\+\/\d+(?:\/|$)/iu.exec(url.pathname)?.[1] ??
     /^(.*?)(?:\/pulls?\/\d+|\/-\/merge_requests\/\d+|\/pull-requests\/\d+|\/pullrequest\/\d+)(?:\/|$)/iu.exec(
       url.pathname,
     )?.[1];
