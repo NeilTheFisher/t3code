@@ -305,7 +305,7 @@ function commentEntries(record: GerritQueryChange): Array<GerritCommentEntry> {
     (patchSet.comments ?? []).forEach((comment, index) => {
       const path = pathOf(comment);
       if (path === null) return;
-      const createdAt = gerritEpochToIso(comment.timestamp);
+      const createdAt = gerritEpochToIso(comment.timestamp ?? patchSet.createdOn);
       if (createdAt === null) return;
       entries.push({
         id: `inline-${patchSet.number ?? 0}-${comment.timestamp ?? index}-${index}`,
@@ -348,6 +348,16 @@ export function decodeGerritQueryOutput(raw: string): Result.Result<GerritChange
     if (Result.isSuccess(stats)) {
       moreChanges = stats.success.moreChanges === true;
       continue;
+    }
+    // Gerrit answers a bad query with a `{"type":"error","message":...}` record, which the change
+    // schema would otherwise swallow as an empty change and report as a successful empty listing.
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      "type" in parsed &&
+      parsed.type === "error"
+    ) {
+      return Result.fail("message" in parsed ? parsed.message : parsed);
     }
     const decoded = decodeRawChange(parsed);
     if (Result.isSuccess(decoded)) {
