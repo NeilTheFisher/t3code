@@ -2859,7 +2859,9 @@ export function PullRequestDetailPanel({
               }}
             >
               {confirmAction === "merge"
-                ? selectedMergeMethodLabel
+                ? detail?.provider === "gerrit"
+                  ? panelLabels(detail?.provider).merge
+                  : selectedMergeMethodLabel
                 : confirmAction === "enable-auto-merge"
                   ? "Enable auto-merge"
                   : confirmAction === "revert"
