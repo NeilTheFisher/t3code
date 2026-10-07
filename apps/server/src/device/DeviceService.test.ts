@@ -6,6 +6,7 @@ import {
   DeviceOperationError,
   LOCAL_DEVICE_HOST_ID,
   ThreadId,
+  type DevicePlatform,
   type DeviceSummary,
   type ServerSettings as Settings,
   type SshDeviceHostConfig,
@@ -37,6 +38,45 @@ import { NodeRuntimeUnavailableError } from "@t3tools/shared/nodeRuntime";
 
 import * as DeviceService from "./DeviceService.ts";
 import { agentDeviceSession } from "./AgentDeviceTarget.ts";
+
+/** A local host backed by a hub whose responses each test stubs per path. */
+const stubDeviceHost = (
+  http: HttpClient.HttpClient,
+  platforms: ReadonlyArray<DevicePlatform> = ["android"],
+): DeviceHost.DeviceHost["Service"] => {
+  const run = () => Effect.succeed({ code: 0, stdout: "", stderr: "" });
+  const ready: DeviceHost.DeviceHostReady = {
+    nodePath: process.execPath,
+    hub: { origin: "http://device.test" },
+    devices: makeDeviceHubOperations({
+      hostId: LOCAL_DEVICE_HOST_ID,
+      origin: "http://device.test",
+      http,
+      run,
+      androidAvailable: Effect.succeed(true),
+    }),
+    helpers: { serveSimAxSettings: null, serveSimCli: null },
+    run,
+  };
+  return {
+    id: LOCAL_DEVICE_HOST_ID,
+    label: "Device host",
+    summary: Effect.succeed({
+      id: LOCAL_DEVICE_HOST_ID,
+      kind: "local",
+      label: "Device host",
+      platforms: platforms.map((platform) => ({ platform, available: true })),
+      hubInstalled: true,
+      agentDeviceInstalled: false,
+    }),
+    platformAvailability: (platform) => Effect.succeed({ platform, available: true }),
+    ensureReady: () => Effect.succeed(ready),
+    ensureAgentReady: () => Effect.die("Agent access is not used in this test"),
+    current: Effect.succeed(ready),
+    stopAgent: Effect.void,
+    stop: Effect.void,
+  };
+};
 
 const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 const decodeBootError = Schema.decodeUnknownSync(Schema.fromJsonString(DeviceBootError));

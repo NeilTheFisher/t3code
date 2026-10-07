@@ -145,7 +145,10 @@ const classifyNonZeroExit = (
     normalized.includes("authentication failed") ||
     normalized.includes("not logged in") ||
     normalized.includes("no oauth token") ||
-    normalized.includes("unauthorized")
+    normalized.includes("unauthorized") ||
+    // ssh refuses a key it cannot use this way, which for a review host means the same thing.
+    (command === "ssh" &&
+      (normalized.includes("permission denied") || normalized.includes("publickey")))
   ) {
     return "authentication";
   }
