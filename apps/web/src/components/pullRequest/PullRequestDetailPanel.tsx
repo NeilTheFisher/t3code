@@ -295,6 +295,32 @@ function ActOnEnvironmentPicker({
   );
 }
 
+/** The number is a link in every place the host writes it, so the right-click that copies one
+    has to answer here too — otherwise the platform's own cut/paste menu opens over it. */
+const GERRIT_PANEL_LABELS = {
+  merge: "Submit",
+  close: "Abandon change",
+  reopen: "Restore change",
+  copyNumber: "Copy CR number",
+  explain: "Explain this CR",
+  mergeConfirm: "Submit change?",
+  closeConfirm: "Abandon change?",
+} as const;
+
+const DEFAULT_PANEL_LABELS = {
+  merge: "Merge",
+  close: "Close pull request",
+  reopen: "Reopen pull request",
+  copyNumber: "Copy PR number",
+  explain: "Explain this PR",
+  mergeConfirm: "Merge pull request?",
+  closeConfirm: "Close pull request?",
+} as const;
+
+/** Gerrit names its actions differently, so the panel's verbs follow the provider. */
+const panelLabels = (provider: string | null | undefined) =>
+  provider === "gerrit" ? GERRIT_PANEL_LABELS : DEFAULT_PANEL_LABELS;
+
 const openNumberContextMenu = (
   event: ReactMouseEvent,
   detail: { readonly url: string; readonly provider: string },
@@ -2097,7 +2123,11 @@ export function PullRequestDetailPanel({
                   <MenuItem disabled={handoff !== null} onClick={explainPullRequest}>
                     <BookOpenIcon className="mt-1 size-3.5 shrink-0 self-start" />
                     <span className="flex min-w-0 flex-col">
-                      <span>{handoff === "explain" ? "Opening..." : "Explain this PR"}</span>
+                      <span>
+                        {handoff === "explain"
+                          ? "Opening..."
+                          : panelLabels(detail?.provider).explain}
+                      </span>
                       <span className="text-xs text-muted-foreground">
                         A walk through the diff and what to read closely.
                       </span>
@@ -2157,7 +2187,7 @@ export function PullRequestDetailPanel({
                           )}
                         >
                           <PullRequestGlyph.merged className="size-3.5" />
-                          {inlineConfirm.isArmed("merge") ? "Confirm merge?" : "Merge now"}
+                          {inlineConfirm.isArmed("merge") ? "Confirm merge?" : `${panelLabels(detail?.provider).merge} now`}
                         </MenuItem>
                       ) : null}
                       {autoMergeArmed && can("disable-auto-merge") ? (
@@ -2239,7 +2269,7 @@ export function PullRequestDetailPanel({
                   </MenuItem>
                   <MenuItem onClick={() => copyReference(`#${reference.number}`, "PR number")}>
                     <CopyIcon className="size-3.5" />
-                    Copy PR number
+                    {panelLabels(detail?.provider).copyNumber}
                     <MenuShortcut>
                       {shortcutLabelForCommand(keybindings, "pullRequest.copyNumber")}
                     </MenuShortcut>
@@ -2257,7 +2287,7 @@ export function PullRequestDetailPanel({
                         {...inlineConfirm.props("close", () => void perform("close"))}
                       >
                         <PullRequestGlyph.closed className="size-3.5" />
-                        {inlineConfirm.isArmed("close") ? "Confirm close?" : "Close pull request"}
+                        {inlineConfirm.isArmed("close") ? "Confirm close?" : panelLabels(detail?.provider).close}
                       </MenuItem>
                     </>
                   ) : detail.state === "closed" && can("reopen") ? (
@@ -2265,7 +2295,7 @@ export function PullRequestDetailPanel({
                       <MenuSeparator />
                       <MenuItem disabled={actionPending} onClick={() => void perform("reopen")}>
                         <PullRequestGlyph.reopen className="size-3.5" />
-                        Reopen pull request
+                        {panelLabels(detail?.provider).reopen}
                       </MenuItem>
                     </>
                   ) : detail.state === "merged" && can("revert") ? (
