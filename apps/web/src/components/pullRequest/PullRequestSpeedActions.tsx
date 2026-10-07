@@ -3,6 +3,7 @@ import { useUiStateStore } from "~/uiStateStore";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { changeRequestActionLabel } from "./changeRequestActionLabels";
 import { resolvePullRequestMergeMethod } from "./pullRequestDetail.logic";
 import { PullRequestGlyph } from "./pullRequestIcons";
 import type { EnvironmentPullRequestEntry } from "./pullRequestList.logic";
@@ -11,8 +12,20 @@ import {
   usePullRequestDefaultMergeMethodResolver,
 } from "./usePullRequestActions";
 
-export interface PullRequestSpeedActionResult {
-  readonly entry: EnvironmentPullRequestEntry;
+type PullRequestSpeedActionEntry = Pick<
+  EnvironmentPullRequestEntry,
+  | "environmentId"
+  | "projectId"
+  | "provider"
+  | "host"
+  | "repository"
+  | "number"
+  | "state"
+  | "isDraft"
+> & { readonly stack?: object | undefined };
+
+export interface PullRequestSpeedActionResult<Entry = EnvironmentPullRequestEntry> {
+  readonly entry: Entry;
   readonly action: PullRequestAction;
 }
 
@@ -76,7 +89,7 @@ export function PullRequestSpeedActions({
       data-pull-request-action-pending={actionPending || closing}
     >
       {actions.map((action) => {
-        const label = ACTIONS[action].label;
+        const label = changeRequestActionLabel(entry.provider, action) ?? ACTIONS[action].label;
         const Icon = ACTIONS[action].Icon;
         return (
           <Tooltip key={action}>

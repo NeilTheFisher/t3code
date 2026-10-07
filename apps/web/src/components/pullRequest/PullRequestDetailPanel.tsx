@@ -310,6 +310,30 @@ function ActOnEnvironmentPicker({
 
 /** The number is a link in every place the host writes it, so the right-click that copies one
     has to answer here too — otherwise the platform's own cut/paste menu opens over it. */
+const GERRIT_PANEL_LABELS = {
+  merge: "Submit",
+  close: "Abandon change",
+  reopen: "Restore change",
+  copyNumber: "Copy CR number",
+  explain: "Explain this CR",
+  mergeConfirm: "Submit change?",
+  closeConfirm: "Abandon change?",
+} as const;
+
+const DEFAULT_PANEL_LABELS = {
+  merge: "Merge",
+  close: "Close pull request",
+  reopen: "Reopen pull request",
+  copyNumber: "Copy PR number",
+  explain: "Explain this PR",
+  mergeConfirm: "Merge pull request?",
+  closeConfirm: "Close pull request?",
+} as const;
+
+/** Gerrit names its actions differently, so the panel's verbs follow the provider. */
+const panelLabels = (provider: string | null | undefined) =>
+  provider === "gerrit" ? GERRIT_PANEL_LABELS : DEFAULT_PANEL_LABELS;
+
 const openNumberContextMenu = (
   event: ReactMouseEvent,
   detail: { readonly url: string; readonly provider: string },
@@ -2007,7 +2031,11 @@ export function PullRequestDetailPanel({
                   <MenuItem disabled={handoff !== null} onClick={explainPullRequest}>
                     <BookOpenIcon className="mt-1 size-3.5 shrink-0 self-start" />
                     <span className="flex min-w-0 flex-col">
-                      <span>{handoff === "explain" ? "Opening..." : "Explain this PR"}</span>
+                      <span>
+                        {handoff === "explain"
+                          ? "Opening..."
+                          : panelLabels(detail?.provider).explain}
+                      </span>
                       <span className="text-xs text-muted-foreground">
                         A walk through the diff and what to read closely.
                       </span>
@@ -2050,7 +2078,7 @@ export function PullRequestDetailPanel({
                           onClick={() => setConfirmation({ open: true, action: "merge" })}
                         >
                           <PullRequestGlyph.merged className="size-3.5" />
-                          Merge now
+                          {panelLabels(detail?.provider).merge} now
                         </MenuItem>
                       ) : null}
                       {/* The same merge, left with the host to carry out once its requirements
@@ -2136,7 +2164,7 @@ export function PullRequestDetailPanel({
                   </MenuItem>
                   <MenuItem onClick={() => copyReference(`#${reference.number}`, "PR number")}>
                     <CopyIcon className="size-3.5" />
-                    Copy PR number
+                    {panelLabels(detail?.provider).copyNumber}
                     <MenuShortcut>
                       {shortcutLabelForCommand(keybindings, "pullRequest.copyNumber")}
                     </MenuShortcut>
@@ -2150,7 +2178,7 @@ export function PullRequestDetailPanel({
                         onClick={() => setConfirmation({ open: true, action: "close" })}
                       >
                         <PullRequestGlyph.closed className="size-3.5" />
-                        Close pull request
+                        {panelLabels(detail?.provider).close}
                       </MenuItem>
                     </>
                   ) : detail.state === "closed" && can("reopen") ? (
@@ -2158,7 +2186,7 @@ export function PullRequestDetailPanel({
                       <MenuSeparator />
                       <MenuItem disabled={actionPending} onClick={() => void perform("reopen")}>
                         <PullRequestGlyph.reopen className="size-3.5" />
-                        Reopen pull request
+                        {panelLabels(detail?.provider).reopen}
                       </MenuItem>
                     </>
                   ) : detail.state === "merged" && can("revert") ? (
@@ -2787,14 +2815,14 @@ export function PullRequestDetailPanel({
           <AlertDialogHeader>
             <AlertDialogTitle>
               {confirmAction === "merge"
-                ? "Merge pull request?"
+                ? panelLabels(detail?.provider).mergeConfirm
                 : confirmAction === "enable-auto-merge"
                   ? "Enable auto-merge?"
                   : confirmAction === "revert"
                     ? "Revert these changes?"
                     : confirmAction === "approve-workflows"
                       ? "Approve workflows to run?"
-                      : "Close pull request?"}
+                      : panelLabels(detail?.provider).closeConfirm}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {confirmAction === "merge"
@@ -2838,7 +2866,7 @@ export function PullRequestDetailPanel({
                     ? "Create revert PR"
                     : confirmAction === "approve-workflows"
                       ? "Approve and run"
-                      : "Close"}
+                      : panelLabels(detail?.provider).close}
             </Button>
           </AlertDialogFooter>
         </AlertDialogPopup>
