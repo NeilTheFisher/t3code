@@ -210,7 +210,7 @@ describe("reading a detail", () => {
 });
 
 describe("checks", () => {
-  it.effect("maps Verified votes onto one check per reviewer, ignoring other labels", () => {
+  it.effect("maps Code-Review and Verified votes onto one check per reviewer per label", () => {
     const queryChanges = () =>
       Effect.succeed(
         page(
@@ -238,9 +238,10 @@ describe("checks", () => {
       expect(result).toEqual({
         state: "open",
         checks: [
-          { name: "ci-bot", status: "success", description: null, url: null },
-          { name: "skeptic", status: "failure", description: null, url: null },
-          { name: "neutral", status: "pending", description: null, url: null },
+          { name: "areviewer · Code-Review", status: "success", description: null, url: null },
+          { name: "ci-bot · Verified", status: "success", description: null, url: null },
+          { name: "skeptic · Verified", status: "failure", description: null, url: null },
+          { name: "neutral · Verified", status: "pending", description: null, url: null },
         ],
       });
     });
