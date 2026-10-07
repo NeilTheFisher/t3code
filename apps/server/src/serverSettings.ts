@@ -165,6 +165,10 @@ const BITBUCKET_SECRET_FIELDS = ["accessToken", "apiToken"] as const;
 function gitHubTokenSecretName(host: string): string {
   return `github-token-${Buffer.from(host.trim().toLowerCase(), "utf8").toString("base64url")}`;
 }
+const GERRIT_SECRET_NAMES = {
+  token: "gerrit-http-token",
+} as const;
+const GERRIT_SECRET_FIELDS = ["token"] as const;
 
 const redactSecret = (value: string) => (value.length > 0 ? SECRET_REDACTED : "");
 
@@ -215,7 +219,11 @@ export function redactServerSettingsForClient(settings: ServerSettings): ServerS
       Object.entries(settings.github.tokens).map(([host, token]) => [host, redactSecret(token)]),
     ),
   };
-  return { ...settings, providerInstances, usageLimitSources, bitbucket, github };
+  const gerrit = {
+    ...settings.gerrit,
+    token: redactSecret(settings.gerrit.token),
+  };
+  return { ...settings, providerInstances, usageLimitSources, bitbucket, github, gerrit };
 }
 
 export function applyProviderInstanceMutation(
@@ -738,6 +746,31 @@ const make = Effect.gen(function* () {
       return moved ? { ...settings, bitbucket, github: { ...settings.github, tokens } } : settings;
     });
 
+  /** The same for a Gerrit HTTP password hand-edited into settings.json. */
+  const moveInlineGerritSecrets = (settings: ServerSettings) =>
+    Effect.gen(function* () {
+      const gerrit = { ...settings.gerrit };
+      let moved = false;
+      for (const field of GERRIT_SECRET_FIELDS) {
+        const value = gerrit[field];
+        if (value.length === 0 || value === SECRET_REDACTED) continue;
+        const stored = yield* secretStore
+          .set(GERRIT_SECRET_NAMES[field], textEncoder.encode(value))
+          .pipe(
+            Effect.as(true),
+            Effect.catch(() =>
+              Effect.logWarning("failed to move a Gerrit secret into the secret store", {
+                field,
+              }).pipe(Effect.as(false)),
+            ),
+          );
+        if (!stored) continue;
+        gerrit[field] = SECRET_REDACTED;
+        moved = true;
+      }
+      return moved ? { ...settings, gerrit } : settings;
+    });
+
   const loadSettingsFromDisk = Effect.gen(function* () {
     let settings = DEFAULT_SERVER_SETTINGS;
     let persisted: typeof PersistedOptionalProviderSettings.Type = {};
@@ -823,7 +856,9 @@ const make = Effect.gen(function* () {
       ? foldLegacyProjectSettings(loaded, legacyProjectRows)
       : loaded;
     // Only rewrite a file that decoded cleanly; an untrusted one stays for the user to repair.
-    const migrated = settingsFileTrusted ? yield* moveInlineBitbucketTokens(folded) : folded;
+    const migrated = settingsFileTrusted
+      ? yield* moveInlineGerritSecrets(yield* moveInlineBitbucketTokens(folded))
+      : folded;
     if (migrated !== loaded) {
       yield* writeSettingsAtomically(migrated);
     }
@@ -925,12 +960,25 @@ const make = Effect.gen(function* () {
           );
         tokens[host] = Option.isSome(secret) ? textDecoder.decode(secret.value) : "";
       }
+      const gerrit = { ...settings.gerrit };
+      for (const field of GERRIT_SECRET_FIELDS) {
+        if (gerrit[field] !== SECRET_REDACTED) continue;
+        const secret = yield* secretStore
+          .get(GERRIT_SECRET_NAMES[field])
+          .pipe(
+            Effect.mapError(
+              (cause) => new ServerSettingsError({ settingsPath, operation: "read-secret", cause }),
+            ),
+          );
+        gerrit[field] = Option.isSome(secret) ? textDecoder.decode(secret.value) : "";
+      }
       return {
         ...settings,
         providerInstances: providerInstances as ServerSettings["providerInstances"],
         usageLimitSources: usageLimitSources as ServerSettings["usageLimitSources"],
         bitbucket,
         github: { ...settings.github, tokens },
+        gerrit,
       };
     });
 

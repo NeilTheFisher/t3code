@@ -1992,6 +1992,10 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       "https://gitlab.example/group/pull/123/repository/-/merge_requests/42",
       "gitlab.example/group/pull/123/repository",
     ],
+    [
+      "https://yul01dvlscm01.summit-tech.org/c/summit/web/bin/spotlight/router/+/86140",
+      "yul01dvlscm01.summit-tech.org/summit/web/bin/spotlight/router",
+    ],
     ["https://github.example.com/team/repository/issues/42", null],
   ] as const)("reads the repository from the returned PR URL %s", (url, expected) => {
     expect(GitManager.pullRequestRepositoryKey(url)).toBe(expected);

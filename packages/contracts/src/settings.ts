@@ -1112,6 +1112,17 @@ export const GitHubSettings = Schema.Struct({
 });
 export type GitHubSettings = typeof GitHubSettings.Type;
 
+/**
+ * Gerrit's HTTP token, used only for the reads and writes SSH cannot carry: a comment's id
+ * (replies), thread resolution, and the account search behind the reviewer picker. The host and
+ * username come from the project's git remote, so the token is the only thing to store. An empty
+ * token means the HTTP surface is off; the SSH transport needs none of it.
+ */
+export const GerritSettings = Schema.Struct({
+  token: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+});
+export type GerritSettings = typeof GerritSettings.Type;
+
 export const ObservabilitySettings = Schema.Struct({
   otlpTracesUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   otlpMetricsUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
@@ -1524,6 +1535,7 @@ export const ServerSettings = Schema.Struct({
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   bitbucket: BitbucketSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   github: GitHubSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  gerrit: GerritSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   // Keyed by a user-chosen id so a source keeps its rows across edits. Entries
   // this build cannot decode round-trip untouched, as provider instances do.
   usageLimitSources: Schema.Record(UsageLimitSourceId, UsageLimitSourceConfig).pipe(
@@ -1831,6 +1843,11 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Struct({
       hosts: Schema.optionalKey(Schema.Record(GitHubHost, GitHubHostSettings)),
       tokens: Schema.optionalKey(Schema.Record(GitHubHost, TrimmedString)),
+    }),
+  ),
+  gerrit: Schema.optionalKey(
+    Schema.Struct({
+      token: Schema.optionalKey(TrimmedString),
     }),
   ),
   providers: Schema.optionalKey(

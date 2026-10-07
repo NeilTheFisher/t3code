@@ -13,9 +13,11 @@ import { detectSourceControlProviderFromRemoteUrl } from "@t3tools/shared/source
 
 import * as AzureDevOpsSourceControlProvider from "./AzureDevOpsSourceControlProvider.ts";
 import * as BitbucketSourceControlProvider from "./BitbucketSourceControlProvider.ts";
+import * as GerritSourceControlProvider from "./GerritSourceControlProvider.ts";
 import * as GitHubSourceControlProvider from "./GitHubSourceControlProvider.ts";
 import * as GitLabSourceControlProvider from "./GitLabSourceControlProvider.ts";
 import * as ForgejoSourceControlProvider from "./ForgejoSourceControlProvider.ts";
+import * as GerritCli from "./GerritCli.ts";
 import * as SourceControlProvider from "./SourceControlProvider.ts";
 import {
   probeSourceControlProvider,
@@ -312,6 +314,7 @@ export const make = Effect.gen(function* () {
   const bitbucket = yield* BitbucketSourceControlProvider.make;
   const bitbucketDiscovery = yield* BitbucketSourceControlProvider.makeDiscovery;
   const azureDevOps = yield* AzureDevOpsSourceControlProvider.make;
+  const gerrit = yield* GerritSourceControlProvider.make;
   return yield* makeWithProviders([
     {
       kind: "github",
@@ -334,7 +337,10 @@ export const make = Effect.gen(function* () {
       discovery: bitbucketDiscovery,
     },
     { kind: "forgejo", provider: forgejo, discovery: forgejoDiscovery },
+    { kind: "gerrit", provider: gerrit, discovery: GerritSourceControlProvider.discovery },
   ]);
 });
 
-export const layer = Layer.effect(SourceControlProviderRegistry, make);
+export const layer = Layer.effect(SourceControlProviderRegistry, make).pipe(
+  Layer.provide(GerritCli.layer),
+);

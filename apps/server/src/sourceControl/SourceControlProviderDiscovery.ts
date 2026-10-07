@@ -36,6 +36,8 @@ export type SourceControlCliDiscoverySpec = SourceControlDiscoverySpecBase & {
   readonly authArgs: ReadonlyArray<string>;
   readonly remoteRefinementArgs?: ReadonlyArray<string>;
   readonly probeTimeoutMs?: number;
+  /** Hide the probed executable's version, for a provider whose real version lives on a host. */
+  readonly suppressVersion?: boolean;
   readonly parseAuth: (input: SourceControlAuthProbeInput) => SourceControlProviderAuth;
   readonly refineUnknownRemote?: (
     input: SourceControlUnknownRemoteRefinementInput,
@@ -200,9 +202,12 @@ function probeCli(input: {
             label: input.spec.label,
             executable: input.spec.executable,
             status: "available" as const,
-            version: Option.orElse(firstNonEmptyLine(result.stdout), () =>
-              firstNonEmptyLine(result.stderr),
-            ),
+            version:
+              input.spec.suppressVersion === true
+                ? Option.none()
+                : Option.orElse(firstNonEmptyLine(result.stdout), () =>
+                    firstNonEmptyLine(result.stderr),
+                  ),
             installHint: input.spec.installHint,
             detail: Option.none<string>(),
           }) satisfies DiscoveryProbeResult,

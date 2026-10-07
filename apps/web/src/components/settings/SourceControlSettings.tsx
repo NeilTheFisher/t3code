@@ -49,6 +49,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   AzureDevOpsIcon,
   BitbucketIcon,
+  GerritIcon,
   GitHubIcon,
   GitIcon,
   GitLabIcon,
@@ -59,6 +60,7 @@ import {
 import { BitbucketCredentialsSettings } from "./BitbucketCredentialsSettings";
 import { GitHubAccountSettings } from "./GitHubAccountSettings";
 import { GitHubTokenSettings } from "./GitHubTokenSettings";
+import { GerritCredentialsSettings } from "./GerritCredentialsSettings";
 import { RedactedSensitiveText } from "./RedactedSensitiveText";
 import { SourceControlWritingSettingsSection } from "./SourceControlWritingSettings";
 import {
@@ -83,6 +85,7 @@ const SOURCE_CONTROL_PROVIDER_ICONS: Partial<Record<SourceControlProviderKind, I
   forgejo: ForgejoIcon,
   "azure-devops": AzureDevOpsIcon,
   bitbucket: BitbucketIcon,
+  gerrit: GerritIcon,
 };
 
 const VCS_ICONS: Partial<Record<VcsDriverKind, Icon>> = {
@@ -295,7 +298,8 @@ function DiscoveryItemRow({
       (item.kind === "git" && searchTargetId === searchableSetting("git-fetch-interval").id) ||
       (item.kind === "bitbucket" &&
         searchTargetId === searchableSetting("bitbucket-credentials").id) ||
-      (item.kind === "github" && searchTargetId === searchableSetting("github-accounts").id)
+      (item.kind === "github" && searchTargetId === searchableSetting("github-accounts").id) ||
+      (item.kind === "gerrit" && searchTargetId === searchableSetting("gerrit-credentials").id)
     ) {
       setIsExpanded(true);
     }
@@ -633,6 +637,14 @@ export function SourceControlSettingsPanel() {
                           />
                         ) : null}
                       </div>
+                    </SettingsSearchTarget>
+                  ) : item.kind === "gerrit" ? (
+                    <SettingsSearchTarget id={searchableSetting("gerrit-credentials").id}>
+                      <GerritCredentialsSettings
+                        key={environmentId}
+                        environmentId={environmentId}
+                        onSaved={handleScan}
+                      />
                     </SettingsSearchTarget>
                   ) : undefined}
                 </DiscoveryItemRow>
