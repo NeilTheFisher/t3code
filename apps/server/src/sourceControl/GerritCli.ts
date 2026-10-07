@@ -231,7 +231,8 @@ export const make = Effect.gen(function* () {
   /** The connection for a checkout, from its remotes; cached because a listing asks per thread. */
   const connectionFor = (cwd: string, host: string): Effect.Effect<GerritConnection | null> =>
     Effect.gen(function* () {
-      const cached = (yield* Ref.get(connections)).get(cwd);
+      const key = `${cwd}\u0000${host}`;
+      const cached = (yield* Ref.get(connections)).get(key);
       if (cached !== undefined) return cached;
       const output = yield* process
         .run({
@@ -257,8 +258,34 @@ export const make = Effect.gen(function* () {
                 return parsed === null ? [] : [parsed];
               });
       const resolved = remotes.find((remote) => remote.host === host) ?? remotes[0] ?? null;
-      yield* Ref.update(connections, (current) => new Map(current).set(cwd, resolved));
+      yield* Ref.update(connections, (current) => new Map(current).set(key, resolved));
       return resolved;
+    });
+
+  /**
+   * The account `ssh` authenticates as for a host, which is the remote's own user when it names
+   * one and otherwise whatever `~/.ssh/config` resolves `User` to (often the local user, but not
+   * always). `ssh -G` prints the effective configuration without connecting.
+   */
+  const effectiveSshUser = (cwd: string, host: string): Effect.Effect<string | null> =>
+    Effect.gen(function* () {
+      const output = yield* process
+        .run({
+          operation: "GerritCli.sshUser",
+          command: "ssh",
+          args: ["-G", host],
+          cwd,
+          allowNonZeroExit: true,
+          timeoutMs: 5_000,
+          maxOutputBytes: 32_000,
+        })
+        .pipe(Effect.orElseSucceed(() => null));
+      if (output === null || Number(output.exitCode) !== 0) return null;
+      for (const line of output.stdout.split("\n")) {
+        const match = /^user\s+(.+)$/u.exec(line.trim());
+        if (match?.[1] !== undefined) return match[1].trim();
+      }
+      return null;
     });
 
   const sshArgs = (
@@ -349,7 +376,9 @@ export const make = Effect.gen(function* () {
   const viewer: GerritCli["Service"]["viewer"] = (cwd) =>
     Effect.gen(function* () {
       const connection = yield* connectionFor(cwd, "");
-      return connection?.user ?? localUser;
+      if (connection === null) return localUser;
+      if (connection.user !== null) return connection.user;
+      return (yield* effectiveSshUser(cwd, connection.host)) ?? localUser;
     });
 
   return GerritCli.of({ viewer, queryChanges, review, reviewJson });
