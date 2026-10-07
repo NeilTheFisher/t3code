@@ -1,6 +1,7 @@
 import * as Effect from "effect/Effect";
-import type {
-  PullRequestCapabilities,
+import {
+  SourceControlProviderKind,
+  type PullRequestCapabilities,
   PullRequestCheck,
   PullRequestInvolvement,
   PullRequestListState,
@@ -20,7 +21,7 @@ import {
   type ProviderChangeRequestDetail,
   type ProviderChangeRequestSummary,
   type PullRequestProviderApi,
-} from "./PullRequestProvider.ts";
+} from "@t3tools/source-control-core/server/PullRequestProvider";
 import {
   currentPatchSet,
   gerritActivityFromRecord,
@@ -145,21 +146,24 @@ function toSummary(change: GerritChange): ProviderChangeRequestSummary {
 }
 
 /**
- * Gerrit's `Verified` votes as checks: one per reviewer who voted, the sign of the vote as the
- * status. Gerrit has no other check-like signal, so a change with no Verified vote reports none.
+ * Gerrit's `Verified` and `Code-Review` votes as checks: one per reviewer per label, the sign of
+ * the vote as the status. Gerrit has no other check-like signal, so a change with neither vote
+ * reports none.
  */
 function gerritChecks(record: GerritQueryChange): ReadonlyArray<PullRequestCheck> {
   const checks: Array<PullRequestCheck> = [];
   const seen = new Set<string>();
   for (const approval of currentPatchSet(record)?.approvals ?? []) {
-    if (approval.type !== VERIFIED_LABEL) continue;
+    if (approval.type !== VERIFIED_LABEL && approval.type !== CODE_REVIEW_LABEL) continue;
     const by = approval.by;
     const login = by?.username ?? by?.email ?? by?.name;
-    if (login === undefined || login === null || login.length === 0 || seen.has(login)) continue;
-    seen.add(login);
+    if (login === undefined || login === null || login.length === 0) continue;
+    const key = `${approval.type}:${login}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
     const value = Number(approval.value ?? 0);
     checks.push({
-      name: login,
+      name: `${login} · ${approval.type}`,
       status: value > 0 ? "success" : value < 0 ? "failure" : "pending",
       description: null,
       url: null,
@@ -350,7 +354,7 @@ export const make = Effect.gen(function* () {
     (operation: string) =>
     (error: GerritCli.GerritCliError): PullRequestProviderError =>
       new PullRequestProviderError({
-        provider: "gerrit",
+        provider: SourceControlProviderKind.make("gerrit"),
         operation,
         reason:
           error._tag === "GerritCliAuthenticationError"
@@ -364,7 +368,7 @@ export const make = Effect.gen(function* () {
 
   const failure = (operation: string, detail: string, cause?: unknown): PullRequestProviderError =>
     new PullRequestProviderError({
-      provider: "gerrit",
+      provider: SourceControlProviderKind.make("gerrit"),
       operation,
       reason: "failed",
       detail,
@@ -375,7 +379,7 @@ export const make = Effect.gen(function* () {
     (operation: string) =>
     (error: GerritRestApi.GerritRestApiError): PullRequestProviderError =>
       new PullRequestProviderError({
-        provider: "gerrit",
+        provider: SourceControlProviderKind.make("gerrit"),
         operation,
         reason: "failed",
         detail: error.detail,
@@ -395,7 +399,7 @@ export const make = Effect.gen(function* () {
         return record === undefined
           ? Effect.fail(
               new PullRequestProviderError({
-                provider: "gerrit",
+                provider: SourceControlProviderKind.make("gerrit"),
                 operation,
                 reason: "not-found",
                 detail: `Gerrit has no change ${input.search}.`,
@@ -508,7 +512,7 @@ export const make = Effect.gen(function* () {
     });
 
   const provider: PullRequestProviderApi = {
-    kind: "gerrit",
+    kind: SourceControlProviderKind.make("gerrit"),
     capabilities: CAPABILITIES,
 
     // Gerrit authenticates with the SSH key named by the checkout's remote, so the account
