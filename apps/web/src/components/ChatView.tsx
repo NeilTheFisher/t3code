@@ -1641,9 +1641,6 @@ export default function ChatView(props: ChatViewProps) {
         message,
       }) as const,
   );
-  const timelineEntries = isServerThread ? serverTimelineEntries : draftTimelineEntries;
-  const timelineMessages = timelineEntries.flatMap((entry) =>
-    entry.kind === "message" ? [entry.message] : [],
   const modelChangeNotices = useMemo(
     () =>
       serverProjection === null
