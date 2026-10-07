@@ -213,7 +213,7 @@ function gerritInlineComments(
   const comments: Record<
     string,
     Array<{ line: number; side: "PARENT" | "REVISION"; message: string }>
-  > = {};
+  > = Object.create(null);
   for (const draft of drafts) {
     const position = draft.position;
     const onOld =
@@ -255,7 +255,15 @@ function gerritReviewThreads(
   const threads: Array<PullRequestReviewThread> = [];
   for (const root of comments) {
     if (root.inReplyTo !== null && byId.has(root.inReplyTo)) continue;
-    const members = [root, ...comments.filter((comment) => comment.inReplyTo === root.id)];
+    // A thread is its root plus every descendant reply, reached by walking the `inReplyTo` chain
+    // rather than only the root's direct children.
+    const members = [root];
+    for (let index = 0; index < members.length; index += 1) {
+      const parent = members[index];
+      if (parent !== undefined) {
+        members.push(...comments.filter((comment) => comment.inReplyTo === parent.id));
+      }
+    }
     const threadComments = members.flatMap((comment) => {
       const createdAt = restTimestamp(comment.createdAt);
       return createdAt === null
@@ -275,7 +283,9 @@ function gerritReviewThreads(
       path: root.path,
       line: root.line !== null && root.line > 0 ? root.line : null,
       side: root.side === "PARENT" ? "left" : "right",
-      isResolved: members.every((comment) => !comment.unresolved),
+      isResolved: !members.reduce((newest, comment) =>
+        (comment.createdAt ?? "") > (newest.createdAt ?? "") ? comment : newest,
+      ).unresolved,
       isOutdated: false,
       comments: threadComments,
     });
@@ -309,6 +319,26 @@ function rewriteCommitMessage(
     .filter((part) => part.length > 0)
     .join("\n\n")
     .concat("\n");
+}
+
+/**
+ * The submitted description with any subject line and trailer block removed. The editor may carry
+ * the whole commit message, and `rewriteCommitMessage` re-adds both, so keeping them here would
+ * duplicate the subject and the `Change-Id`.
+ */
+function submittedDescription(message: string, subject: string): string {
+  const lines = message.replace(/\n+$/u, "").split("\n");
+  if ((lines[0] ?? "").trim() === subject.trim()) {
+    let start = 1;
+    while (start < lines.length && (lines[start] ?? "").trim() === "") start += 1;
+    lines.splice(0, start);
+  }
+  let trailerStart = lines.length;
+  while (trailerStart > 0 && TRAILER_LINE.test(lines[trailerStart - 1] ?? "")) trailerStart -= 1;
+  if (trailerStart < lines.length && (lines[trailerStart - 1] ?? "").trim() === "") {
+    lines.splice(trailerStart - 1);
+  }
+  return lines.join("\n").trim();
 }
 
 export const make = Effect.gen(function* () {
@@ -414,8 +444,26 @@ export const make = Effect.gen(function* () {
         Effect.mapError((error) => failure(operation, "Git failed for the Gerrit change.", error)),
       );
 
-  const fetchRef = (cwd: string, remote: string, ref: string) =>
-    git(cwd, "getDiff", ["fetch", remote, ref]).pipe(
+  /** The remote whose URL names the routed Gerrit host, so a fetch never assumes `origin`. */
+  const resolveRemote = (cwd: string, host: string, operation: string) =>
+    git(cwd, operation, ["remote", "-v"]).pipe(
+      Effect.map((output) => {
+        if (Number(output.exitCode) !== 0) return "origin";
+        const remotes = output.stdout
+          .split("\n")
+          .map((line) => line.split(/\s+/))
+          .filter((parts) => parts[2] === "(fetch)");
+        const match = remotes.find((parts) => parts[1]?.includes(host));
+        return match?.[0] ?? "origin";
+      }),
+    );
+
+  /**
+   * Fetches a patch set into its own local ref rather than `FETCH_HEAD`, which every fetch
+   * overwrites: two concurrent diffs would otherwise read each other's revision.
+   */
+  const fetchRef = (cwd: string, remote: string, ref: string, into: string) =>
+    git(cwd, "getDiff", ["fetch", remote, `${ref}:${into}`]).pipe(
       Effect.flatMap((output) =>
         Number(output.exitCode) === 0
           ? Effect.void
@@ -431,7 +479,7 @@ export const make = Effect.gen(function* () {
       Effect.mapError(fail(operation)),
     );
 
-  const threadRoot = (
+  const threadContext = (
     input: { cwd: string; host: string; number: number },
     threadId: string,
     operation: string,
@@ -445,7 +493,18 @@ export const make = Effect.gen(function* () {
       if (root === undefined) {
         return yield* failure(operation, "Gerrit has no such comment thread.");
       }
-      return root;
+      const members = [root];
+      for (let index = 0; index < members.length; index += 1) {
+        const parent = members[index];
+        if (parent !== undefined) {
+          members.push(...comments.filter((comment) => comment.inReplyTo === parent.id));
+        }
+      }
+      // The newest member carries the thread's current resolution, which a reply inherits.
+      const latest = members.reduce((newest, comment) =>
+        (comment.createdAt ?? "") > (newest.createdAt ?? "") ? comment : newest,
+      );
+      return { root, latest };
     });
 
   const provider: PullRequestProviderApi = {
@@ -625,14 +684,19 @@ export const make = Effect.gen(function* () {
     getDiff: (input) =>
       Effect.gen(function* () {
         const patchSet = yield* loadPatchSet(input, "getDiff");
-        yield* fetchRef(input.cwd, "origin", patchSet.ref);
+        const remote = yield* resolveRemote(input.cwd, input.host, "getDiff");
+        const revision = `refs/t3-gerrit/${input.number}/${patchSet.number}`;
+        yield* fetchRef(input.cwd, remote, patchSet.ref, revision);
         const output = yield* git(
           input.cwd,
           "getDiff",
           patchSet.parent === null
-            ? ["diff-tree", "-p", "--root", "--no-commit-id", "FETCH_HEAD"]
-            : ["diff", patchSet.parent, "FETCH_HEAD", "--no-color"],
+            ? ["diff-tree", "-p", "--root", "--no-commit-id", revision]
+            : ["diff", patchSet.parent, revision, "--no-color"],
         );
+        if (Number(output.exitCode) !== 0) {
+          return yield* failure("getDiff", "Git could not diff the Gerrit change.");
+        }
         return {
           patch: output.stdout,
           truncated: output.stdoutTruncated,
@@ -643,17 +707,27 @@ export const make = Effect.gen(function* () {
     getDiffFileContents: (input) =>
       Effect.gen(function* () {
         const patchSet = yield* loadPatchSet(input, "getDiffFileContents");
-        yield* fetchRef(input.cwd, "origin", patchSet.ref);
+        const remote = yield* resolveRemote(input.cwd, input.host, "getDiffFileContents");
+        const revision = `refs/t3-gerrit/${input.number}/${patchSet.number}`;
+        yield* fetchRef(input.cwd, remote, patchSet.ref, revision);
         const show = (rev: string, path: string) =>
           git(input.cwd, "getDiffFileContents", ["show", `${rev}:${path}`]).pipe(
-            Effect.map((output) => (Number(output.exitCode) === 0 ? output.stdout : "")),
+            Effect.flatMap((output) =>
+              Number(output.exitCode) !== 0
+                ? Effect.succeed("")
+                : output.stdoutTruncated
+                  ? Effect.fail(
+                      failure("getDiffFileContents", `Git output for ${path} was truncated.`),
+                    )
+                  : Effect.succeed(output.stdout),
+            ),
           );
         const [oldContents, newContents] = yield* Effect.all(
           [
             input.changeType === "new" || patchSet.parent === null
               ? Effect.succeed("")
               : show(patchSet.parent, input.oldPath),
-            input.changeType === "deleted" ? Effect.succeed("") : show("FETCH_HEAD", input.newPath),
+            input.changeType === "deleted" ? Effect.succeed("") : show(revision, input.newPath),
           ],
           { concurrency: 2 },
         );
@@ -724,11 +798,14 @@ export const make = Effect.gen(function* () {
           return yield* failure("updateChangeRequest", "Gerrit returned an unreadable change.");
         }
         const target = yield* restTarget(input.cwd, input.host, "updateChangeRequest");
+        const subject = (detail.body.split("\n")[0] ?? "").trim();
+        const body =
+          input.body === undefined ? undefined : submittedDescription(input.body, subject);
         yield* rest
           .updateMessage({
             ...target,
             change: input.number,
-            message: rewriteCommitMessage(detail.body, input.title, input.body),
+            message: rewriteCommitMessage(detail.body, input.title, body),
           })
           .pipe(Effect.mapError(failRest("updateChangeRequest")));
       }),
@@ -771,7 +848,7 @@ export const make = Effect.gen(function* () {
     replyToThread: (input) =>
       Effect.gen(function* () {
         const target = yield* restTarget(input.cwd, input.host, "replyToThread");
-        const root = yield* threadRoot(input, input.threadId, "replyToThread");
+        const { root, latest } = yield* threadContext(input, input.threadId, "replyToThread");
         yield* rest
           .postReview({
             ...target,
@@ -779,7 +856,15 @@ export const make = Effect.gen(function* () {
             review: {
               comments: {
                 [root.path]: [
-                  { line: root.line ?? 1, message: input.body, in_reply_to: input.threadId },
+                  {
+                    // Anchor on the root's own side and line; a file-level root has no line, and
+                    // an explicit `line: 1` would move the reply onto the first line instead.
+                    ...(root.line === null ? {} : { line: root.line }),
+                    ...(root.side === null ? {} : { side: root.side }),
+                    message: input.body,
+                    in_reply_to: latest.id,
+                    unresolved: latest.unresolved,
+                  },
                 ],
               },
             },
@@ -790,7 +875,7 @@ export const make = Effect.gen(function* () {
     setThreadResolution: (input) =>
       Effect.gen(function* () {
         const target = yield* restTarget(input.cwd, input.host, "setThreadResolution");
-        const root = yield* threadRoot(input, input.threadId, "setThreadResolution");
+        const { root, latest } = yield* threadContext(input, input.threadId, "setThreadResolution");
         yield* rest
           .postReview({
             ...target,
@@ -799,9 +884,11 @@ export const make = Effect.gen(function* () {
               comments: {
                 [root.path]: [
                   {
-                    line: root.line ?? 1,
-                    message: "",
-                    in_reply_to: input.threadId,
+                    ...(root.line === null ? {} : { line: root.line }),
+                    ...(root.side === null ? {} : { side: root.side }),
+                    // Gerrit drops a comment with an empty message before applying `unresolved`.
+                    message: input.resolved ? "Resolved" : "Reopened",
+                    in_reply_to: latest.id,
                     unresolved: !input.resolved,
                   },
                 ],
