@@ -9,9 +9,7 @@ import * as Cause from "effect/Cause";
 import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
 import * as Schedule from "effect/Schedule";
-import { HttpClient, HttpClientRequest } from "effect/http";
 
 import { createModelCapabilities } from "@t3tools/shared/model";
 import { compareSemverVersions } from "@t3tools/shared/semver";
@@ -22,7 +20,6 @@ import {
   providerModelsFromSettings,
   type ServerProviderDraft,
 } from "@t3tools/provider-core/server/snapshotProbe";
-import { parseOpenCodeGoUsageHtml } from "@t3tools/provider-core/server/usageLimits";
 import * as OpenCodeRuntime from "./OpenCodeRuntime.ts";
 import type { ProbedOpenCode } from "./versionProbe.ts";
 import type { Agent, ProviderListResponse } from "@opencode-ai/sdk/v2";
@@ -616,35 +613,6 @@ const checkOpenCode2 = Effect.fn("checkOpenCode2")(function* (
  * the version endpoints for a configured server. The status check refreshes it, so an in-place
  * upgrade re-routes the instance.
  */
-/** OpenCode Go subscription usage, scraped from the workspace dashboard. */
-const fetchOpenCodeGoUsageLimits = Effect.fn("fetchOpenCodeGoUsageLimits")(function* (input: {
-  readonly workspaceId: string;
-  readonly authCookie: string;
-  readonly checkedAt: string;
-}) {
-  if (!input.workspaceId || !input.authCookie) return undefined;
-  const client = yield* HttpClient.HttpClient;
-  const request = HttpClientRequest.get(
-    `https://opencode.ai/workspace/${encodeURIComponent(input.workspaceId)}/go`,
-  ).pipe(
-    HttpClientRequest.setHeader("accept", "text/html,application/xhtml+xml"),
-    HttpClientRequest.setHeader(
-      "cookie",
-      input.authCookie.includes("auth=") ? input.authCookie : `auth=${input.authCookie}`,
-    ),
-    HttpClientRequest.setHeader("user-agent", "T3-Code"),
-  );
-  const response = yield* client.execute(request).pipe(
-    Effect.timeoutOption(10_000),
-    Effect.orElseSucceed(() => Option.none()),
-  );
-  if (Option.isNone(response) || response.value.status < 200 || response.value.status >= 300) {
-    return undefined;
-  }
-  const html = yield* response.value.text.pipe(Effect.orElseSucceed(() => ""));
-  return parseOpenCodeGoUsageHtml(html, input.checkedAt);
-});
-
 export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatus")(function* (
   openCodeSettings: OpenCodeSettings,
   cwd: string,
@@ -656,7 +624,7 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
 ): Effect.fn.Return<
   ServerProviderDraft,
   never,
-  OpenCodeRuntime.OpenCodeRuntime | OpenCodeServerOwner.OpenCodeServerOwner | HttpClient.HttpClient
+  OpenCodeRuntime.OpenCodeRuntime | OpenCodeServerOwner.OpenCodeServerOwner
 > {
   const openCodeRuntime = yield* OpenCodeRuntime.OpenCodeRuntime;
   const serverOwner = yield* OpenCodeServerOwner.OpenCodeServerOwner;

@@ -2187,7 +2187,9 @@ export function PullRequestDetailPanel({
                           )}
                         >
                           <PullRequestGlyph.merged className="size-3.5" />
-                          {inlineConfirm.isArmed("merge") ? "Confirm merge?" : `${panelLabels(detail?.provider).merge} now`}
+                          {inlineConfirm.isArmed("merge")
+                            ? "Confirm merge?"
+                            : `${panelLabels(detail?.provider).merge} now`}
                         </MenuItem>
                       ) : null}
                       {autoMergeArmed && can("disable-auto-merge") ? (
@@ -2287,7 +2289,9 @@ export function PullRequestDetailPanel({
                         {...inlineConfirm.props("close", () => void perform("close"))}
                       >
                         <PullRequestGlyph.closed className="size-3.5" />
-                        {inlineConfirm.isArmed("close") ? "Confirm close?" : panelLabels(detail?.provider).close}
+                        {inlineConfirm.isArmed("close")
+                          ? "Confirm close?"
+                          : panelLabels(detail?.provider).close}
                       </MenuItem>
                     </>
                   ) : detail.state === "closed" && can("reopen") ? (
