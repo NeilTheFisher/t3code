@@ -14,6 +14,7 @@ const OPEN_ON_HOST_LABELS: Partial<Record<string, string>> = {
   forgejo: "Open on Forgejo",
   bitbucket: "Open on Bitbucket",
   "azure-devops": "Open on Azure DevOps",
+  gerrit: "Open on Gerrit",
 };
 
 export const openOnHostLabel = (provider: string): string =>
