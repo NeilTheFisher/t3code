@@ -138,6 +138,13 @@ const normalizeServerSettings = (
     ),
   );
 
+const GERRIT_SECRET_NAMES = {
+  token: "gerrit-http-token",
+} as const;
+const GERRIT_SECRET_FIELDS = ["token"] as const;
+
+const redactSecret = (value: string) => (value.length > 0 ? SECRET_REDACTED : "");
+
 export function redactServerSettingsForClient(
   settings: ServerSettings,
   client: { readonly secretReferences: boolean },
@@ -153,7 +160,15 @@ export function redactServerSettingsForClient(
     : mapSettingsSecretValues(redacted, (value) =>
         isSecretReference(value) ? SECRET_REDACTED : value,
       );
-  return { ...shaped, secretProviders: withoutUnknownSecretProviderConfigs(shaped) };
+  return {
+    ...shaped,
+    secretProviders: withoutUnknownSecretProviderConfigs(shaped),
+    // The Gerrit HTTP token is a plain string, so it is not covered by the secret annotations.
+    gerrit: {
+      ...shaped.gerrit,
+      token: redactSecret(shaped.gerrit.token),
+    },
+  };
 }
 
 /** A client shown a reference as a saved secret sends that marker back; it keeps the reference. */
@@ -782,6 +797,30 @@ const make = Effect.gen(function* () {
     },
   );
 
+  /** The same for a Gerrit HTTP password hand-edited into settings.json. */
+  const moveInlineGerritSecrets = Effect.fn("moveInlineGerritSecrets")(function* (
+    settings: ServerSettings,
+  ) {
+    const gerrit = { ...settings.gerrit };
+    let moved = false;
+    for (const field of GERRIT_SECRET_FIELDS) {
+      const value = gerrit[field];
+      if (value.length === 0 || value === SECRET_REDACTED) continue;
+      const stored = yield* secretStore.set(GERRIT_SECRET_NAMES[field], textEncoder.encode(value)).pipe(
+        Effect.as(true),
+        Effect.catch(() =>
+          Effect.logWarning("failed to move a Gerrit secret into the secret store", {
+            field,
+          }).pipe(Effect.as(false)),
+        ),
+      );
+      if (!stored) continue;
+      gerrit[field] = SECRET_REDACTED;
+      moved = true;
+    }
+    return moved ? { ...settings, gerrit } : settings;
+  });
+
   const loadSettingsFromDisk = Effect.gen(function* () {
     let settings = managed.defaults;
     let legacyProviders: Readonly<Record<string, unknown>> | undefined;
@@ -910,7 +949,9 @@ const make = Effect.gen(function* () {
       ? migrateLegacySourceControlSettings(folded, legacySourceControl)
       : { settings: folded, secretMoves: [] };
     const migrated = settingsFileTrusted
-      ? yield* moveInlineSettingsSecrets(sourceControlMigration.settings)
+      ? yield* moveInlineGerritSecrets(
+          yield* moveInlineSettingsSecrets(sourceControlMigration.settings),
+        )
       : folded;
     if (
       migrated !== loaded ||
@@ -963,13 +1004,24 @@ const make = Effect.gen(function* () {
           Option.isSome(value) ? textDecoder.decode(value.value) : "",
         );
       }
-      return mapSettingsSecrets(settings, (secret) => ({
+      const materialized = mapSettingsSecrets(settings, (secret) => ({
         value:
           secret.sensitive && secret.redacted
             ? (storedSecrets.get(secret.secretName) ?? "")
             : secret.value,
         redacted: secret.sensitive && secret.kind === "environment" && secret.redacted,
       }));
+      const gerrit = { ...materialized.gerrit };
+      if (gerrit.token === SECRET_REDACTED) {
+        const secret = yield* secretStore.get(GERRIT_SECRET_NAMES.token).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ServerSettingsError({ settingsPath, operation: "read-secret", cause }),
+          ),
+        );
+        gerrit.token = Option.isSome(secret) ? textDecoder.decode(secret.value) : "";
+      }
+      return { ...materialized, gerrit };
     },
   );
 
@@ -1078,7 +1130,24 @@ const make = Effect.gen(function* () {
             : {}),
         });
       }
-      return { settings, changes };
+      const gerrit = { ...next.gerrit };
+      for (const field of GERRIT_SECRET_FIELDS) {
+        let value = gerrit[field];
+        if (value === SECRET_REDACTED) {
+          // The marker keeps what is saved; a hand-edited plaintext token moves into the store.
+          const inline = current.gerrit[field];
+          if (inline === SECRET_REDACTED || inline.length === 0) continue;
+          value = inline;
+        }
+        const secretName = GERRIT_SECRET_NAMES[field];
+        if (value.length === 0) {
+          changes.push({ kind: "remove", secretName, operation: "remove-secret" });
+          continue;
+        }
+        changes.push({ kind: "write", secretName, value: textEncoder.encode(value) });
+        gerrit[field] = SECRET_REDACTED;
+      }
+      return { settings: { ...settings, gerrit }, changes };
     });
 
   const rollbackSettingsSecretWrites = (
