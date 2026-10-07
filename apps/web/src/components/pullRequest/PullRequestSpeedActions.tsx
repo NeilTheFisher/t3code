@@ -10,6 +10,7 @@ import { pullRequestEnvironment } from "~/state/pullRequests";
 import { useUiStateStore } from "~/uiStateStore";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
+import { changeRequestActionLabel } from "./changeRequestActionLabels";
 import { resolvePullRequestMergeMethod } from "./pullRequestDetail.logic";
 import { PullRequestGlyph } from "./pullRequestIcons";
 import { pullRequestQuickActions, type EnvironmentPullRequestEntry } from "./pullRequestList.logic";
@@ -23,7 +24,14 @@ import { SharedTooltipTrigger } from "../ui/shared-tooltip";
 
 type PullRequestSpeedActionEntry = Pick<
   EnvironmentPullRequestEntry,
-  "environmentId" | "projectId" | "host" | "repository" | "number" | "state" | "isDraft"
+  | "environmentId"
+  | "projectId"
+  | "provider"
+  | "host"
+  | "repository"
+  | "number"
+  | "state"
+  | "isDraft"
 > & { readonly stack?: object | undefined };
 
 export interface PullRequestSpeedActionResult<Entry = EnvironmentPullRequestEntry> {
@@ -99,7 +107,8 @@ export function PullRequestSpeedActions<Entry extends PullRequestSpeedActionEntr
       )}
     >
       {actions.map((action) => {
-        const label = resolve(ACTIONS[action].label);
+        const label =
+          changeRequestActionLabel(entry.provider, action) ?? resolve(ACTIONS[action].label);
         const Icon = ACTIONS[action].Icon;
         return (
           <SharedTooltipTrigger
