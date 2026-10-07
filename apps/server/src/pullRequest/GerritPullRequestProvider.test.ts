@@ -375,7 +375,9 @@ describe("diff", () => {
       const diff = yield* provider.getDiff(changeRef);
 
       expect(run).toHaveBeenCalledWith(
-        expect.objectContaining({ args: ["fetch", "origin", "refs/changes/34/1234/1"] }),
+        expect.objectContaining({
+          args: ["fetch", "origin", "refs/changes/34/1234/1:refs/t3-gerrit/1234/1"],
+        }),
       );
       expect(diff.patch).toContain("diff --git a/a.js b/a.js");
       expect(diff.nextCursor).toBeNull();
