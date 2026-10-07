@@ -33,6 +33,8 @@ import * as ForgejoPullRequestProvider from "@t3tools/source-control-forgejo/ser
 import * as SourceControlDiscovery from "./SourceControlDiscovery.ts";
 import * as SourceControlProviderRegistry from "./SourceControlProviderRegistry.ts";
 import * as ServerSourceControlHost from "./ServerSourceControlHost.ts";
+import * as GerritCli from "./GerritCli.ts";
+import * as GerritRestApi from "./GerritRestApi.ts";
 import * as SourceControlHost from "@t3tools/source-control-core/server/SourceControlHost";
 
 const layerSourceControlProviderRegistryTest = (input: {
@@ -60,6 +62,8 @@ const layerSourceControlProviderRegistryTest = (input: {
         Layer.mock(GitCafeCredentials.GitCafeCredentials)({
           cliEnv: () => Effect.succeed({}),
         }),
+        Layer.mock(GerritCli.GerritCli)({}),
+        Layer.mock(GerritRestApi.GerritRestApi)({}),
         Layer.mock(VcsDriverRegistry.VcsDriverRegistry)({}),
         Layer.mock(VcsProcess.VcsProcess)(input.process),
         ServerSourceControlHost.layer.pipe(
@@ -216,6 +220,12 @@ it.effect("reports implemented tools separately from locally available executabl
           auth: "unknown",
           account: Option.none(),
         },
+        {
+          kind: "gerrit",
+          status: "missing",
+          auth: "unknown",
+          account: Option.none(),
+        },
       ],
     );
     const bitbucket = result.sourceControlProviders.find((item) => item.kind === "bitbucket");
@@ -366,6 +376,12 @@ Logged in to gitlab.com as gitlab-user
           auth: "authenticated",
           account: Option.some("cafe-user"),
           detail: Option.none(),
+        },
+        {
+          kind: SourceControlProviderKind.make("gerrit"),
+          auth: "unknown",
+          account: Option.none(),
+          detail: Option.some("Hosting integration command was not found on the server PATH."),
         },
       ],
     );

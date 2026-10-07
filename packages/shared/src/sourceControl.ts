@@ -9,6 +9,7 @@ export interface ChangeRequestPresentation {
     | "azure-devops"
     | "bitbucket"
     | "gitcafe"
+    | "gerrit"
     | "change-request";
   readonly providerName: string;
   readonly shortName: string;
@@ -89,6 +90,17 @@ const GITCAFE_CHANGE_REQUEST_PRESENTATION: ChangeRequestPresentation = {
   urlExample: "https://git.cafe/owner/repo/pulls/42",
 };
 
+const GERRIT_CHANGE_REQUEST_PRESENTATION: ChangeRequestPresentation = {
+  icon: "gerrit",
+  providerName: "Gerrit",
+  shortName: "CR",
+  longName: "change request",
+  pluralLongName: "change requests",
+  providerLongName: "Gerrit change request",
+  checkoutCommandExample: "git fetch origin refs/changes/25/1234/1",
+  urlExample: "https://review.example.com/c/project/+/1234",
+};
+
 const GENERIC_CHANGE_REQUEST_PRESENTATION: ChangeRequestPresentation = {
   icon: "change-request",
   providerName: "source control",
@@ -116,6 +128,8 @@ export function resolveChangeRequestPresentation(
       return BITBUCKET_CHANGE_REQUEST_PRESENTATION;
     case "gitcafe":
       return GITCAFE_CHANGE_REQUEST_PRESENTATION;
+    case "gerrit":
+      return GERRIT_CHANGE_REQUEST_PRESENTATION;
     default:
       return GENERIC_CHANGE_REQUEST_PRESENTATION;
   }
@@ -212,6 +226,28 @@ function isBitbucketHost(host: string): boolean {
   return host === "bitbucket.org" || hasDnsLabel(host, "bitbucket");
 }
 
+function isGerritHost(host: string): boolean {
+  return hasDnsLabel(host, "gerrit");
+}
+
+/**
+ * Gerrit's own SSH port. A remote that carries it — `ssh://user@host:29418/project` — is on a
+ * Gerrit instance even when the hostname says nothing about it, which is the norm on an internal
+ * review server.
+ */
+function isGerritRemote(remoteUrl: string): boolean {
+  const trimmed = remoteUrl.trim();
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) {
+    try {
+      return new URL(trimmed).port === "29418";
+    } catch {
+      // Fall through to the scp-style check.
+    }
+  }
+  const scp = /^[^@\s]+@[^:\s]+:(\d+)\//.exec(trimmed);
+  return scp?.[1] === "29418";
+}
+
 export function detectSourceControlProviderFromRemoteUrl(
   remoteUrl: string,
 ): SourceControlProviderInfo | null {
@@ -272,6 +308,16 @@ export function detectSourceControlProviderFromRemoteUrl(
       kind: SourceControlProviderKind.make("bitbucket"),
       name: hostname === "bitbucket.org" ? "Bitbucket" : "Bitbucket Self-Hosted",
       baseUrl: toBaseUrl(host),
+    };
+  }
+
+  if (isGerritHost(hostname) || isGerritRemote(remoteUrl)) {
+    // Gerrit is recognised by a `gerrit` DNS label or its conventional SSH port; the web URL is
+    // the hostname alone, because the SSH port is not the port the review UI is served on.
+    return {
+      kind: "gerrit",
+      name: "Gerrit",
+      baseUrl: toBaseUrl(parseHostName(host)),
     };
   }
 

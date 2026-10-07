@@ -9,6 +9,7 @@ import {
   AzureDevOpsIcon,
   BitbucketIcon,
   ForgejoIcon,
+  GerritIcon,
   GitCafeIcon,
   GitHubIcon,
   GitLabIcon,
@@ -27,6 +28,7 @@ const SOURCE_CONTROL_ICONS: Partial<Record<string, SourceControlIcon>> = {
   bitbucket: BitbucketIcon,
   "azure-devops": AzureDevOpsIcon,
   gitcafe: GitCafeIcon,
+  gerrit: GerritIcon,
 };
 
 export function sourceControlIcon(definition: SourceControlClientDefinition): SourceControlIcon {
@@ -57,7 +59,9 @@ export function getSourceControlPresentation(
   provider: SourceControlProviderInfo | null | undefined,
 ): SourceControlPresentation {
   const definition = sourceControlClients.get(provider?.kind);
-  return presentDefinition(definition, provider?.name || definition.label);
+  const presentation = presentDefinition(definition, provider?.name || definition.label);
+  // Gerrit ships no client definition in this fork; keep its own mark.
+  return provider?.kind === "gerrit" ? { ...presentation, Icon: GerritIcon } : presentation;
 }
 
 /** For surfaces that know only the host kind, such as a change request row or filter. */

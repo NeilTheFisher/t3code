@@ -846,6 +846,14 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   ...SOURCE_CONTROL_HOST_SEARCH_ITEMS,
   {
+    id: "gerrit-credentials",
+    title: "Gerrit HTTP credentials",
+    to: "/settings/source-control",
+    searchTerms: ["gerrit http base url username password credentials replies reviewers"],
+    environmentOnly: true,
+    scope: "environment-defaults",
+  },
+  {
     id: "source-control-writing-style",
     title: "Source control writing style",
     to: "/settings/source-control",

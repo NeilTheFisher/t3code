@@ -24,10 +24,29 @@ import * as GitHubDriver from "@t3tools/source-control-github/server/driver";
 import * as GitLabCli from "@t3tools/source-control-gitlab/server/GitLabCli";
 import * as GitLabPullRequestCli from "@t3tools/source-control-gitlab/server/GitLabPullRequestCli";
 import * as GitLabDriver from "@t3tools/source-control-gitlab/server/driver";
-import type { SourceControlDriver } from "@t3tools/source-control-core/server/driver";
+import { SourceControlProviderKind } from "@t3tools/contracts";
+import {
+  defineSourceControlDriver,
+  type SourceControlDriver,
+} from "@t3tools/source-control-core/server/driver";
+import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 import * as ServerSourceControlHost from "./ServerSourceControlHost.ts";
+import * as GerritCli from "./GerritCli.ts";
+import * as GerritRestApi from "./GerritRestApi.ts";
+import * as GerritSourceControlProvider from "./GerritSourceControlProvider.ts";
+import * as GerritPullRequestProvider from "../pullRequest/GerritPullRequestProvider.ts";
+
+/** Gerrit ships inside the server rather than its own package in this fork. */
+const gerritDriver = defineSourceControlDriver({
+  kind: SourceControlProviderKind.make("gerrit"),
+  make: Effect.all({
+    sourceControl: GerritSourceControlProvider.make,
+    discovery: Effect.succeed(GerritSourceControlProvider.discovery),
+    pullRequests: GerritPullRequestProvider.make,
+  }),
+});
 
 const drivers = [
   GitHubDriver.driver,
@@ -36,6 +55,7 @@ const drivers = [
   BitbucketDriver.driver,
   ForgejoDriver.driver,
   GitCafeDriver.driver,
+  gerritDriver,
 ];
 
 /** Every service a built-in driver's `make` needs; the server's layers must provide them all. */
@@ -57,4 +77,6 @@ export const layer = Layer.mergeAll(
   ForgejoCli.layer,
   GitCafeApi.layer.pipe(Layer.provideMerge(GitCafeCredentials.layer)),
   GitLabPullRequestCli.layer.pipe(Layer.provideMerge(GitLabCli.layer)),
+  GerritCli.layer,
+  GerritRestApi.layer,
 ).pipe(Layer.provideMerge(ServerSourceControlHost.layer));
