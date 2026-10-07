@@ -45,6 +45,8 @@ it.effect("reads Go limits with the instance's XDG credentials and preserves res
     const limits = yield* readOpenCodeGoUsageLimits({
       enabled: true,
       serverUrl: "",
+      workspaceId: "",
+      authCookie: "",
       environment: { XDG_DATA_HOME: "/instance/data", OPENCODE_API_KEY: "env-key" },
     }).pipe(
       Effect.provideService(
@@ -106,7 +108,12 @@ it.effect("does not read local credentials for external or disabled OpenCode ins
       { enabled: true, serverUrl: "https://remote.example" },
       { enabled: false, serverUrl: "" },
     ]) {
-      const limits = yield* readOpenCodeGoUsageLimits({ ...settings, environment: {} }).pipe(
+      const limits = yield* readOpenCodeGoUsageLimits({
+        ...settings,
+        workspaceId: "",
+        authCookie: "",
+        environment: {},
+      }).pipe(
         Effect.provideService(
           FileSystem.FileSystem,
           FileSystem.makeNoop({
@@ -134,6 +141,8 @@ it.effect("keeps Go entitlement absence distinct from failed or malformed usage 
       const limits = yield* readOpenCodeGoUsageLimits({
         enabled: true,
         serverUrl: "",
+        workspaceId: "",
+        authCookie: "",
         environment: {
           OPENCODE_AUTH_CONTENT: '{"opencode-go":{"type":"api","key":"inline-key"}}',
         },
@@ -159,6 +168,115 @@ it.effect("keeps Go entitlement absence distinct from failed or malformed usage 
   }),
 );
 
+it.effect("reads Go limits from the workspace console meters and derives percents", () =>
+  Effect.gen(function* () {
+    const resetsAt = "2026-11-04T16:14:52.000Z";
+    const limits = yield* readOpenCodeGoUsageLimits({
+      enabled: true,
+      serverUrl: "http://127.0.0.1:4096",
+      workspaceId: "wrk_test",
+      authCookie: "session-cookie",
+      environment: {},
+    }).pipe(
+      Effect.provideService(
+        FileSystem.FileSystem,
+        FileSystem.makeNoop({
+          readFileString: () => Effect.die("console reads must not touch disk"),
+        }),
+      ),
+      Effect.provideService(
+        HttpClient.HttpClient,
+        HttpClient.make((request) => {
+          NodeAssert.equal(request.url, "https://opencode.ai/console/api/go/status");
+          NodeAssert.equal(request.headers["x-org-id"], "wrk_test");
+          NodeAssert.equal(request.headers["cookie"], "auth=session-cookie");
+          return Effect.succeed(
+            HttpClientResponse.fromWeb(
+              request,
+              Response.json({
+                access: {
+                  meters: {
+                    fiveHour: {
+                      resetsAt,
+                      limitMicroCents: "1200000000",
+                      usedMicroCents: "108530814",
+                    },
+                    week: {
+                      resetsAt,
+                      limitMicroCents: "3000000000",
+                      usedMicroCents: "1627594832",
+                    },
+                    month: {
+                      resetsAt,
+                      limitMicroCents: "6000000000",
+                      usedMicroCents: "1627594832",
+                    },
+                  },
+                },
+              }),
+            ),
+          );
+        }),
+      ),
+      Effect.provide(NodeServices.layer),
+    );
+    NodeAssert.equal(limits.unavailable, undefined);
+    NodeAssert.deepEqual(
+      limits.windows.map(({ label, kind, usedPercent }) => ({
+        label,
+        kind,
+        usedPercent: Math.round(usedPercent),
+      })),
+      [
+        { label: "Go · Session", kind: "session", usedPercent: 9 },
+        { label: "Go · Weekly", kind: "weekly", usedPercent: 54 },
+        { label: "Go · Monthly", kind: "monthly", usedPercent: 27 },
+      ],
+    );
+  }),
+);
+
+it.effect("maps console entitlement absence and expired cookies onto unsupported/probeFailed", () =>
+  Effect.gen(function* () {
+    const cases = [
+      { status: 403, body: {}, reason: "unsupported" },
+      { status: 401, body: {}, reason: "probeFailed" },
+      { status: 200, body: {}, reason: "unsupported" },
+      { status: 200, body: { access: { meters: {} } }, reason: "probeFailed" },
+    ] as const;
+    for (const testCase of cases) {
+      const limits = yield* readOpenCodeGoUsageLimits({
+        enabled: true,
+        serverUrl: "",
+        workspaceId: "wrk_test",
+        authCookie: "cookie",
+        environment: {},
+      }).pipe(
+        Effect.provideService(
+          FileSystem.FileSystem,
+          FileSystem.makeNoop({
+            readFileString: () => Effect.die("console reads must not touch disk"),
+          }),
+        ),
+        Effect.provideService(
+          HttpClient.HttpClient,
+          HttpClient.make((request) =>
+            Effect.succeed(
+              HttpClientResponse.fromWeb(
+                request,
+                Response.json(testCase.body, { status: testCase.status }),
+              ),
+            ),
+          ),
+        ),
+        Effect.provide(NodeServices.layer),
+      );
+      NodeAssert.equal(limits.unavailable?.reason, testCase.reason);
+      NodeAssert.deepEqual(limits.windows, []);
+    }
+  }),
+);
+
 /**
  * The legacy `OpenCodeProviderLive` Layer + `OpenCodeProvider` service tag
  * are deleted. The snapshot-producing logic they wrapped now lives in the
@@ -176,7 +294,6 @@ const runtimeMock = {
     inventoryError: null as Error | null,
     connectionError: null as Error | null,
     inventoryCwd: null as string | null,
-    dashboardHtml: null as string | null,
     closeCalls: 0,
     sdkClientInputs: [] as Array<{
       baseUrl: string;
@@ -196,7 +313,6 @@ const runtimeMock = {
     this.state.inventoryError = null;
     this.state.connectionError = null;
     this.state.inventoryCwd = null;
-    this.state.dashboardHtml = null;
     this.state.closeCalls = 0;
     this.state.sdkClientInputs.length = 0;
     this.state.inventory = {
@@ -298,20 +414,6 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntime.OpenCodeRuntimeShape = {
   loadSkillsFromCli: () => Effect.succeed([]),
 };
 
-const TestHttpClientLive = Layer.succeed(
-  HttpClient.HttpClient,
-  HttpClient.make((request) =>
-    Effect.succeed(
-      HttpClientResponse.fromWeb(
-        request,
-        runtimeMock.state.dashboardHtml === null
-          ? new Response("Not found", { status: 404 })
-          : new Response(runtimeMock.state.dashboardHtml),
-      ),
-    ),
-  ),
-);
-
 beforeEach(() => {
   runtimeMock.reset();
 });
@@ -335,7 +437,6 @@ it("keeps native and MCP commands while preserving compaction and separate skill
 const layerTest = Layer.succeed(OpenCodeRuntime.OpenCodeRuntime, OpenCodeRuntimeTestDouble).pipe(
   Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
   Layer.provideMerge(NodeServices.layer),
-  Layer.provideMerge(TestHttpClientLive),
 );
 
 const makeOpenCodeSettings = (overrides?: Partial<OpenCodeSettings>): OpenCodeSettings =>
@@ -671,32 +772,6 @@ it.layer(layerTest)("checkOpenCodeProviderStatus", (it) => {
       );
 
       NodeAssert.equal(runtimeMock.state.sdkClientInputs[0]?.serverPassword, "settings-password");
-    }),
-  );
-
-  it.effect("attaches OpenCode Go dashboard usage when credentials are configured", () =>
-    Effect.gen(function* () {
-      runtimeMock.state.dashboardHtml =
-        '{"rollingUsage":{"usagePercent":10,"resetInSec":60},"weeklyUsage":{"usagePercent":20,"resetInSec":120},"monthlyUsage":{"usagePercent":30,"resetInSec":180}}';
-
-      const snapshot = yield* checkStatus(
-        makeOpenCodeSettings({
-          goWorkspaceId: "wrk_test",
-          goAuthCookie: "cookie-value",
-        }),
-      );
-
-      NodeAssert.deepEqual(
-        snapshot.usageLimits?.windows.map(({ label, usedPercent }) => ({
-          label,
-          usedPercent,
-        })),
-        [
-          { label: "Session", usedPercent: 10 },
-          { label: "Weekly", usedPercent: 20 },
-          { label: "Monthly", usedPercent: 30 },
-        ],
-      );
     }),
   );
 
