@@ -58,6 +58,7 @@ describe("buildThreadActionMenuItems", () => {
             "rename",
             "regenerate-title",
             "auto-settle",
+            "export-markdown",
             "archive",
             "delete",
           ]
@@ -68,6 +69,7 @@ describe("buildThreadActionMenuItems", () => {
             "rename",
             "regenerate-title",
             "auto-settle",
+            "export-markdown",
             "archive",
             "delete",
           ];
