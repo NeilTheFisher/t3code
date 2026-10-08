@@ -17,6 +17,7 @@ import {
 import { makeStreamingTimelineFixture } from "../../test-fixtures";
 import type { TurnDiffSummary } from "../../types";
 import { describe, expect, it } from "vite-plus/test";
+import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipeline";
 import { MessageId, RunId } from "@t3tools/contracts";
 import {
   computeStableMessagesTimelineRows,
@@ -28,7 +29,6 @@ import {
   resolveAssistantMessageCopyState,
   resolveWorkGroupScrollIndex,
   shouldFollowWorkGroupAppend,
-  shouldPreserveAssistantLineBreaks,
   type MessagesTimelineRow,
   resolveTimelineToolPresentation,
   workEntryDisplayLabel,

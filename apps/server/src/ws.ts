@@ -2391,82 +2391,31 @@ const layerWsRpc = (
         [WS_METHODS.serverGetSettings]: (_input) =>
           serverSettings.getSettings.pipe(Effect.map(ServerSettings.redactServerSettingsForClient)),
         [WS_METHODS.serverUpdateSettings]: ({ patch, providerInstanceMutation }) =>
-          observeRpcEffect(
-            WS_METHODS.serverUpdateSettings,
-            Effect.gen(function* () {
-              const deviceHosts = patch.deviceHosts
-                ? yield* remoteSshDeviceHosts(patch.deviceHosts).pipe(
-                    Effect.provide(deviceHostContext),
-                  )
-                : undefined;
-              const nextPatch = { ...patch, ...(deviceHosts ? { deviceHosts } : {}) };
-              const settings = yield* providerInstanceMutation === undefined
-                ? serverSettings.updateSettings(nextPatch)
-                : serverSettings.updateProviderInstance(providerInstanceMutation, nextPatch);
-              return ServerSettings.redactServerSettingsForClient(settings);
-            }),
-            {
-              "rpc.aggregate": "server",
-            },
-          ),
-        [WS_METHODS.voiceGetCredentialStatus]: (_input) =>
-          observeRpcEffect(
-            WS_METHODS.voiceGetCredentialStatus,
-            voiceSessionService.getCredentialStatus,
-            { "rpc.aggregate": "voice" },
-          ),
-        [WS_METHODS.voiceSetCredential]: ({ apiKey }) =>
-          observeRpcEffect(
-            WS_METHODS.voiceSetCredential,
-            voiceSessionService.setCredential(apiKey),
-            { "rpc.aggregate": "voice" },
-          ),
-        [WS_METHODS.voiceRemoveCredential]: (_input) =>
-          observeRpcEffect(WS_METHODS.voiceRemoveCredential, voiceSessionService.removeCredential, {
-            "rpc.aggregate": "voice",
+          Effect.gen(function* () {
+            const deviceHosts = patch.deviceHosts
+              ? yield* remoteSshDeviceHosts(patch.deviceHosts).pipe(
+                  Effect.provide(deviceHostContext),
+                )
+              : undefined;
+            const nextPatch = { ...patch, ...(deviceHosts ? { deviceHosts } : {}) };
+            const settings = yield* providerInstanceMutation === undefined
+              ? serverSettings.updateSettings(nextPatch)
+              : serverSettings.updateProviderInstance(providerInstanceMutation, nextPatch);
+            return ServerSettings.redactServerSettingsForClient(settings);
           }),
-        [WS_METHODS.voiceCreateSession]: ({ model }) =>
-          observeRpcEffect(
-            WS_METHODS.voiceCreateSession,
-            voiceSessionService.createSession(model),
-            {
-              "rpc.aggregate": "voice",
-            },
-          ),
+        [WS_METHODS.voiceGetCredentialStatus]: (_input) => voiceSessionService.getCredentialStatus,
+        [WS_METHODS.voiceSetCredential]: ({ apiKey }) => voiceSessionService.setCredential(apiKey),
+        [WS_METHODS.voiceRemoveCredential]: (_input) => voiceSessionService.removeCredential,
+        [WS_METHODS.voiceCreateSession]: ({ model }) => voiceSessionService.createSession(model),
         [WS_METHODS.voiceGetParallelCredentialStatus]: (_input) =>
-          observeRpcEffect(
-            WS_METHODS.voiceGetParallelCredentialStatus,
-            voiceSessionService.getParallelCredentialStatus,
-            { "rpc.aggregate": "voice" },
-          ),
+          voiceSessionService.getParallelCredentialStatus,
         [WS_METHODS.voiceSetParallelCredential]: ({ apiKey }) =>
-          observeRpcEffect(
-            WS_METHODS.voiceSetParallelCredential,
-            voiceSessionService.setParallelCredential(apiKey),
-            { "rpc.aggregate": "voice" },
-          ),
+          voiceSessionService.setParallelCredential(apiKey),
         [WS_METHODS.voiceRemoveParallelCredential]: (_input) =>
-          observeRpcEffect(
-            WS_METHODS.voiceRemoveParallelCredential,
-            voiceSessionService.removeParallelCredential,
-            { "rpc.aggregate": "voice" },
-          ),
-        [WS_METHODS.voiceSearchWeb]: (input) =>
-          observeRpcEffect(WS_METHODS.voiceSearchWeb, voiceSessionService.searchWeb(input), {
-            "rpc.aggregate": "voice",
-          }),
-        [WS_METHODS.voiceExtractWeb]: (input) =>
-          observeRpcEffect(WS_METHODS.voiceExtractWeb, voiceSessionService.extractWeb(input), {
-            "rpc.aggregate": "voice",
-          }),
-        [WS_METHODS.serverDiscoverSourceControl]: (_input) =>
-          observeRpcEffect(
-            WS_METHODS.serverDiscoverSourceControl,
-            sourceControlDiscovery.discover,
-            {
-              "rpc.aggregate": "server",
-            },
-          ),
+          voiceSessionService.removeParallelCredential,
+        [WS_METHODS.voiceSearchWeb]: (input) => voiceSessionService.searchWeb(input),
+        [WS_METHODS.voiceExtractWeb]: (input) => voiceSessionService.extractWeb(input),
+        [WS_METHODS.serverDiscoverSourceControl]: (_input) => sourceControlDiscovery.discover,
         [WS_METHODS.serverGetTraceDiagnostics]: (_input) =>
           TraceDiagnostics.readTraceDiagnostics({
             traceFilePath: config.serverTracePath,
@@ -2762,63 +2711,31 @@ const layerWsRpc = (
         [WS_METHODS.agentSessionsImport]: (input) =>
           agentSessionImporter.importRecentAgentThreads(input),
         [WS_METHODS.assetsCreateUrl]: (input) =>
-          observeRpcEffect(
-            WS_METHODS.assetsCreateUrl,
-            Effect.gen(function* () {
-              const path = yield* Path.Path;
-              // An absolute media path can be linked from a thread on another environment.
-              if (
-                input.resource._tag === "attachment" ||
-                input.resource._tag === "native-app-icon" ||
-                input.resource._tag === "tool-output-image" ||
-                input.resource._tag === "external-file" ||
-                // GitHub media names the repository it authenticates through itself.
-                input.resource._tag === "github-media" ||
-                (input.resource._tag === "media-file" && path.isAbsolute(input.resource.path))
-              ) {
-                return yield* issueAssetUrl({ resource: input.resource });
-              }
-              if (input.resource._tag === "draft-workspace-file") {
-                // A project draft names its workspace directly; there is no
-                // thread to resolve one from.
-                return yield* issueAssetUrl({
-                  resource: input.resource,
-                  workspaceRoot: input.resource.cwd,
-                });
-              }
-              if (input.resource._tag === "project-favicon") {
-                const project = yield* projectStore
-                  .findActiveByWorkspaceRoot(input.resource.cwd)
-                  .pipe(
-                    Effect.mapError(
-                      (cause) =>
-                        new AssetWorkspaceContextResolutionError({
-                          resource: input.resource,
-                          cause,
-                        }),
-                    ),
-                  );
-                if (Option.isNone(project)) {
-                  return yield* new AssetWorkspaceContextNotFoundError({
-                    resource: input.resource,
-                  });
-                }
-                // A cloned project exists before its files do. Clients ask again
-                // when the clone lands (see createProjectFaviconUrlAtomFamily).
-                const clone = yield* projectCloneTracker.get(project.value.projectId);
-                return yield* issueAssetUrl({
-                  resource: input.resource,
-                  ...(project.value.faviconPath
-                    ? { projectFaviconPath: project.value.faviconPath }
-                    : {}),
-                  projectCheckoutPending:
-                    clone !== null &&
-                    clone.phase !== "done" &&
-                    clone.destinationPath === project.value.workspaceRoot,
-                });
-              }
-              const thread = yield* threadManagement
-                .getThreadRecords(input.resource.threadId, [])
+          Effect.gen(function* () {
+            const path = yield* Path.Path;
+            // An absolute media path can be linked from a thread on another environment.
+            if (
+              input.resource._tag === "attachment" ||
+              input.resource._tag === "native-app-icon" ||
+              input.resource._tag === "tool-output-image" ||
+              input.resource._tag === "external-file" ||
+              // GitHub media names the repository it authenticates through itself.
+              input.resource._tag === "github-media" ||
+              (input.resource._tag === "media-file" && path.isAbsolute(input.resource.path))
+            ) {
+              return yield* issueAssetUrl({ resource: input.resource });
+            }
+            if (input.resource._tag === "draft-workspace-file") {
+              // A project draft names its workspace directly; there is no
+              // thread to resolve one from.
+              return yield* issueAssetUrl({
+                resource: input.resource,
+                workspaceRoot: input.resource.cwd,
+              });
+            }
+            if (input.resource._tag === "project-favicon") {
+              const project = yield* projectStore
+                .findActiveByWorkspaceRoot(input.resource.cwd)
                 .pipe(
                   Effect.mapError(
                     (cause) =>

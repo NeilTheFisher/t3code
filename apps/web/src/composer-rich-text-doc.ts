@@ -443,6 +443,18 @@ interface DocLine {
   inline: InlineJson[];
 }
 
+/** The literal source text a non-text segment restores when a code fence holds it. */
+function segmentSourceText(
+  segment: Exclude<ReturnType<typeof splitPromptIntoComposerSegments>[number], { type: "text" }>,
+): string {
+  if (segment.type === "terminal-context") {
+    return segment.context
+      ? formatInlineContextReference(terminalContextReference(segment.context))
+      : INLINE_TERMINAL_CONTEXT_PLACEHOLDER;
+  }
+  return segment.source;
+}
+
 function atomJsonForSegment(
   segment: Exclude<ReturnType<typeof splitPromptIntoComposerSegments>[number], { type: "text" }>,
   skillLabelFor: (name: string) => SkillMeta,
@@ -579,7 +591,7 @@ export function buildTiptapContent(
     .map((segment) => {
       if (segment.type === "text") return segment.text;
       atoms.push(atomJsonForSegment(segment, skillLabelFor));
-      atomSources.push(segment.source);
+      atomSources.push(segmentSourceText(segment));
       return sentinel;
     })
     .join("");
@@ -1275,7 +1287,7 @@ function appendCodeBlockRun(
     ? splitPromptIntoComposerSegments(content).map((segment) =>
         segment.type === "text"
           ? { length: segment.text.length, collapsedLen: segment.text.length }
-          : { length: segment.source.length, collapsedLen: 1 },
+          : { length: segmentSourceText(segment).length, collapsedLen: 1 },
       )
     : [{ length: 0, collapsedLen: 0 }];
   let offset = 0;

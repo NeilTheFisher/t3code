@@ -112,6 +112,7 @@ function LinkRow({
       ? {
           environmentId: threadRef.environmentId,
           projectId,
+          provider: "github" as const,
           host: link.host,
           repository: link.repository,
           number: link.number,

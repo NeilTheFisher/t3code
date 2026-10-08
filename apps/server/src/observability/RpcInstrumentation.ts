@@ -199,6 +199,16 @@ const RPC_AGGREGATES = {
   [WS_METHODS.subscribeServerLifecycle]: "server",
   [WS_METHODS.subscribeAuthAccess]: "auth",
   [WS_METHODS.subscribeBackgroundPolicy]: "server",
+  // Fork-only voice methods; the group middleware labels every RPC here.
+  [WS_METHODS.voiceGetCredentialStatus]: "voice",
+  [WS_METHODS.voiceSetCredential]: "voice",
+  [WS_METHODS.voiceRemoveCredential]: "voice",
+  [WS_METHODS.voiceCreateSession]: "voice",
+  [WS_METHODS.voiceGetParallelCredentialStatus]: "voice",
+  [WS_METHODS.voiceSetParallelCredential]: "voice",
+  [WS_METHODS.voiceRemoveParallelCredential]: "voice",
+  [WS_METHODS.voiceSearchWeb]: "voice",
+  [WS_METHODS.voiceExtractWeb]: "voice",
 } as const satisfies Readonly<Record<WsRpcMethod, string>>;
 
 const RPC_SPAN_PREFIX = "ws.rpc";
