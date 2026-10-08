@@ -1,3 +1,4 @@
+import { SourceControlProviderKind } from "@t3tools/contracts";
 import type { ProjectId, ScopedThreadRef, ThreadPullRequestLink } from "@t3tools/contracts";
 import {
   sourceControlClients,
@@ -118,6 +119,7 @@ function LinkRowImpl({
       ? {
           environmentId: threadRef.environmentId,
           projectId,
+          provider: SourceControlProviderKind.make("github"),
           host: link.host,
           repository: link.repository,
           number: link.number,
