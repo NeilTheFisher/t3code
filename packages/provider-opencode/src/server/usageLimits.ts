@@ -1,6 +1,7 @@
 import * as NodeSqlite from "node:sqlite";
 
 import type { ServerProviderUsageWindow } from "@t3tools/contracts";
+import * as NodeOS from "node:os";
 import * as Digest from "effect/crypto/Digest";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -8,6 +9,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as Hex from "effect/encoding/Hex";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
@@ -18,7 +20,7 @@ import {
   makeUnavailableUsageLimits,
   makeUsageLimits,
 } from "@t3tools/provider-core/server/usageLimits";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 
 const AuthFile = Schema.Struct({ "opencode-go": Schema.optionalKey(Schema.Unknown) });
 const ApiAuth = Schema.Struct({ type: Schema.Literal("api"), key: Schema.String });
@@ -32,7 +34,65 @@ const StoredKey = Schema.Struct({
     Schema.NullOr(Schema.Struct({ server: Schema.optionalKey(Schema.Unknown) })),
   ),
 });
-const decodeStoredKey = Schema.decodeOption(Schema.fromJsonString(StoredKey));
+const decodeStoredKey = Schema.decodeSync(Schema.fromJsonString(StoredKey));
+// Newer CLIs store the `opencode console login` OAuth grant in the
+// `credential` table instead of `account`/`account_state`.
+const StoredOAuth = Schema.Struct({
+  type: Schema.Literal("oauth"),
+  access: Schema.optionalKey(Schema.String),
+  expires: Schema.optionalKey(Schema.Number),
+  metadata: Schema.optionalKey(
+    Schema.NullOr(
+      Schema.Struct({
+        server: Schema.optionalKey(Schema.String),
+        orgID: Schema.optionalKey(Schema.String),
+      }),
+    ),
+  ),
+});
+const decodeStoredOAuth = Schema.decodeOption(Schema.fromJsonString(StoredOAuth));
+
+// A stored API key from the CLI's `credential` table. `NULL`-active rows predate
+// the selection flag, so only an explicit `0` deselects.
+function readStoredKey(
+  databasePath: string,
+  integrationId: "opencode" | "opencode-go",
+): string | undefined {
+  try {
+    const database = new NodeSqlite.DatabaseSync(databasePath, { readOnly: true });
+    try {
+      database.exec("PRAGMA busy_timeout = 100");
+      const row = database
+        .prepare(
+          `SELECT value FROM credential
+           WHERE integration_id = ? AND (active IS NULL OR active != 0)
+           ORDER BY active DESC, time_created DESC, id DESC LIMIT 1`,
+        )
+        .get(integrationId) as { readonly value?: unknown } | undefined;
+      if (typeof row?.value !== "string") return undefined;
+      const stored = decodeStoredKey(row.value);
+      const server = stored.metadata?.server;
+      if (typeof server === "string" && !isConsoleServer(server)) return undefined;
+      const key = stored.key.trim();
+      return key ? key : undefined;
+    } finally {
+      database.close();
+    }
+  } catch {
+    return undefined;
+  }
+}
+
+// The OAuth grant belongs to the server that issued it; only the public
+// console's grants authenticate the console meters API.
+function isConsoleServer(server: string): boolean {
+  try {
+    const url = new URL(server);
+    return `${url.origin}${url.pathname.replace(/\/+$/, "")}` === "https://opencode.ai/console";
+  } catch {
+    return false;
+  }
+}
 const UsageWindow = Schema.Struct({
   percent: Schema.Finite,
   resetsAt: Schema.DateTimeUtcFromString,
@@ -41,49 +101,319 @@ const UsageResponse = Schema.Struct({
   usage: Schema.Struct({ rolling: UsageWindow, weekly: UsageWindow, monthly: UsageWindow }),
 });
 
-// Select before decoding so an OAuth or self-hosted connection cannot fall
-// through to another stored account. NULL-active rows predate the selection flag.
-class OpenCodeCredentialReadError extends Schema.TaggedError<OpenCodeCredentialReadError>()(
-  "OpenCodeCredentialReadError",
-  { databasePath: Schema.String, cause: Schema.Defect() },
-) {
-  override get message(): string {
-    return `Could not read OpenCode credentials from ${this.databasePath}.`;
+/**
+ * The console dashboard's own Go meters. Each meter reports micro-cents spent
+ * against a per-window limit, so the percent is derived rather than sent.
+ */
+const GoMeter = Schema.Struct({
+  resetsAt: Schema.optionalKey(Schema.DateTimeUtcFromString),
+  limitMicroCents: Schema.optionalKey(Schema.String),
+  usedMicroCents: Schema.optionalKey(Schema.String),
+});
+const GoStatusResponse = Schema.Struct({
+  access: Schema.optionalKey(
+    Schema.NullOr(
+      Schema.Struct({
+        meters: Schema.optionalKey(
+          Schema.Struct({
+            fiveHour: Schema.optionalKey(GoMeter),
+            week: Schema.optionalKey(GoMeter),
+            month: Schema.optionalKey(GoMeter),
+          }),
+        ),
+      }),
+    ),
+  ),
+});
+
+function meterUsedPercent(meter: {
+  readonly limitMicroCents?: string | undefined;
+  readonly usedMicroCents?: string | undefined;
+}): number | undefined {
+  const limit = Number(meter.limitMicroCents);
+  const used = Number(meter.usedMicroCents);
+  if (!Number.isFinite(limit) || limit <= 0 || !Number.isFinite(used) || used < 0) {
+    return undefined;
   }
+  return clampPercent((used / limit) * 100);
 }
 
-const readStoredApiKey = (databasePath: string, integrationId: "opencode" | "opencode-go") =>
-  Effect.try({
-    try: () => {
-      const database = new NodeSqlite.DatabaseSync(databasePath, { readOnly: true });
-      try {
-        database.exec("PRAGMA busy_timeout = 100");
-        const row = database
-          .prepare(
-            `SELECT value FROM credential
-             WHERE integration_id = ? AND active IS NOT 0
-             ORDER BY active DESC, time_created DESC, id DESC LIMIT 1`,
-          )
-          .get(integrationId);
-        const stored =
-          typeof row?.value === "string"
-            ? Option.getOrUndefined(decodeStoredKey(row.value))
-            : undefined;
-        const server = stored?.metadata?.server;
-        if (typeof server === "string") {
-          const url = new URL(server);
-          if (`${url.origin}${url.pathname.replace(/\/+$/, "")}` !== "https://opencode.ai/console")
-            return undefined;
-        }
-        return stored?.key.trim();
-      } finally {
-        database.close();
-      }
+function consoleGoWindows(response: typeof GoStatusResponse.Type): ServerProviderUsageWindow[] {
+  const meters = response.access?.meters;
+  if (!meters) return [];
+  const entries = [
+    {
+      meter: meters.fiveHour,
+      id: "go_rolling",
+      kind: "session",
+      label: "Go · Session",
+      mins: 5 * 60,
     },
-    catch: (cause) => new OpenCodeCredentialReadError({ databasePath, cause }),
-  }).pipe(Effect.orElseSucceed(() => undefined));
+    {
+      meter: meters.week,
+      id: "go_weekly",
+      kind: "weekly",
+      label: "Go · Weekly",
+      mins: 7 * 24 * 60,
+    },
+    {
+      meter: meters.month,
+      id: "go_monthly",
+      kind: "monthly",
+      label: "Go · Monthly",
+      mins: 30 * 24 * 60,
+    },
+  ] as const;
+  const windows: ServerProviderUsageWindow[] = [];
+  for (const entry of entries) {
+    if (!entry.meter) continue;
+    const usedPercent = meterUsedPercent(entry.meter);
+    if (usedPercent === undefined) continue;
+    windows.push({
+      id: entry.id,
+      kind: entry.kind,
+      label: entry.label,
+      usedPercent,
+      windowDurationMins: entry.mins,
+      ...(entry.meter.resetsAt ? { resetsAt: DateTime.formatIso(entry.meter.resetsAt) } : {}),
+    });
+  }
+  return windows;
+}
 
-/** External OpenCode servers own their credentials; never read the host's account for them. */
+/**
+ * The workspace dashboard's JSON meters, the source the console itself reads.
+ * An `x-org-id` header selects the workspace and the account's OAuth access
+ * token authenticates it; a 403 means no Go subscription and a 401 means the
+ * token has expired.
+ */
+const readConsoleGoUsageLimits = Effect.fn("readConsoleGoUsageLimits")(function* (input: {
+  readonly checkedAt: string;
+  readonly workspaceId: string;
+  readonly accessToken: string;
+}) {
+  const client = yield* HttpClient.HttpClient;
+  const response = yield* client.execute(
+    HttpClientRequest.get("https://opencode.ai/console/api/go/status").pipe(
+      HttpClientRequest.setHeader("accept", "application/json"),
+      HttpClientRequest.setHeader("x-org-id", input.workspaceId),
+      HttpClientRequest.bearerToken(input.accessToken),
+      HttpClientRequest.setHeader("user-agent", "T3-Code"),
+    ),
+  );
+  if (response.status === 403) {
+    return makeUnavailableUsageLimits({ checkedAt: input.checkedAt, reason: "unsupported" });
+  }
+  const body = yield* HttpClientResponse.filterStatusOk(response).pipe(
+    Effect.flatMap(HttpClientResponse.schemaBodyJson(GoStatusResponse)),
+  );
+  // A Go subscription always carries meters; their absence means this
+  // workspace cannot report Go usage at all.
+  if (!body.access) {
+    return makeUnavailableUsageLimits({ checkedAt: input.checkedAt, reason: "unsupported" });
+  }
+  const windows = consoleGoWindows(body);
+  if (windows.length === 0) {
+    return makeUnavailableUsageLimits({
+      checkedAt: input.checkedAt,
+      reason: "probeFailed",
+      message: "OpenCode Go returned no usage windows.",
+    });
+  }
+  const digest = yield* Digest.Digest;
+  // The console response has no account ID; identify the account by its
+  // workspace so two instances on the same workspace pool as one account.
+  const credentialFingerprint = yield* digest
+    .digest(Digest.sha256, new TextEncoder().encode(`opencode-go\0${input.workspaceId}`))
+    .pipe(Effect.map(Hex.encode), Effect.orDie);
+  return { ...makeUsageLimits({ checkedAt: input.checkedAt, windows }), credentialFingerprint };
+});
+
+/**
+ * Legacy host-account read: the CLI's stored Console API key or Zen API key
+ * against the Zen usage API. Used only when no `console login` OAuth grant is
+ * available.
+ */
+const readZenGoUsageLimits = Effect.fn("readZenGoUsageLimits")(function* (input: {
+  readonly checkedAt: string;
+  readonly environment: NodeJS.ProcessEnv;
+}) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const env = input.environment;
+  const dataHome =
+    env.XDG_DATA_HOME ||
+    path.join(env.HOME || env.USERPROFILE || NodeOS.homedir(), ".local", "share");
+  const authPath = path.join(dataHome, "opencode", "auth.json");
+  const contents =
+    env.OPENCODE_AUTH_CONTENT ||
+    (yield* fs.readFileString(authPath).pipe(
+      Effect.catchTags({
+        PlatformError: (error) =>
+          error.reason._tag === "NotFound" ? Effect.succeed("{}") : Effect.fail(error),
+      }),
+    ));
+  const auth = yield* decodeAuthFile(contents);
+  const apiAuth = decodeApiAuth(auth["opencode-go"]);
+  // OpenCode overlays stored API credentials after environment credentials.
+  const goKey = (Option.isSome(apiAuth) ? apiAuth.value.key : env.OPENCODE_API_KEY)?.trim();
+  // Console supplies Go credentials in OpenCode 2. Inline auth explicitly
+  // overrides local credentials, including the Console connection.
+  const databaseFile = env.OPENCODE_DB ?? "opencode.db";
+  const databasePath = path.resolve(dataHome, "opencode", databaseFile);
+  const storedKeys =
+    env.OPENCODE_AUTH_CONTENT !== undefined || databaseFile === ":memory:"
+      ? []
+      : [
+          readStoredKey(databasePath, "opencode"),
+          // OpenCode 2 imports auth.json once, so a replaced Go key only exists here.
+          readStoredKey(databasePath, "opencode-go"),
+        ];
+  const keys = [...new Set([...storedKeys, goKey].filter((key): key is string => Boolean(key)))];
+  let apiKey = keys[0];
+  if (!apiKey) {
+    return makeUnavailableUsageLimits({ checkedAt: input.checkedAt, reason: "unsupported" });
+  }
+
+  const client = yield* HttpClient.HttpClient;
+  const readUsage = (key: string) =>
+    client.execute(
+      HttpClientRequest.get("https://opencode.ai/zen/go/v1/usage").pipe(
+        HttpClientRequest.bearerToken(key),
+      ),
+    );
+  let response = yield* readUsage(apiKey);
+  for (const key of keys.slice(1)) {
+    if (response.status !== 401 && response.status !== 403) break;
+    apiKey = key;
+    response = yield* readUsage(apiKey);
+  }
+  // A valid Zen key can exist without a Go subscription.
+  if (response.status === 403) {
+    return makeUnavailableUsageLimits({ checkedAt: input.checkedAt, reason: "unsupported" });
+  }
+  const body = yield* HttpClientResponse.filterStatusOk(response).pipe(
+    Effect.flatMap(HttpClientResponse.schemaBodyJson(UsageResponse)),
+  );
+  const windows: ServerProviderUsageWindow[] = [
+    {
+      id: "go_rolling",
+      kind: "session",
+      label: "Go · Session",
+      windowDurationMins: 5 * 60,
+      usedPercent: clampPercent(body.usage.rolling.percent),
+      resetsAt: DateTime.formatIso(body.usage.rolling.resetsAt),
+    },
+    {
+      id: "go_weekly",
+      kind: "weekly",
+      label: "Go · Weekly",
+      windowDurationMins: 7 * 24 * 60,
+      usedPercent: clampPercent(body.usage.weekly.percent),
+      resetsAt: DateTime.formatIso(body.usage.weekly.resetsAt),
+    },
+    {
+      id: "go_monthly",
+      kind: "monthly",
+      label: "Go · Monthly",
+      usedPercent: clampPercent(body.usage.monthly.percent),
+      resetsAt: DateTime.formatIso(body.usage.monthly.resetsAt),
+    },
+  ];
+  const digest = yield* Digest.Digest;
+  // Go's usage response has no account ID. An unkeyed hash matches across
+  // environments without a shared secret. It permits offline guesses, but
+  // Go keys are randomly generated.
+  const credentialFingerprint = yield* digest
+    .digest(Digest.sha256, new TextEncoder().encode(`opencode-go\0${apiKey}`))
+    .pipe(Effect.map(Hex.encode), Effect.orDie);
+  return {
+    ...makeUsageLimits({ checkedAt: input.checkedAt, windows }),
+    credentialFingerprint,
+  };
+});
+
+interface ConsoleCredential {
+  readonly workspaceId: string;
+  readonly accessToken: string;
+}
+
+/**
+ * The credential `opencode console login` stores. The CLI refreshes the OAuth
+ * token itself, so it outlives a pasted browser cookie.
+ */
+const readConsoleCredential = Effect.fn("readConsoleCredential")(function* (
+  environment: NodeJS.ProcessEnv,
+) {
+  return yield* Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const dataHome =
+      environment.XDG_DATA_HOME?.trim() ||
+      path.join(environment.HOME || environment.USERPROFILE || NodeOS.homedir(), ".local", "share");
+    const databasePath = path.join(dataHome, "opencode", "opencode.db");
+    if (!(yield* fs.exists(databasePath))) return Option.none<ConsoleCredential>();
+
+    const credential = yield* Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      // The CLI may hold the writer; fail promptly instead of waiting on it.
+      yield* sql.unsafe("PRAGMA busy_timeout = 100");
+      const legacy = yield* sql
+        .unsafe<{ access_token: unknown; active_org_id: unknown }>(
+          `SELECT a.access_token AS access_token, s.active_org_id AS active_org_id
+           FROM account_state s
+           JOIN account a ON a.id = s.active_account_id
+           LIMIT 1`,
+        )
+        // Older databases predate either table; absence just means no legacy grant.
+        .pipe(Effect.catch(() => Effect.succeed([] as Array<unknown>)));
+
+      const row = legacy[0] as { access_token?: unknown; active_org_id?: unknown } | undefined;
+      const workspaceId = typeof row?.active_org_id === "string" ? row.active_org_id.trim() : "";
+      const accessToken = typeof row?.access_token === "string" ? row.access_token.trim() : "";
+      if (workspaceId && accessToken) return Option.some({ workspaceId, accessToken });
+
+      const oauthRows = yield* sql
+        .unsafe<{ value: unknown }>(
+          `SELECT value AS value FROM credential
+           WHERE integration_id = 'opencode' AND (active IS NULL OR active != 0)
+           ORDER BY active DESC, time_created DESC, id DESC LIMIT 1`,
+        )
+        .pipe(Effect.catch(() => Effect.succeed([] as Array<{ value: unknown }>)));
+      const stored =
+        typeof oauthRows[0]?.value === "string"
+          ? Option.getOrUndefined(decodeStoredOAuth(oauthRows[0].value))
+          : undefined;
+      if (stored === undefined) return Option.none<ConsoleCredential>();
+      const access = stored.access?.trim();
+      const orgID = stored.metadata?.orgID?.trim();
+      if (!access || !orgID) return Option.none<ConsoleCredential>();
+      // A stale grant stays out of the way so the Zen API-key path can try.
+      const nowMillis = DateTime.toEpochMillis(yield* DateTime.now);
+      if (typeof stored.expires === "number" && stored.expires <= nowMillis) {
+        return Option.none<ConsoleCredential>();
+      }
+      const server = stored.metadata?.server;
+      if (typeof server === "string" && !isConsoleServer(server)) {
+        return Option.none<ConsoleCredential>();
+      }
+      return Option.some({ workspaceId: orgID, accessToken: access });
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: databasePath, readonly: true })));
+
+    return credential;
+  }).pipe(
+    // A missing, locked, or schema-shifted CLI database must not fail the
+    // provider probe; it just means no console credential is available.
+    Effect.catch(() => Effect.succeed(Option.none<ConsoleCredential>())),
+  );
+});
+
+/**
+ * OpenCode Go subscription usage. The console credential comes from the
+ * OpenCode CLI's `console login`; the Zen API-key path is a legacy fallback
+ * for host accounts without a console login. External servers own their
+ * credentials, so neither host path applies to them.
+ */
 export const readOpenCodeGoUsageLimits = Effect.fn("readOpenCodeGoUsageLimits")(function* (input: {
   readonly enabled: boolean;
   readonly serverUrl: string;
@@ -91,101 +421,34 @@ export const readOpenCodeGoUsageLimits = Effect.fn("readOpenCodeGoUsageLimits")(
 }) {
   const checkedAt = DateTime.formatIso(yield* DateTime.now);
   const unsupported = makeUnavailableUsageLimits({ checkedAt, reason: "unsupported" });
-  if (!input.enabled || input.serverUrl.trim()) return unsupported;
+  if (!input.enabled) return unsupported;
 
-  return yield* Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const env = input.environment;
-    const dataHome =
-      env.XDG_DATA_HOME ||
-      path.join(
-        env.HOME || env.USERPROFILE || (yield* HostProcess.HomeDirectory),
-        ".local",
-        "share",
-      );
-    const authPath = path.join(dataHome, "opencode", "auth.json");
-    const contents =
-      env.OPENCODE_AUTH_CONTENT ||
-      (yield* fs.readFileString(authPath).pipe(
-        Effect.catchTags({
-          PlatformError: (error) =>
-            error.reason._tag === "NotFound" ? Effect.succeed("{}") : Effect.fail(error),
+  if (input.serverUrl.trim()) return unsupported;
+
+  // Inline auth is an explicit credential override: it must not be replaced by
+  // whatever account this host happens to be logged into.
+  const credential =
+    input.environment.OPENCODE_AUTH_CONTENT === undefined
+      ? yield* readConsoleCredential(input.environment)
+      : Option.none<ConsoleCredential>();
+  if (Option.isSome(credential)) {
+    return yield* readConsoleGoUsageLimits({
+      checkedAt,
+      workspaceId: credential.value.workspaceId,
+      accessToken: credential.value.accessToken,
+    }).pipe(
+      Effect.timeout("5 seconds"),
+      Effect.orElseSucceed(() =>
+        makeUnavailableUsageLimits({
+          checkedAt,
+          reason: "probeFailed",
+          message: "OpenCode Go could not read usage.",
         }),
-      ));
-    const auth = yield* decodeAuthFile(contents);
-    const apiAuth = decodeApiAuth(auth["opencode-go"]);
-    // OpenCode overlays stored API credentials after environment credentials.
-    const goKey = (Option.isSome(apiAuth) ? apiAuth.value.key : env.OPENCODE_API_KEY)?.trim();
-    // Console supplies Go credentials in OpenCode 2. Inline auth explicitly
-    // overrides local credentials, including the Console connection.
-    const databaseFile = env.OPENCODE_DB ?? "opencode.db";
-    const databasePath = path.resolve(dataHome, "opencode", databaseFile);
-    const storedKeys =
-      env.OPENCODE_AUTH_CONTENT || databaseFile === ":memory:"
-        ? []
-        : [
-            yield* readStoredApiKey(databasePath, "opencode"),
-            // OpenCode 2 imports auth.json once, so a replaced Go key only exists here.
-            yield* readStoredApiKey(databasePath, "opencode-go"),
-          ];
-    const keys = [...new Set([...storedKeys, goKey].filter((key): key is string => Boolean(key)))];
-    let apiKey = keys[0];
-    if (!apiKey) return unsupported;
-
-    const client = yield* HttpClient.HttpClient;
-    const readUsage = (key: string) =>
-      client.execute(
-        HttpClientRequest.get("https://opencode.ai/zen/go/v1/usage").pipe(
-          HttpClientRequest.bearerToken(key),
-        ),
-      );
-    let response = yield* readUsage(apiKey);
-    for (const key of keys.slice(1)) {
-      if (response.status !== 401 && response.status !== 403) break;
-      apiKey = key;
-      response = yield* readUsage(apiKey);
-    }
-    // A valid Zen key can exist without a Go subscription.
-    if (response.status === 403) return unsupported;
-    const body = yield* HttpClientResponse.filterStatusOk(response).pipe(
-      Effect.flatMap(HttpClientResponse.schemaBodyJson(UsageResponse)),
+      ),
     );
-    const windows: ServerProviderUsageWindow[] = [
-      {
-        id: "go_rolling",
-        kind: "session",
-        label: "Go · Session",
-        windowDurationMins: 5 * 60,
-        usedPercent: clampPercent(body.usage.rolling.percent),
-        resetsAt: DateTime.formatIso(body.usage.rolling.resetsAt),
-      },
-      {
-        id: "go_weekly",
-        kind: "weekly",
-        label: "Go · Weekly",
-        windowDurationMins: 7 * 24 * 60,
-        usedPercent: clampPercent(body.usage.weekly.percent),
-        resetsAt: DateTime.formatIso(body.usage.weekly.resetsAt),
-      },
-      {
-        id: "go_monthly",
-        kind: "monthly",
-        label: "Go · Monthly",
-        usedPercent: clampPercent(body.usage.monthly.percent),
-        resetsAt: DateTime.formatIso(body.usage.monthly.resetsAt),
-      },
-    ];
-    const digest = yield* Digest.Digest;
-    // Unkeyed hashes match across environments; random Go keys resist offline guessing.
-    const credentialFingerprint = yield* digest
-      .digest(Digest.sha256, new TextEncoder().encode(`opencode-go\0${apiKey}`))
-      .pipe(Effect.map(Hex.encode), Effect.orDie);
-    return {
-      ...makeUsageLimits({ checkedAt, windows }),
-      credentialFingerprint,
-    };
-  }).pipe(
+  }
+
+  return yield* readZenGoUsageLimits({ checkedAt, environment: input.environment }).pipe(
     Effect.timeout("5 seconds"),
     Effect.orElseSucceed(() =>
       makeUnavailableUsageLimits({

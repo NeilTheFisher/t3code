@@ -33,7 +33,6 @@ import type {
   RuntimeRequestId,
   ScopedThreadRef,
   ServerProvider,
-  ServerProviderUsageLimits,
   ThreadId,
 } from "@t3tools/contracts";
 import {
@@ -1004,14 +1003,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeThreadModelSelection,
     modelOptionsByInstance,
   );
-  // Provider subscription usage shown inside the context-window popover.
-  const activeProviderUsageLimits = settings.showProviderUsageInContextPopover
-    ? providerStatuses.find(
-        (provider) =>
-          provider.instanceId ===
-          (activeThread?.runtime?.providerInstanceId ?? activeThreadModelSelection?.instanceId),
-      )?.usageLimits
-    : undefined;
   const reserveContextWindowMeter = shouldReserveContextWindowMeter({
     meterEnabled: settings.contextWindowMeterEnabled,
     detailLoading: props.threadSyncPhase === "loading",
@@ -3574,7 +3565,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     }
                     reserveContextWindowMeter={reserveContextWindowMeter}
                     activeThreadModelDisplayName={activeThreadModelDisplayName}
-                    activeProviderUsageLimits={activeProviderUsageLimits}
                     pendingAction={pendingPrimaryAction}
                     isRunning={phase === "running"}
                     canInterrupt={canInterrupt}
