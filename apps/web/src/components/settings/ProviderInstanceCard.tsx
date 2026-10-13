@@ -31,7 +31,6 @@ import {
   type ServerProvider,
   type ServerProviderModel,
 } from "@t3tools/contracts";
-import type { TimestampFormat } from "@t3tools/contracts/settings";
 
 import {
   type CustomModelDefinition,
@@ -78,7 +77,6 @@ import {
   settleCustomModelSave,
 } from "./customModelSaves.logic";
 import { getProviderRestartNotice } from "../ProviderUpdateLaunchNotification.logic";
-import { ProviderUsageRows, ProviderUsageSummary } from "../providerUsage/ProviderUsageRows";
 import {
   getProviderVersionAdvisoryPresentation,
   PROVIDER_STATUS_STYLES,
@@ -679,7 +677,6 @@ interface ProviderInstanceCardProps {
   readonly instance: ProviderInstanceConfig;
   readonly driverOption: ProviderClientDefinition | undefined;
   readonly liveProvider: ServerProvider | undefined;
-  readonly timestampFormat?: TimestampFormat | undefined;
   readonly mode: "list" | "editor";
   readonly selected?: boolean | undefined;
   readonly onSelect?: (() => void) | undefined;
@@ -754,7 +751,6 @@ export function ProviderInstanceCard({
   instance,
   driverOption,
   liveProvider,
-  timestampFormat,
   mode,
   selected = false,
   onSelect,
@@ -789,12 +785,6 @@ export function ProviderInstanceCard({
   const summary = enabled
     ? getProviderSummary(effectiveProvider)
     : { headline: "Disabled", detail: null };
-  // Subscription usage windows from the instance snapshot. An `unavailable`
-  // probe or a disabled instance has no bars worth showing.
-  const usageLimits =
-    enabled && liveProvider?.usageLimits && liveProvider.usageLimits.windows.length > 0
-      ? liveProvider.usageLimits
-      : undefined;
   const authEmail = liveProvider?.auth.email?.trim();
   const isAuthenticated = enabled && liveProvider?.auth.status === "authenticated";
   const authLabel =
@@ -1188,11 +1178,6 @@ export function ProviderInstanceCard({
                 </span>
               </ProviderStatusDiagnostic>
             </span>
-            {usageLimits ? (
-              <span className="mt-0.5 block min-w-0">
-                <ProviderUsageSummary usageLimits={usageLimits} />
-              </span>
-            ) : null}
           </span>
         </div>
         <span className="pointer-events-none relative flex h-5 shrink-0 items-center gap-1 *:pointer-events-auto">
@@ -1354,17 +1339,6 @@ export function ProviderInstanceCard({
           }
         />
       </SettingsSection>
-
-      {usageLimits ? (
-        <SettingsSection title="Provider limits">
-          <div className="px-3 py-3 sm:px-4">
-            <ProviderUsageRows
-              usageLimits={usageLimits}
-              timestampFormat={timestampFormat ?? "locale"}
-            />
-          </div>
-        </SettingsSection>
-      ) : null}
 
       {setup || environmentFields.length > 0 ? (
         <SettingsSection title="Setup">
