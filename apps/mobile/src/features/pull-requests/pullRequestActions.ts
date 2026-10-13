@@ -137,5 +137,92 @@ export function mergeUnavailableReason(
   return null;
 }
 
+export function mergeSummary(
+  pr: ActionDetail & Pick<PullRequestDetail, "autoMergeMethod">,
+  connectionAllowsWrites: boolean,
+  terminology: ChangeRequestTerminology,
+) {
+  if (pr.state === "merged") return "Merged";
+  if (pr.state === "closed") return "Closed";
+  if (pr.isDraft) return "Draft";
+  if (pr.mergeability === "conflicting") return "Has conflicts";
+  if (!connectionAllowsWrites) return "Read-only connection";
+  const allowed = allowedMergeMethods(pr);
+  const method = pr.autoMergeMethod ?? (allowed.includes("squash") ? "squash" : allowed[0]);
+  const methodLabel = method ? `${method[0]?.toUpperCase()}${method.slice(1)}` : "Merge";
+  if (pr.autoMergeEnabled) return `${methodLabel} · auto-merge on`;
+  if (mergeUnavailableReason(pr, connectionAllowsWrites, terminology)) return "Unavailable";
+  return `${methodLabel}${pr.autoMergeEnabled === false ? " · auto-merge off" : ""}`;
+}
+
+export interface ChangeRequestLabels {
+  readonly merge: string;
+  readonly mergeConfirm: string;
+  readonly close: string;
+  readonly closeBody: string;
+  readonly reopen: string;
+  readonly revert: string;
+  readonly updateBranch: string;
+  readonly explain: string;
+  readonly watch: string;
+}
+
+const DEFAULT_CHANGE_REQUEST_LABELS: ChangeRequestLabels = {
+  merge: PR_ACTION_LABELS.merge,
+  mergeConfirm: "Merge pull request?",
+  close: PR_ACTION_LABELS.close,
+  closeBody: "Close this pull request without merging its changes?",
+  reopen: PR_ACTION_LABELS.reopen,
+  revert: PR_ACTION_LABELS.revert,
+  updateBranch: PR_ACTION_LABELS["update-branch"],
+  explain: "Explain this PR",
+  watch: "Watch PR",
+};
+
+/** Gerrit submits, abandons and restores a change rather than merging, closing and reopening one. */
+const GERRIT_CHANGE_REQUEST_LABELS: ChangeRequestLabels = {
+  merge: "Submit change",
+  mergeConfirm: "Submit change?",
+  close: "Abandon change",
+  closeBody: "Abandon this change without submitting it?",
+  reopen: "Restore change",
+  revert: "Revert change",
+  updateBranch: "Rebase",
+  explain: "Explain this CR",
+  watch: "Watch CR",
+};
+
+/** The copy a host's change-request actions wear, where the generic GitHub wording would mislead. */
+export function changeRequestLabels(provider: string | null | undefined): ChangeRequestLabels {
+  return provider === "gerrit" ? GERRIT_CHANGE_REQUEST_LABELS : DEFAULT_CHANGE_REQUEST_LABELS;
+}
+
+/** The verb a host uses for an action, as a menu item or confirm dialog names it. */
+export function changeRequestActionTitle(
+  provider: string | null | undefined,
+  action: PullRequestAction,
+): string {
+  const labels = changeRequestLabels(provider);
+  switch (action) {
+    case "merge":
+      return labels.merge;
+    case "close":
+      return labels.close;
+    case "reopen":
+      return labels.reopen;
+    case "update-branch":
+      return labels.updateBranch;
+    case "revert":
+      return labels.revert;
+    default:
+      return PR_ACTION_LABELS[action];
+  }
+}
+
+/** Gerrit ships no client definition, so its host name is not in the registry. */
+export function changeRequestHostLabel(provider: string | null | undefined): string {
+  return provider === "gerrit" ? "Gerrit" : sourceControlClients.get(provider).label;
+}
+
 export const openOnProviderLabel = (provider: SourceControlProviderKind) =>
-  `Open on ${sourceControlClients.get(provider).label}`;
+  `Open on ${changeRequestHostLabel(provider)}`;
