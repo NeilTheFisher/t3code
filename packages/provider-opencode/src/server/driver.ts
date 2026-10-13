@@ -380,8 +380,6 @@ export const OpenCodeDriver: ProviderDriver<
           usageLimits: readOpenCodeGoUsageLimits({
             enabled: effectiveConfig.enabled,
             serverUrl: effectiveConfig.serverUrl,
-            workspaceId: effectiveConfig.goWorkspaceId,
-            authCookie: effectiveConfig.goAuthCookie,
             environment: processEnv,
           }),
         },

@@ -2,12 +2,16 @@ import * as NodeAssert from "node:assert/strict";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
+import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
+import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as TestClock from "effect/testing/TestClock";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
@@ -39,19 +43,52 @@ const DEFAULT_VERSION_STDOUT = "opencode 1.14.19\n";
 const TEST_OPENCODE_HOME = "/__t3code_open_code_provider_test_home__";
 const testEnvironment = { ...process.env, OPENCODE_HOME: TEST_OPENCODE_HOME };
 
+/**
+ * Seeds the `account`/`account_state` tables the OpenCode CLI's `console
+ * login` writes, so the console-credential reader can run without the real
+ * CLI database.
+ */
+const seedConsoleCredentialDatabase = (
+  directory: string,
+  credential: { readonly accessToken: string; readonly workspaceId: string },
+) =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    yield* fileSystem.makeDirectory(path.join(directory, "opencode"), { recursive: true });
+    const databasePath = path.join(directory, "opencode", "opencode.db");
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        const context = yield* Layer.build(NodeSqliteClient.layer({ filename: databasePath }));
+        const db = Context.get(context, SqlClient.SqlClient);
+        yield* db.unsafe("CREATE TABLE account (id TEXT, access_token TEXT)");
+        yield* db.unsafe(
+          "CREATE TABLE account_state (id INTEGER, active_account_id TEXT, active_org_id TEXT)",
+        );
+        yield* db.unsafe("INSERT INTO account (id, access_token) VALUES (?, ?)", [
+          credential.workspaceId,
+          credential.accessToken,
+        ]);
+        yield* db.unsafe(
+          "INSERT INTO account_state (id, active_account_id, active_org_id) VALUES (1, ?, ?)",
+          [credential.workspaceId, credential.workspaceId],
+        );
+      }),
+    );
+  });
+
 it.effect("reads Go limits with the instance's XDG credentials and preserves reset times", () =>
   Effect.gen(function* () {
     const resetsAt = "2026-09-17T12:00:00.000Z";
     const limits = yield* readOpenCodeGoUsageLimits({
       enabled: true,
       serverUrl: "",
-      workspaceId: "",
-      authCookie: "",
       environment: { XDG_DATA_HOME: "/instance/data", OPENCODE_API_KEY: "env-key" },
     }).pipe(
       Effect.provideService(
         FileSystem.FileSystem,
         FileSystem.makeNoop({
+          exists: () => Effect.succeed(false),
           readFileString: (path) => {
             NodeAssert.equal(path, "/instance/data/opencode/auth.json");
             return Effect.succeed(
@@ -110,13 +147,12 @@ it.effect("does not read local credentials for external or disabled OpenCode ins
     ]) {
       const limits = yield* readOpenCodeGoUsageLimits({
         ...settings,
-        workspaceId: "",
-        authCookie: "",
         environment: {},
       }).pipe(
         Effect.provideService(
           FileSystem.FileSystem,
           FileSystem.makeNoop({
+            exists: () => Effect.die("unexpected credential read"),
             readFileString: () => Effect.die("unexpected credential read"),
           }),
         ),
@@ -141,8 +177,6 @@ it.effect("keeps Go entitlement absence distinct from failed or malformed usage 
       const limits = yield* readOpenCodeGoUsageLimits({
         enabled: true,
         serverUrl: "",
-        workspaceId: "",
-        authCookie: "",
         environment: {
           OPENCODE_AUTH_CONTENT: '{"opencode-go":{"type":"api","key":"inline-key"}}',
         },
@@ -150,6 +184,7 @@ it.effect("keeps Go entitlement absence distinct from failed or malformed usage 
         Effect.provideService(
           FileSystem.FileSystem,
           FileSystem.makeNoop({
+            exists: () => Effect.succeed(false),
             readFileString: () => Effect.die("inline credentials must bypass disk"),
           }),
         ),
@@ -170,26 +205,27 @@ it.effect("keeps Go entitlement absence distinct from failed or malformed usage 
 
 it.effect("reads Go limits from the workspace console meters and derives percents", () =>
   Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const directory = yield* fileSystem.makeTempDirectoryScoped({
+      prefix: "opencode-console-usage-",
+    });
+    yield* seedConsoleCredentialDatabase(directory, {
+      accessToken: "console-token",
+      workspaceId: "wrk_test",
+    });
     const resetsAt = "2026-11-04T16:14:52.000Z";
     const limits = yield* readOpenCodeGoUsageLimits({
       enabled: true,
-      serverUrl: "http://127.0.0.1:4096",
-      workspaceId: "wrk_test",
-      authCookie: "session-cookie",
-      environment: {},
+      serverUrl: "",
+      environment: { XDG_DATA_HOME: directory },
     }).pipe(
-      Effect.provideService(
-        FileSystem.FileSystem,
-        FileSystem.makeNoop({
-          readFileString: () => Effect.die("console reads must not touch disk"),
-        }),
-      ),
       Effect.provideService(
         HttpClient.HttpClient,
         HttpClient.make((request) => {
           NodeAssert.equal(request.url, "https://opencode.ai/console/api/go/status");
           NodeAssert.equal(request.headers["x-org-id"], "wrk_test");
-          NodeAssert.equal(request.headers["cookie"], "auth=session-cookie");
+          NodeAssert.equal(request.headers.authorization, "Bearer console-token");
           return Effect.succeed(
             HttpClientResponse.fromWeb(
               request,
@@ -218,7 +254,6 @@ it.effect("reads Go limits from the workspace console meters and derives percent
           );
         }),
       ),
-      Effect.provide(NodeServices.layer),
     );
     NodeAssert.equal(limits.unavailable, undefined);
     NodeAssert.deepEqual(
@@ -233,48 +268,50 @@ it.effect("reads Go limits from the workspace console meters and derives percent
         { label: "Go · Monthly", kind: "monthly", usedPercent: 27 },
       ],
     );
-  }),
+  }).pipe(Effect.provide(NodeServices.layer)),
 );
 
-it.effect("maps console entitlement absence and expired cookies onto unsupported/probeFailed", () =>
-  Effect.gen(function* () {
-    const cases = [
-      { status: 403, body: {}, reason: "unsupported" },
-      { status: 401, body: {}, reason: "probeFailed" },
-      { status: 200, body: {}, reason: "unsupported" },
-      { status: 200, body: { access: { meters: {} } }, reason: "probeFailed" },
-    ] as const;
-    for (const testCase of cases) {
-      const limits = yield* readOpenCodeGoUsageLimits({
-        enabled: true,
-        serverUrl: "",
+it.effect(
+  "maps console entitlement absence and expired credentials onto unsupported/probeFailed",
+  () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const directory = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "opencode-console-errors-",
+      });
+      yield* seedConsoleCredentialDatabase(directory, {
+        accessToken: "console-token",
         workspaceId: "wrk_test",
-        authCookie: "cookie",
-        environment: {},
-      }).pipe(
-        Effect.provideService(
-          FileSystem.FileSystem,
-          FileSystem.makeNoop({
-            readFileString: () => Effect.die("console reads must not touch disk"),
-          }),
-        ),
-        Effect.provideService(
-          HttpClient.HttpClient,
-          HttpClient.make((request) =>
-            Effect.succeed(
-              HttpClientResponse.fromWeb(
-                request,
-                Response.json(testCase.body, { status: testCase.status }),
+      });
+      const cases = [
+        { status: 403, body: {}, reason: "unsupported" },
+        { status: 401, body: {}, reason: "probeFailed" },
+        { status: 200, body: {}, reason: "unsupported" },
+        { status: 200, body: { access: { meters: {} } }, reason: "probeFailed" },
+      ] as const;
+      for (const testCase of cases) {
+        const limits = yield* readOpenCodeGoUsageLimits({
+          enabled: true,
+          serverUrl: "",
+          environment: { XDG_DATA_HOME: directory },
+        }).pipe(
+          Effect.provideService(
+            HttpClient.HttpClient,
+            HttpClient.make((request) =>
+              Effect.succeed(
+                HttpClientResponse.fromWeb(
+                  request,
+                  Response.json(testCase.body, { status: testCase.status }),
+                ),
               ),
             ),
           ),
-        ),
-        Effect.provide(NodeServices.layer),
-      );
-      NodeAssert.equal(limits.unavailable?.reason, testCase.reason);
-      NodeAssert.deepEqual(limits.windows, []);
-    }
-  }),
+        );
+        NodeAssert.equal(limits.unavailable?.reason, testCase.reason);
+        NodeAssert.deepEqual(limits.windows, []);
+      }
+    }).pipe(Effect.provide(NodeServices.layer)),
 );
 
 /**
