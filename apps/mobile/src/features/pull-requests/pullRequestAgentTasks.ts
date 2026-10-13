@@ -1,4 +1,5 @@
 import type { PullRequestDetail, PullRequestLinkedThreadsResult } from "@t3tools/contracts";
+import { changeRequestLabels } from "./pullRequestActions";
 
 export type PullRequestAgentTask = "ask" | "explain" | "feedback" | "conflicts" | "watch";
 
@@ -28,6 +29,7 @@ export function pullRequestAgentPrompt(task: PullRequestAgentTask): string {
 }
 
 export function pullRequestAgentActions(pr: PullRequestDetail, canWatch: boolean) {
+  const labels = changeRequestLabels(pr.provider);
   return [
     {
       task: "ask",
@@ -35,7 +37,7 @@ export function pullRequestAgentActions(pr: PullRequestDetail, canWatch: boolean
       icon: "bubble.left.and.text.bubble.right",
       disabled: false,
     },
-    { task: "explain", title: "Explain this PR", icon: "book", disabled: false },
+    { task: "explain", title: labels.explain, icon: "book", disabled: false },
     {
       task: "feedback",
       title: "Address feedback",
@@ -48,7 +50,7 @@ export function pullRequestAgentActions(pr: PullRequestDetail, canWatch: boolean
       icon: "arrow.triangle.branch",
       disabled: pr.state !== "open" || pr.mergeability !== "conflicting",
     },
-    { task: "watch", title: "Watch PR", icon: "eye", disabled: pr.state !== "open" || !canWatch },
+    { task: "watch", title: labels.watch, icon: "eye", disabled: pr.state !== "open" || !canWatch },
   ] as const;
 }
 

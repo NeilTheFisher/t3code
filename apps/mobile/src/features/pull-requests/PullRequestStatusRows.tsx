@@ -14,7 +14,12 @@ import { PullRequestCardRow } from "./PullRequestControls";
 import { PullRequestAgentRow } from "./PullRequestAgentRow";
 import { composerPullRequests } from "../../state/pull-requests";
 import { useEnvironmentQuery } from "../../state/query";
-import { allowedUpdateMethods, PR_ACTION_ICONS, PR_ACTION_LABELS } from "./pullRequestActions";
+import {
+  allowedUpdateMethods,
+  changeRequestActionTitle,
+  changeRequestLabels,
+  PR_ACTION_ICONS,
+} from "./pullRequestActions";
 import {
   checkStatus,
   pullRequestBranchSummary,
@@ -46,6 +51,7 @@ const CHECK_PRIORITY = {
 
 export function PullRequestStatusMenu(props: RowProps) {
   const action = usePullRequestAction(props.params, props.pr);
+  const labels = changeRequestLabels(props.pr.provider);
   const actions = STATUS_ACTIONS.filter(action.available);
   const status = pullRequestStatus(props.pr);
   const trigger = (
@@ -68,23 +74,18 @@ export function PullRequestStatusMenu(props: RowProps) {
       title="Pull request status"
       actions={actions.map((id) => ({
         id,
-        title: PR_ACTION_LABELS[id],
+        title: changeRequestActionTitle(props.pr.provider, id),
         image: PR_ACTION_ICONS[id],
         attributes: { destructive: id === "close" },
       }))}
       onPressAction={({ nativeEvent }) => {
         const selected = actions.find((id) => id === nativeEvent.event);
         if (!selected) return;
-        if (selected === "close")
-          action.confirm(
-            selected,
-            "Close pull request",
-            "Close this pull request without merging its changes?",
-          );
+        if (selected === "close") action.confirm(selected, labels.close, labels.closeBody);
         else if (selected === "revert")
           action.confirm(
             selected,
-            "Create revert pull request",
+            labels.revert,
             "Open a new pull request that reverses these changes?",
           );
         else void action.perform(selected);
@@ -213,7 +214,14 @@ export function PullRequestBranchRow(props: RowProps) {
       title="Branch"
       actions={[
         ...(canResolve ? [agent.menuAction("conflicts")] : []),
-        ...methods.map((id) => ({ id, title: `Update with ${id}`, image: "arrow.up.circle" })),
+        ...methods.map((id) => ({
+          id,
+          title:
+            props.pr.provider === "gerrit"
+              ? changeRequestLabels(props.pr.provider).updateBranch
+              : `Update with ${id}`,
+          image: "arrow.up.circle",
+        })),
       ]}
       onPressAction={({ nativeEvent }) => {
         const method = methods.find((id) => id === nativeEvent.event);
