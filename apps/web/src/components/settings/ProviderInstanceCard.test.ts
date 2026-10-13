@@ -158,9 +158,9 @@ describe("deriveProviderModelsForDisplay", () => {
     }
   });
 
-  it("shows provider usage limits in the list row and the editor", () => {
-    const instanceId = ProviderInstanceId.make("claude");
-    const driver = ProviderDriverKind.make("claude");
+  it("keeps provider usage out of the settings card even when the snapshot has limits", () => {
+    const instanceId = ProviderInstanceId.make("opencode");
+    const driver = ProviderDriverKind.make("opencode");
     const liveProvider: ServerProvider = {
       instanceId,
       driver,
@@ -176,8 +176,8 @@ describe("deriveProviderModelsForDisplay", () => {
       usageLimits: {
         checkedAt: "2026-09-08T12:00:00.000Z",
         windows: [
-          { id: "session", kind: "session", label: "Session", usedPercent: 30 },
-          { id: "weekly-fable", kind: "weekly", label: "Weekly (Fable)", usedPercent: 26 },
+          { id: "go_rolling", kind: "session", label: "Go · Session", usedPercent: 30 },
+          { id: "go_weekly", kind: "weekly", label: "Go · Weekly", usedPercent: 26 },
         ],
       },
     };
@@ -186,7 +186,6 @@ describe("deriveProviderModelsForDisplay", () => {
       instance: { driver, enabled: true },
       driverOption: undefined,
       liveProvider,
-      timestampFormat: "24-hour" as const,
       onUpdate: () => undefined,
       hiddenModels: [],
       favoriteModels: [],
@@ -197,75 +196,12 @@ describe("deriveProviderModelsForDisplay", () => {
       onModelOrderChange: () => undefined,
     } as const;
 
-    const listMarkup = renderToStaticMarkup(
-      createElement(ProviderInstanceCard, { ...props, mode: "list" }),
-    );
-    expect(listMarkup).toContain("Session");
-    expect(listMarkup).toContain("70%");
-    expect(listMarkup).toContain("Weekly (Fable)");
-
-    const editorMarkup = renderToStaticMarkup(
-      createElement(ProviderInstanceCard, { ...props, mode: "editor" }),
-    );
-    expect(editorMarkup).toContain("Provider limits");
-    expect(editorMarkup).toContain("70% remaining");
-    expect(editorMarkup).toContain("Weekly (Fable)");
-  });
-
-  it("hides provider usage limits without a snapshot or on a disabled instance", () => {
-    const instanceId = ProviderInstanceId.make("claude");
-    const driver = ProviderDriverKind.make("claude");
-    const withLimits: ServerProvider = {
-      instanceId,
-      driver,
-      enabled: true,
-      installed: true,
-      version: null,
-      status: "ready",
-      auth: { status: "unknown" },
-      checkedAt: "2026-09-08T12:00:00.000Z",
-      models: [],
-      slashCommands: [],
-      skills: [],
-      usageLimits: {
-        checkedAt: "2026-09-08T12:00:00.000Z",
-        windows: [{ id: "session", kind: "session", label: "Session", usedPercent: 30 }],
-      },
-    };
-    const baseProps = {
-      instanceId,
-      driverOption: undefined,
-      timestampFormat: "24-hour" as const,
-      onUpdate: () => undefined,
-      hiddenModels: [],
-      favoriteModels: [],
-      modelOrder: [],
-      onHiddenModelsChange: () => undefined,
-      onFavoriteModelsChange: () => undefined,
-      onToggleFavorite: () => undefined,
-      onModelOrderChange: () => undefined,
-    } as const;
-
-    const noSnapshot = renderToStaticMarkup(
-      createElement(ProviderInstanceCard, {
-        ...baseProps,
-        instance: { driver, enabled: true },
-        liveProvider: undefined,
-        mode: "editor",
-      }),
-    );
-    expect(noSnapshot).not.toContain("Provider limits");
-
-    const disabled = renderToStaticMarkup(
-      createElement(ProviderInstanceCard, {
-        ...baseProps,
-        instance: { driver, enabled: false },
-        liveProvider: withLimits,
-        mode: "editor",
-      }),
-    );
-    expect(disabled).not.toContain("Provider limits");
-    expect(disabled).not.toContain("Session");
+    for (const mode of ["list", "editor"] as const) {
+      const markup = renderToStaticMarkup(createElement(ProviderInstanceCard, { ...props, mode }));
+      expect(markup).not.toContain("Provider limits");
+      expect(markup).not.toContain("Go · Session");
+      expect(markup).not.toContain("Go · Weekly");
+    }
   });
 });
 
