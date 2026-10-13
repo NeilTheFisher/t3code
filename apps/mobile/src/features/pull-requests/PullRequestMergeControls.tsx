@@ -17,6 +17,7 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import {
   allowedMergeMethods,
   canPerformPullRequestAction,
+  changeRequestLabels,
   mergeUnavailableReason,
   MERGE_CONFLICT_REASON,
   MERGE_METHODS,
@@ -77,11 +78,16 @@ export function PullRequestMergeControls(props: {
           : "Checking stack membership…"
         : null);
   const canMerge = !busy && method !== undefined && !reason;
-  const label = method
-    ? scope && scope.layers.length > 1
-      ? `${MERGE_METHODS[method].title} stack (${scope.layers.length})`
-      : MERGE_METHODS[method].title
-    : "Merge unavailable";
+  const labels = changeRequestLabels(pr.provider);
+  // Gerrit submits rather than merging by a strategy, and only offers the one stand-in method.
+  const label =
+    pr.provider === "gerrit"
+      ? labels.merge
+      : method
+        ? scope && scope.layers.length > 1
+          ? `${MERGE_METHODS[method].title} stack (${scope.layers.length})`
+          : MERGE_METHODS[method].title
+        : "Merge unavailable";
   const autoAction = pr.autoMergeEnabled ? "disable-auto-merge" : "enable-auto-merge";
   const canAutoMerge =
     !busy &&
@@ -142,20 +148,24 @@ export function PullRequestMergeControls(props: {
   const confirm = (action: "merge" | "enable-auto-merge" | "disable-auto-merge") => {
     const title =
       action === "merge"
-        ? scope && scope.layers.length > 1
-          ? `Merge ${scope.layers.length} stack layers?`
-          : "Merge pull request?"
+        ? pr.provider === "gerrit"
+          ? labels.mergeConfirm
+          : scope && scope.layers.length > 1
+            ? `Merge ${scope.layers.length} stack layers?`
+            : "Merge pull request?"
         : action === "enable-auto-merge"
           ? "Enable auto-merge?"
           : "Disable auto-merge?";
     const message =
-      action === "merge" && scope
-        ? `Merge ${scope.layers.map((layer) => `#${layer.number}`).join(" → ")} into ${stack.stack?.base} using ${method}. Layers above #${pr.number} stay open.`
-        : action === "enable-auto-merge"
-          ? `Merge #${pr.number} using ${method} when its requirements are met. This may happen immediately.`
-          : action === "disable-auto-merge"
-            ? "Stop the provider from automatically merging this pull request."
-            : `Merge #${pr.number} into ${pr.baseBranch} using ${method}.`;
+      action === "merge" && pr.provider === "gerrit"
+        ? `Submit change #${pr.number} to ${pr.baseBranch}.`
+        : action === "merge" && scope
+          ? `Merge ${scope.layers.map((layer) => `#${layer.number}`).join(" → ")} into ${stack.stack?.base} using ${method}. Layers above #${pr.number} stay open.`
+          : action === "enable-auto-merge"
+            ? `Merge #${pr.number} using ${method} when its requirements are met. This may happen immediately.`
+            : action === "disable-auto-merge"
+              ? "Stop the provider from automatically merging this pull request."
+              : `Merge #${pr.number} into ${pr.baseBranch} using ${method}.`;
     Dialog.alert(title, message, [
       { text: "Cancel", style: "cancel" },
       {

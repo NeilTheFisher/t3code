@@ -15,8 +15,8 @@ import { composerPullRequests } from "../../state/pull-requests";
 import { useAtomCommand } from "../../state/use-atom-command";
 import {
   canPerformPullRequestAction,
+  changeRequestActionTitle,
   openOnProviderLabel,
-  PR_ACTION_LABELS,
 } from "./pullRequestActions";
 import { scopedPullRequestListKey, type EnvironmentPullRequestListEntry } from "./pullRequestList";
 import { copyPullRequestLink, sharePullRequestLink } from "./pullRequestLink";
@@ -135,10 +135,11 @@ export function usePullRequestListActions(
       (value) => value === action,
     );
     if (!supported) return;
-    Dialog.alert(`${PR_ACTION_LABELS[supported]}?`, `#${entry.number} · ${entry.title}`, [
+    const title = changeRequestActionTitle(entry.provider, supported);
+    Dialog.alert(`${title}?`, `#${entry.number} · ${entry.title}`, [
       { text: "Cancel", style: "cancel" },
       {
-        text: PR_ACTION_LABELS[supported],
+        text: title,
         style: supported === "close" ? "destructive" : "default",
         onPress: () => void perform(entry, supported),
       },
@@ -173,7 +174,7 @@ export function usePullRequestListActions(
         ? [
             {
               id: "reopen",
-              title: "Reopen pull request",
+              title: changeRequestActionTitle(entry.provider, "reopen"),
               image: Platform.OS === "ios" ? "arrow.clockwise" : "refresh",
             },
           ]
