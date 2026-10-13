@@ -40,7 +40,6 @@ import type {
   RuntimeRequestId,
   ScopedThreadRef,
   ServerProvider,
-  ServerProviderUsageLimits,
   ThreadId,
   SnapShotSource,
 } from "@t3tools/contracts";
@@ -1357,7 +1356,6 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   activeContextWindow: ContextWindowSnapshot | null;
   reserveContextWindowMeter: boolean;
   activeThreadModelDisplayName: string | null;
-  activeProviderUsageLimits?: ServerProviderUsageLimits | undefined;
   isPreparingWorktree: boolean;
   pendingAction: {
     questionIndex: number;
@@ -1399,7 +1397,6 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
         <ContextWindowMeter
           usage={props.activeContextWindow}
           modelDisplayName={props.activeThreadModelDisplayName}
-          providerUsageLimits={props.activeProviderUsageLimits}
           onCompact={props.onCompactContext}
           compactDisabled={props.compactDisabled}
           compactDisabledReason={props.compactDisabledReason}
@@ -2427,14 +2424,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeThreadModelSelection,
     modelOptionsByInstance,
   );
-  // Provider subscription usage shown inside the context-window popover.
-  const activeProviderUsageLimits = settings.showProviderUsageInContextPopover
-    ? providerStatuses.find(
-        (provider) =>
-          provider.instanceId ===
-          (activeThread?.runtime?.providerInstanceId ?? activeThreadModelSelection?.instanceId),
-      )?.usageLimits
-    : undefined;
   const reserveContextWindowMeter = shouldReserveContextWindowMeter({
     meterEnabled: settings.contextWindowMeterEnabled,
     detailLoading: props.threadSyncPhase === "loading",
@@ -7402,7 +7391,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     }
                     reserveContextWindowMeter={reserveContextWindowMeter}
                     activeThreadModelDisplayName={activeThreadModelDisplayName}
-                    activeProviderUsageLimits={activeProviderUsageLimits}
                     pendingAction={pendingPrimaryAction}
                     isRunning={phase === "running"}
                     canInterrupt={canInterrupt}

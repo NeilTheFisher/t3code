@@ -9,6 +9,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as Hex from "effect/encoding/Hex";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
@@ -19,6 +20,7 @@ import {
   makeUnavailableUsageLimits,
   makeUsageLimits,
 } from "@t3tools/provider-core/server/usageLimits";
+import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 
 const AuthFile = Schema.Struct({ "opencode-go": Schema.optionalKey(Schema.Unknown) });
 const ApiAuth = Schema.Struct({ type: Schema.Literal("api"), key: Schema.String });
@@ -123,24 +125,21 @@ function consoleGoWindows(response: typeof GoStatusResponse.Type): ServerProvide
 
 /**
  * The workspace dashboard's JSON meters, the source the console itself reads.
- * An `x-org-id` header selects the workspace; the `auth` cookie authenticates
- * it. The cookie is bound to the workspace, so a 403 means no Go subscription
- * and a 401 means the cookie has expired.
+ * An `x-org-id` header selects the workspace and the account's OAuth access
+ * token authenticates it; a 403 means no Go subscription and a 401 means the
+ * token has expired.
  */
 const readConsoleGoUsageLimits = Effect.fn("readConsoleGoUsageLimits")(function* (input: {
   readonly checkedAt: string;
   readonly workspaceId: string;
-  readonly authCookie: string;
+  readonly accessToken: string;
 }) {
   const client = yield* HttpClient.HttpClient;
   const response = yield* client.execute(
     HttpClientRequest.get("https://opencode.ai/console/api/go/status").pipe(
       HttpClientRequest.setHeader("accept", "application/json"),
       HttpClientRequest.setHeader("x-org-id", input.workspaceId),
-      HttpClientRequest.setHeader(
-        "cookie",
-        input.authCookie.includes("auth=") ? input.authCookie : `auth=${input.authCookie}`,
-      ),
+      HttpClientRequest.bearerToken(input.accessToken),
       HttpClientRequest.setHeader("user-agent", "T3-Code"),
     ),
   );
@@ -254,26 +253,77 @@ const readZenGoUsageLimits = Effect.fn("readZenGoUsageLimits")(function* (input:
   };
 });
 
+interface ConsoleCredential {
+  readonly workspaceId: string;
+  readonly accessToken: string;
+}
+
 /**
- * OpenCode Go subscription usage. The workspace dashboard credentials are T3
- * settings, so they apply to external servers too; the Zen API-key path below
- * reads the host account and is skipped for external servers.
+ * The console dashboard credential the OpenCode CLI stores when the user runs
+ * `opencode console login`. The CLI keeps the OAuth access token fresh, so
+ * this is sturdier than a manually pasted browser cookie. Both the account and
+ * its active workspace live in the CLI's SQLite database next to `auth.json`.
+ */
+const readConsoleCredential = Effect.fn("readConsoleCredential")(function* (
+  environment: NodeJS.ProcessEnv,
+) {
+  return yield* Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const dataHome =
+      environment.XDG_DATA_HOME?.trim() ||
+      path.join(environment.HOME || environment.USERPROFILE || NodeOS.homedir(), ".local", "share");
+    const databasePath = path.join(dataHome, "opencode", "opencode.db");
+    if (!(yield* fs.exists(databasePath))) return Option.none<ConsoleCredential>();
+
+    const rows = yield* Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      // The CLI may hold the writer; fail promptly instead of waiting on it.
+      yield* sql.unsafe("PRAGMA busy_timeout = 100");
+      return yield* sql.unsafe<{ access_token: unknown; active_org_id: unknown }>(
+        `SELECT a.access_token AS access_token, s.active_org_id AS active_org_id
+         FROM account_state s
+         JOIN account a ON a.id = s.active_account_id
+         LIMIT 1`,
+      );
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: databasePath, readonly: true })));
+
+    const row = rows[0];
+    const workspaceId = typeof row?.active_org_id === "string" ? row.active_org_id.trim() : "";
+    const accessToken = typeof row?.access_token === "string" ? row.access_token.trim() : "";
+    if (!workspaceId || !accessToken) return Option.none<ConsoleCredential>();
+    return Option.some({ workspaceId, accessToken });
+  }).pipe(
+    // A missing, locked, or schema-shifted CLI database must not fail the
+    // provider probe; it just means no console credential is available.
+    Effect.catch(() => Effect.succeed(Option.none<ConsoleCredential>())),
+  );
+});
+
+/**
+ * OpenCode Go subscription usage. The console credential comes from the
+ * OpenCode CLI's `console login`; the Zen API-key path is a legacy fallback
+ * for host accounts without a console login. External servers own their
+ * credentials, so neither host path applies to them.
  */
 export const readOpenCodeGoUsageLimits = Effect.fn("readOpenCodeGoUsageLimits")(function* (input: {
   readonly enabled: boolean;
   readonly serverUrl: string;
-  readonly workspaceId: string;
-  readonly authCookie: string;
   readonly environment: NodeJS.ProcessEnv;
 }) {
   const checkedAt = DateTime.formatIso(yield* DateTime.now);
   const unsupported = makeUnavailableUsageLimits({ checkedAt, reason: "unsupported" });
   if (!input.enabled) return unsupported;
 
-  const workspaceId = input.workspaceId.trim();
-  const authCookie = input.authCookie.trim();
-  if (workspaceId && authCookie) {
-    return yield* readConsoleGoUsageLimits({ checkedAt, workspaceId, authCookie }).pipe(
+  if (input.serverUrl.trim()) return unsupported;
+
+  const credential = yield* readConsoleCredential(input.environment);
+  if (Option.isSome(credential)) {
+    return yield* readConsoleGoUsageLimits({
+      checkedAt,
+      workspaceId: credential.value.workspaceId,
+      accessToken: credential.value.accessToken,
+    }).pipe(
       Effect.timeout("5 seconds"),
       Effect.orElseSucceed(() =>
         makeUnavailableUsageLimits({
@@ -284,8 +334,6 @@ export const readOpenCodeGoUsageLimits = Effect.fn("readOpenCodeGoUsageLimits")(
       ),
     );
   }
-
-  if (input.serverUrl.trim()) return unsupported;
 
   return yield* readZenGoUsageLimits({ checkedAt, environment: input.environment }).pipe(
     Effect.timeout("5 seconds"),
