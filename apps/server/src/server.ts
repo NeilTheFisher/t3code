@@ -216,6 +216,7 @@ import { acceptsPrivateNetworkConnection, loopbackUrlHostForAddress } from "./st
 import * as VoiceSessionService from "./voice/VoiceSessionService.ts";
 import * as OrchestrationHttp from "./orchestration-v2/http.ts";
 import * as ProjectHttp from "./project/http.ts";
+import * as TtsHttp from "./voice/http.ts";
 import * as NetService from "@t3tools/shared/Net";
 import * as RelayClient from "@t3tools/shared/relayClient";
 import {
@@ -794,11 +795,15 @@ const layerMakeRoutes = Layer.mergeAll(
       Layer.provide(PullRequestHttp.layer),
       Layer.provide(ProjectHttp.layer),
       Layer.provide(speechHttpApiLayer),
+
+      Layer.provide(TtsHttp.layer),
       Layer.provide(ServerHttp.layerServerEnvironmentHttpApi),
       Layer.provide(WebhookRoute.layer.pipe(Layer.provide(RelayDeliveryProof.layer))),
       Layer.provide(AuthHttp.layerAuthenticatedAuth),
     ),
     ServerHttp.layerOtlpTracesProxyRoute,
+    ServerHttp.layerTtsSpeechRoute,
+    ServerHttp.layerTtsVoicesRoute,
     ServerHttp.layerAssetRoute,
     ServerHttp.layerAttachmentUploadRoute,
     GuestHttp.layer,

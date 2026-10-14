@@ -66,6 +66,7 @@ import type { ToolCallVisibility } from "@t3tools/contracts/settings";
 import { resolveT3McpToolDefinition } from "@t3tools/shared/t3McpToolPresentation";
 import { compactDynamicToolOutput } from "@t3tools/shared/toolOutput";
 import { htmlRenderReferencesEqual, type HtmlRenderReference } from "@t3tools/shared/htmlRender";
+import type { SpeakReference } from "@t3tools/shared/speak";
 import { mcpAppReferencesEqual, type McpAppReference } from "@t3tools/shared/mcpApp";
 import { dynamicToolTitle } from "@t3tools/shared/toolActivity";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";
@@ -642,6 +643,12 @@ type MessagesTimelineRowContent =
       itemId: TurnItemId;
       revision: string;
       mcpApp: McpAppReference;
+    }
+  | {
+      kind: "spoken";
+      id: string;
+      createdAt: string;
+      speak: SpeakReference;
     };
 
 export interface StableMessagesTimelineRowsState {
@@ -2157,6 +2164,16 @@ export function deriveMessagesTimelineRows(input: {
       continue;
     }
 
+    if (timelineEntry.kind === "spoken") {
+      nextRows.push({
+        kind: "spoken",
+        id: timelineEntry.id,
+        createdAt: timelineEntry.createdAt,
+        speak: timelineEntry.speak,
+      });
+      continue;
+    }
+
     if (timelineEntry.kind === "event") {
       const previous = nextRows.at(-1);
       if (
@@ -2651,6 +2668,16 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.createdAt === bm.createdAt &&
         a.revision === bm.revision &&
         mcpAppReferencesEqual(a.mcpApp, bm.mcpApp)
+      );
+    }
+
+    case "spoken": {
+      const bs = b as typeof a;
+      return (
+        a.createdAt === bs.createdAt &&
+        a.speak.text === bs.speak.text &&
+        a.speak.speed === bs.speak.speed &&
+        a.speak.interrupt === bs.speak.interrupt
       );
     }
 
