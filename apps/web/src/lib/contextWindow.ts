@@ -63,7 +63,12 @@ export function deriveLatestContextWindowSnapshot(
   liveUsage?: OrchestrationV2ProviderTurnTokenUsage | null,
   providerThread?: Pick<OrchestrationV2ProviderThread, "contextUsage" | "updatedAt"> | null,
 ): ContextWindowSnapshot | null {
-  if (liveUsage != null) {
+  const compactionUsage = latestCompactionUsage(entries);
+  if (
+    liveUsage != null &&
+    (compactionUsage === null ||
+      Date.parse(liveUsage.updatedAt) >= Date.parse(compactionUsage.updatedAt))
+  ) {
     const usedTokens = Math.max(0, liveUsage.usedTokens);
     const maxTokens = liveUsage.maxTokens ?? null;
     const usedPercentage =
@@ -130,31 +135,16 @@ export function deriveLatestContextWindowSnapshot(
       updatedAt: DateTime.formatIso(providerUsageUpdatedAt),
     };
   }
-  for (let index = entries.length - 1; index >= 0; index -= 1) {
-    const entry = entries[index];
-    if (!entry || entry.item.type !== "compaction") {
-      continue;
-    }
-    const payload = entry.item;
-    const usedTokens = asFiniteNumber(payload.afterTokenCount);
-    if (usedTokens === null || usedTokens < 0) {
-      continue;
-    }
-
-    const maxTokens = null;
-    const usedPercentage =
-      maxTokens !== null && maxTokens > 0 ? Math.min(100, (usedTokens / maxTokens) * 100) : null;
-    const remainingTokens =
-      maxTokens !== null ? Math.max(0, Math.round(maxTokens - usedTokens)) : null;
-    const remainingPercentage = usedPercentage !== null ? Math.max(0, 100 - usedPercentage) : null;
-
+  if (compactionUsage !== null) {
+    const usedTokens = compactionUsage.usedTokens;
+    // Compaction items carry no model window, so only the token count shows.
     return {
       usedTokens,
-      totalProcessedTokens: asFiniteNumber(payload.beforeTokenCount),
-      maxTokens,
-      remainingTokens,
-      usedPercentage,
-      remainingPercentage,
+      totalProcessedTokens: compactionUsage.beforeTokenCount,
+      maxTokens: null,
+      remainingTokens: null,
+      usedPercentage: null,
+      remainingPercentage: null,
       inputTokens: null,
       cachedInputTokens: null,
       outputTokens: null,
@@ -169,10 +159,41 @@ export function deriveLatestContextWindowSnapshot(
       compactsAutomatically: true,
       autoCompactThreshold: null,
       cost: null,
-      updatedAt: DateTime.formatIso(payload.startedAt ?? payload.updatedAt),
+      updatedAt: compactionUsage.updatedAt,
     };
   }
 
+  return null;
+}
+
+/**
+ * The newest compaction item that reports the context left behind, if any.
+ * Providers that compact without a post count (OpenCode) leave `afterTokenCount`
+ * unset, so they contribute nothing here.
+ */
+function latestCompactionUsage(
+  entries: ReadonlyArray<{ readonly item: OrchestrationV2TurnItem }>,
+): {
+  readonly usedTokens: number;
+  readonly beforeTokenCount: number | null;
+  readonly updatedAt: string;
+} | null {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (!entry || entry.item.type !== "compaction") {
+      continue;
+    }
+    const payload = entry.item;
+    const usedTokens = asFiniteNumber(payload.afterTokenCount);
+    if (usedTokens === null || usedTokens < 0) {
+      continue;
+    }
+    return {
+      usedTokens,
+      beforeTokenCount: asFiniteNumber(payload.beforeTokenCount),
+      updatedAt: DateTime.formatIso(payload.startedAt ?? payload.updatedAt),
+    };
+  }
   return null;
 }
 
