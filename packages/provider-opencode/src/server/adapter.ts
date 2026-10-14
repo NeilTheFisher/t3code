@@ -252,15 +252,68 @@ function makeOpenCodeTurnTokenUsageAccumulator(): OpenCodeTurnTokenUsageAccumula
 function accumulateOpenCodeStepUsage(
   accumulator: OpenCodeTurnTokenUsageAccumulator,
   part: OpenCodeStepUsage,
-): void {
-  if (accumulator.partIds.has(part.id)) return;
+  trackContext = true,
+): boolean {
+  if (accumulator.partIds.has(part.id)) return false;
   accumulator.partIds.add(part.id);
   accumulator.inputTokens += part.tokens.input + part.tokens.cache.read + part.tokens.cache.write;
   accumulator.cachedInputTokens += part.tokens.cache.read;
   accumulator.cacheCreationTokens += part.tokens.cache.write;
   accumulator.outputTokens += part.tokens.output + part.tokens.reasoning;
   accumulator.reasoningTokens += part.tokens.reasoning;
+  if (!trackContext) return false;
   accumulator.lastStepTokens = part.tokens;
+  return true;
+}
+
+/** The tokens one step's report counts as the current context size. */
+function openCodeStepUsedTokens(tokens: OpenCodeStepUsage["tokens"]): number {
+  return tokens.input + tokens.cache.read + tokens.cache.write + tokens.output;
+}
+
+/**
+ * Live context usage for the composer meter (#8144). The v1 OpenCode SDK
+ * reports only per-turn totals, so mirror the v2 adapter's input+output split.
+ * The model's context window is unknown here, so the meter falls back to the
+ * used-token count when maxTokens is null.
+ */
+function openCodeLiveTokenUsage(tokens: OpenCodeStepUsage["tokens"], updatedAt: string) {
+  return {
+    usedTokens: openCodeStepUsedTokens(tokens),
+    maxTokens: null,
+    inputTokens: tokens.input + tokens.cache.read + tokens.cache.write,
+    cachedInputTokens: tokens.cache.read,
+    outputTokens: tokens.output,
+    reasoningOutputTokens: tokens.reasoning,
+    updatedAt,
+  };
+}
+
+/** The turn's reported totals, which only the end of a turn publishes. */
+function openCodeTurnTokenUsage(
+  usage: OpenCodeTurnTokenUsageAccumulator,
+  status: OrchestrationV2ProviderTurn["status"],
+): NonNullable<OrchestrationV2ProviderTurn["turnTokenUsage"]> {
+  if (usage.partIds.size === 0) {
+    return {
+      usageScope: "main_agent",
+      usageStatus: "unavailable",
+      hasSubagents: usage.hasSubagents,
+    };
+  }
+  return {
+    usageScope: "main_agent",
+    usageStatus:
+      status === "completed" && usage.complete && usage.unresolvedStepsByMessageId.size === 0
+        ? "complete"
+        : "partial",
+    inputTokens: usage.inputTokens,
+    cachedInputTokens: usage.cachedInputTokens,
+    cacheCreationTokens: usage.cacheCreationTokens,
+    outputTokens: usage.outputTokens,
+    reasoningTokens: usage.reasoningTokens,
+    hasSubagents: usage.hasSubagents,
+  };
 }
 
 interface ActiveOpenCodeTurn {
@@ -382,6 +435,12 @@ interface OpenCodeThreadState {
   readonly runtimeRequests: Map<string, OrchestrationV2RuntimeRequest>;
   readonly messageRoles: Map<string, "user" | "assistant">;
   readonly userMessageIds: Array<string>;
+  /**
+   * Assistant messages OpenCode marks `summary`: a compaction's own call. Its
+   * tokens are the conversation it read, not the context left behind, so they
+   * must not become the live context size the meter shows.
+   */
+  readonly summaryMessageIds: Set<string>;
   parentSubagent: OpenCodeSubagentContext | null;
   nextChildTurnOrdinal: number;
   nextAdmissionGeneration: number;
@@ -1130,7 +1189,14 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
           turn: ActiveOpenCodeTurn,
           status: OrchestrationV2ProviderTurn["status"],
           completedAt: DateTime.Utc | null,
+          liveUsageAt: DateTime.Utc | null = null,
         ) => {
+          const usageUpdatedAt = liveUsageAt ?? completedAt;
+          const lastStepTokens = turn.usage.lastStepTokens;
+          const tokenUsage =
+            usageUpdatedAt !== null && lastStepTokens !== undefined && turn.usage.partIds.size > 0
+              ? openCodeLiveTokenUsage(lastStepTokens, DateTime.formatIso(usageUpdatedAt))
+              : undefined;
           const providerTurn: OrchestrationV2ProviderTurn = {
             ...turn.providerTurn,
             nativeTurnRef:
@@ -1139,57 +1205,10 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
                 : providerRef(turn.nativeUserMessageId, "weak"),
             status,
             completedAt,
+            ...(tokenUsage === undefined ? {} : { tokenUsage }),
             ...(completedAt === null
               ? {}
-              : {
-                  // Live context usage for the composer meter (#8144). The
-                  // v1 OpenCode SDK reports only per-turn totals, so mirror
-                  // the v2 adapter's input+output split here. The model's
-                  // context window is not known to this adapter, so the meter
-                  // falls back to its used-token count when maxTokens is null.
-                  ...(turn.usage.partIds.size === 0 || turn.usage.lastStepTokens === undefined
-                    ? {}
-                    : {
-                        tokenUsage: {
-                          usedTokens:
-                            turn.usage.lastStepTokens.input +
-                            turn.usage.lastStepTokens.cache.read +
-                            turn.usage.lastStepTokens.cache.write +
-                            turn.usage.lastStepTokens.output,
-                          maxTokens: null,
-                          inputTokens:
-                            turn.usage.lastStepTokens.input +
-                            turn.usage.lastStepTokens.cache.read +
-                            turn.usage.lastStepTokens.cache.write,
-                          cachedInputTokens: turn.usage.lastStepTokens.cache.read,
-                          outputTokens: turn.usage.lastStepTokens.output,
-                          reasoningOutputTokens: turn.usage.lastStepTokens.reasoning,
-                          updatedAt: DateTime.formatIso(completedAt),
-                        },
-                      }),
-                  turnTokenUsage:
-                    turn.usage.partIds.size === 0
-                      ? {
-                          usageScope: "main_agent" as const,
-                          usageStatus: "unavailable" as const,
-                          hasSubagents: turn.usage.hasSubagents,
-                        }
-                      : {
-                          usageScope: "main_agent" as const,
-                          usageStatus:
-                            status === "completed" &&
-                            turn.usage.complete &&
-                            turn.usage.unresolvedStepsByMessageId.size === 0
-                              ? ("complete" as const)
-                              : ("partial" as const),
-                          inputTokens: turn.usage.inputTokens,
-                          cachedInputTokens: turn.usage.cachedInputTokens,
-                          cacheCreationTokens: turn.usage.cacheCreationTokens,
-                          outputTokens: turn.usage.outputTokens,
-                          reasoningTokens: turn.usage.reasoningTokens,
-                          hasSubagents: turn.usage.hasSubagents,
-                        },
-                }),
+              : { turnTokenUsage: openCodeTurnTokenUsage(turn.usage, status) }),
           };
           Object.assign(turn.providerTurn, providerTurn);
           state.providerTurns.set(String(providerTurn.id), providerTurn);
@@ -1200,6 +1219,18 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
             providerTurn,
           });
         };
+
+        /**
+         * Publishes the turn's live context size after a step, so the composer
+         * meter moves as the turn runs instead of only when it ends (#8144).
+         */
+        const emitLiveProviderTurn = Effect.fnUntraced(function* (
+          state: OpenCodeThreadState,
+          turn: ActiveOpenCodeTurn,
+        ) {
+          if (turn.usage.lastStepTokens === undefined) return;
+          yield* emitProviderTurn(state, turn, "running", null, yield* DateTime.now);
+        });
 
         const emitTextPart = Effect.fnUntraced(function* (
           state: OpenCodeThreadState,
@@ -1436,6 +1467,7 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
               runtimeRequests: new Map(),
               messageRoles: new Map(),
               userMessageIds: [],
+              summaryMessageIds: new Set(),
               parentSubagent: context,
               nextChildTurnOrdinal: 1,
               nextAdmissionGeneration: 1,
@@ -2399,6 +2431,12 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
               startedAt: turn.startedAt,
               completedAt: now,
               updatedAt: now,
+              // The context compaction replaced. OpenCode does not report the
+              // context it keeps afterward, so the meter drops on the next
+              // step's live usage instead.
+              ...(turn.usage.lastStepTokens === undefined
+                ? {}
+                : { beforeTokenCount: openCodeStepUsedTokens(turn.usage.lastStepTokens) }),
             },
           });
         });
@@ -2411,8 +2449,10 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
           const message = event.properties.info;
           state.messageRoles.set(message.id, message.role);
           if (message.role === "assistant") {
-            const usage = state.activeTurn?.usage;
-            if (usage === undefined) return;
+            const turn = state.activeTurn;
+            if (turn === null) return;
+            const usage = turn.usage;
+            if (message.summary === true) state.summaryMessageIds.add(message.id);
             const prior = usage.assistantOwnershipByMessageId.get(message.id);
             const ownership =
               prior !== undefined && prior !== "unknown"
@@ -2425,10 +2465,13 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
             usage.assistantOwnershipByMessageId.set(message.id, ownership);
             if (ownership !== "unknown") {
               if (ownership === "owned") {
+                const trackContext = !state.summaryMessageIds.has(message.id);
+                let changed = false;
                 for (const step of usage.unresolvedStepsByMessageId.get(message.id)?.values() ??
                   []) {
-                  accumulateOpenCodeStepUsage(usage, step);
+                  if (accumulateOpenCodeStepUsage(usage, step, trackContext)) changed = true;
                 }
+                if (changed) yield* emitLiveProviderTurn(state, turn);
               }
               usage.unresolvedStepsByMessageId.delete(message.id);
             }
@@ -2471,8 +2514,14 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
           if (part.type === "step-finish") {
             const usage = turn.usage;
             const ownership = usage.assistantOwnershipByMessageId.get(part.messageID);
-            if (ownership === "owned") accumulateOpenCodeStepUsage(usage, part);
-            else if (
+            if (ownership === "owned") {
+              const changed = accumulateOpenCodeStepUsage(
+                usage,
+                part,
+                !state.summaryMessageIds.has(part.messageID),
+              );
+              if (changed) yield* emitLiveProviderTurn(state, turn);
+            } else if (
               ownership === "unknown" ||
               (ownership === undefined && !state.messageRoles.has(part.messageID))
             ) {
@@ -2835,6 +2884,7 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
             runtimeRequests: new Map(),
             messageRoles: new Map(),
             userMessageIds: [],
+            summaryMessageIds: new Set(),
             parentSubagent,
             nextChildTurnOrdinal: 1,
             nextAdmissionGeneration: 1,

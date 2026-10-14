@@ -183,6 +183,26 @@ const OpenCode2ProviderCapabilities = {
 type EventOf<T extends OpenCodeEvent["type"]> = Extract<OpenCodeEvent, { readonly type: T }>;
 type Tokens = EventOf<"session.step.ended">["data"]["tokens"];
 
+/** The context size one step's tokens report, the same shape the meter reads. */
+const usedTokensOf = (tokens: Tokens): number =>
+  tokens.input + tokens.cache.read + tokens.cache.write + tokens.output;
+
+/**
+ * One step's tokens as the live context size (#8144). OpenCode reports each
+ * step's input as the whole conversation, so the latest step is the current
+ * context; a turn's cumulative totals would over-count it.
+ */
+const stepTokenUsage = (tokens: Tokens, maxTokens: number | null, updatedAt: string) => ({
+  usedTokens: usedTokensOf(tokens),
+  maxTokens,
+  inputTokens: tokens.input + tokens.cache.read + tokens.cache.write,
+  cachedInputTokens: tokens.cache.read,
+  outputTokens: tokens.output,
+  reasoningOutputTokens: tokens.reasoning,
+  updatedAt,
+});
+
+/** What a turn reports against: a run's own turn, or a subagent session's runless one. */
 interface TurnOwner {
   readonly appThread: OrchestrationV2AppThread;
   readonly threadId: OrchestrationV2AppThread["id"];
@@ -211,7 +231,18 @@ interface ActiveTurn {
   steps: number;
   lastStep: Tokens | undefined;
   before: string | null | undefined;
-  compaction: { readonly nativeId: string; readonly startedAt: DateTime.Utc } | undefined;
+  /**
+   * The compaction running in this turn, `/compact` or OpenCode's own when the
+   * context fills, and the step it followed so the item can report the context
+   * it replaced.
+   */
+  compaction:
+    | {
+        readonly nativeId: string;
+        readonly startedAt: DateTime.Utc;
+        beforeTokens: Tokens | undefined;
+      }
+    | undefined;
   compactions: number;
   retry:
     | {
@@ -996,6 +1027,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
       turn: ActiveTurn,
       status: "running" | "completed" | "failed" | "interrupted",
       summary?: string,
+      counts?: { readonly beforeTokenCount?: number; readonly afterTokenCount?: number },
     ) {
       const compaction = turn.compaction;
       if (compaction === undefined) return;
@@ -1026,6 +1058,12 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
                   ? "Compaction failed"
                   : "Compaction interrupted",
           ...(summary === undefined || summary.length === 0 ? {} : { summary }),
+          ...(counts?.beforeTokenCount === undefined
+            ? {}
+            : { beforeTokenCount: counts.beforeTokenCount }),
+          ...(counts?.afterTokenCount === undefined
+            ? {}
+            : { afterTokenCount: counts.afterTokenCount }),
         },
       });
       if (status !== "running") turn.compaction = undefined;
@@ -1096,6 +1134,22 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
         providerTurn,
       });
     };
+
+    /**
+     * Publishes the turn's live context size after a step, so the composer
+     * meter moves as the turn runs instead of only when it ends (#8144).
+     */
+    const emitLiveTurnUsage = Effect.fnUntraced(function* (state: ThreadState, turn: ActiveTurn) {
+      const tokens = turn.lastStep;
+      if (tokens === undefined) return;
+      const window = windowOf(turn.input.runtimePolicy.cwd, turn.input.modelSelection.model);
+      yield* emitProviderTurn(state, turn, {
+        ...turn.providerTurn,
+        status: "running",
+        completedAt: null,
+        tokenUsage: stepTokenUsage(tokens, window ?? null, DateTime.formatIso(yield* DateTime.now)),
+      });
+    });
 
     const makeTurn = (
       owner: TurnOwner,
@@ -1582,16 +1636,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
         ...(lastStep === undefined
           ? {}
           : {
-              tokenUsage: {
-                usedTokens:
-                  lastStep.input + lastStep.cache.read + lastStep.cache.write + lastStep.output,
-                maxTokens: window ?? null,
-                inputTokens: lastStep.input + lastStep.cache.read + lastStep.cache.write,
-                cachedInputTokens: lastStep.cache.read,
-                outputTokens: lastStep.output,
-                reasoningOutputTokens: lastStep.reasoning,
-                updatedAt: DateTime.formatIso(completedAt),
-              },
+              tokenUsage: stepTokenUsage(lastStep, window ?? null, DateTime.formatIso(completedAt)),
             }),
       });
       // Subagent turns are runless; their calls own settlement.
@@ -2094,10 +2139,29 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
           turn.compaction = {
             nativeId: `${turn.providerTurn.id}:compaction:${turn.compactions++}`,
             startedAt: yield* DateTime.now,
+            beforeTokens: turn.lastStep,
           };
           return yield* emitCompaction(state, turn, "running");
-        case "session.compaction.ended":
-          return yield* emitCompaction(state, turn, "completed", event.data.text);
+        case "session.compaction.ended": {
+          const beforeTokens = turn.compaction?.beforeTokens;
+          const endTokens = event.data.tokens;
+          const before = beforeTokens === undefined ? undefined : usedTokensOf(beforeTokens);
+          // OpenCode does not report the context it keeps after compacting, so
+          // only a compaction report below the context it replaced proves a
+          // drop; anything else is the summarizer's read, which the next step
+          // corrects.
+          const afterTokens =
+            before !== undefined && endTokens !== undefined && usedTokensOf(endTokens) <= before
+              ? endTokens
+              : undefined;
+          if (afterTokens !== undefined) turn.lastStep = afterTokens;
+          yield* emitCompaction(state, turn, "completed", event.data.text, {
+            ...(before === undefined ? {} : { beforeTokenCount: before }),
+            ...(afterTokens === undefined ? {} : { afterTokenCount: usedTokensOf(afterTokens) }),
+          });
+          if (afterTokens !== undefined) yield* emitLiveTurnUsage(state, turn);
+          return;
+        }
         case "session.compaction.failed":
           return yield* emitCompaction(state, turn, "failed");
         case "session.step.ended":
@@ -2111,6 +2175,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
           turn.usage.cacheWrite += tokens.cache.write;
           turn.usage.output += tokens.output + tokens.reasoning;
           turn.usage.reasoning += tokens.reasoning;
+          yield* emitLiveTurnUsage(state, turn);
           return;
         }
         case "session.retry.scheduled":
