@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { markdownToSpokenText } from "./markdownToSpokenText";
+import { markdownToSpokenText, toSpokenUnits } from "./markdownToSpokenText";
 
 describe("markdownToSpokenText", () => {
   it("strips heading markers and pauses after the heading", () => {
@@ -73,5 +73,44 @@ describe("markdownToSpokenText", () => {
 
   it("passes plain text through unchanged", () => {
     expect(markdownToSpokenText("Just a normal sentence.")).toBe("Just a normal sentence.");
+  });
+});
+
+describe("toSpokenUnits", () => {
+  it("makes each list item its own unit with its own pause", () => {
+    expect(toSpokenUnits("- one\n- two")).toEqual([
+      { text: "one", pauseAfter: 0.4 },
+      { text: "two", pauseAfter: 0.4 },
+    ]);
+  });
+
+  it("splits a paragraph into sentences, pausing only after the last", () => {
+    expect(toSpokenUnits("First. Second.")).toEqual([
+      { text: "First.", pauseAfter: 0 },
+      { text: "Second.", pauseAfter: 0.6 },
+    ]);
+  });
+
+  it("makes a heading its own unit with the heading pause", () => {
+    expect(toSpokenUnits("## Title\nBody.")).toEqual([
+      { text: "Title", pauseAfter: 0.8 },
+      { text: "Body.", pauseAfter: 0.6 },
+    ]);
+  });
+
+  it("attaches a standalone silence to the preceding unit", () => {
+    expect(toSpokenUnits("before\n```ts\nx\n```\nafter")).toEqual([
+      { text: "before", pauseAfter: 0.5 },
+      { text: "after", pauseAfter: 0.6 },
+    ]);
+  });
+
+  it("hard-wraps a sentence longer than the unit limit", () => {
+    const sentence = Array.from({ length: 40 }, () => "word").join(" ");
+    const units = toSpokenUnits(sentence);
+    expect(units.length).toBeGreaterThan(1);
+    expect(units.every((unit) => unit.text.length <= 160)).toBe(true);
+    expect(units.slice(0, -1).every((unit) => unit.pauseAfter === 0)).toBe(true);
+    expect(units[units.length - 1]!.pauseAfter).toBe(0.6);
   });
 });
