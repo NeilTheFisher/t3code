@@ -402,6 +402,87 @@ describe("OpenCodeAdapterV2", () => {
       ),
   );
 
+  it.effect("publishes live context usage per step and skips a compaction summary", () =>
+    Effect.gen(function* () {
+      const nativeEvents = asyncEventStream();
+      let promptId = "";
+      const harness = yield* makeOpenCodeRuntimeHarness("live-usage", "root", {
+        event: { subscribe: async () => ({ stream: nativeEvents.stream }) },
+        session: {
+          create: async () => ({ data: { id: "root", time: { created: 1, updated: 1 } } }),
+          promptAsync: async (input: { messageID: string }) => {
+            promptId = input.messageID;
+            return { data: true };
+          },
+          abort: async () => ({ data: true }),
+          children: async () => ({ data: [] }),
+        },
+      });
+      yield* harness.startTurn();
+      const received = yield* harness.runtime.events.pipe(
+        Stream.takeUntil((event) => event.type === "turn.terminal"),
+        Stream.runCollect,
+        Effect.forkScoped,
+      );
+      const push = (value: unknown) => Effect.promise(() => nativeEvents.push(value));
+      const step = (id: string, messageID: string, input: number) => ({
+        type: "message.part.updated",
+        properties: {
+          part: {
+            type: "step-finish",
+            id,
+            sessionID: "root",
+            messageID,
+            reason: "stop",
+            cost: 0,
+            tokens: { input, output: 5, reasoning: 0, cache: { read: 0, write: 0 } },
+          },
+        },
+      });
+      const assistant = (id: string, extra: Record<string, unknown> = {}) => ({
+        type: "message.updated",
+        properties: {
+          sessionID: "root",
+          info: { id, role: "assistant", time: { created: 1 }, parentID: promptId, ...extra },
+        },
+      });
+
+      yield* push({
+        type: "message.updated",
+        properties: {
+          sessionID: "root",
+          info: { id: promptId, role: "user", time: { created: 1 } },
+        },
+      });
+      yield* push(assistant("assistant"));
+      yield* push(step("one", "assistant", 1_000));
+      // A compaction's summary call reads the whole conversation, so its tokens
+      // are not the context left behind and must not reach the meter.
+      yield* push(assistant("summary", { summary: true }));
+      yield* push(step("summary-step", "summary", 9_000));
+      yield* push(step("two", "assistant", 2_000));
+      yield* push({
+        type: "session.status",
+        properties: { sessionID: "root", status: { type: "busy" } },
+      });
+      yield* push({
+        type: "session.status",
+        properties: { sessionID: "root", status: { type: "idle" } },
+      });
+
+      const events = yield* Fiber.join(received);
+      const liveUsage = events
+        .filter((event) => event.type === "provider_turn.updated")
+        .filter((event) => event.providerTurn.status === "running")
+        .map((event) => event.providerTurn.tokenUsage?.usedTokens)
+        .filter((used): used is number => used !== undefined);
+      assert.deepEqual(liveUsage, [1_005, 2_005]);
+    }).pipe(
+      Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer)),
+      Effect.scoped,
+    ),
+  );
+
   it.effect.each(["permission", "question"] as const)(
     "cancels an undelivered %s reply at its deadline",
     (kind) =>

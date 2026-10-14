@@ -110,3 +110,45 @@ describe("latestProviderTurnTokenUsage", () => {
     expect(latest?.usedTokens).toBe(300_000);
   });
 });
+
+describe("compaction item versus live usage ordering", () => {
+  const compactionEntry = (afterTokenCount: number, startedAt: string) => ({
+    item: {
+      id: "compaction-1" as never,
+      threadId: "thread-1" as never,
+      runId: null,
+      nodeId: null,
+      providerThreadId: null,
+      providerTurnId: null,
+      nativeItemRef: null,
+      parentItemId: null,
+      ordinal: 1,
+      status: "completed",
+      title: null,
+      startedAt: DateTime.makeUnsafe(startedAt),
+      completedAt: null,
+      updatedAt: DateTime.makeUnsafe(startedAt),
+      type: "compaction",
+      driver: null,
+      beforeTokenCount: 100_000,
+      afterTokenCount,
+    },
+  });
+
+  it("prefers a compaction item newer than the live report", () => {
+    const snapshot = deriveLatestContextWindowSnapshot(
+      [compactionEntry(30_000, "2026-08-27T00:00:05.000Z")],
+      { usedTokens: 90_000, maxTokens: 200_000, updatedAt: "2026-08-27T00:00:00.000Z" },
+    );
+    expect(snapshot?.usedTokens).toBe(30_000);
+    expect(snapshot?.totalProcessedTokens).toBe(100_000);
+  });
+
+  it("keeps a live report newer than the compaction item", () => {
+    const snapshot = deriveLatestContextWindowSnapshot(
+      [compactionEntry(30_000, "2026-08-27T00:00:00.000Z")],
+      { usedTokens: 12_000, maxTokens: 200_000, updatedAt: "2026-08-27T00:00:05.000Z" },
+    );
+    expect(snapshot?.usedTokens).toBe(12_000);
+  });
+});
