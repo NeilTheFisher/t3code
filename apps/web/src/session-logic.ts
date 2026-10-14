@@ -27,9 +27,14 @@ import {
   formatSearchToolLabel,
 } from "@t3tools/shared/toolActivity";
 import type { HtmlRenderReference } from "@t3tools/shared/htmlRender";
+import type { SpeakReference } from "@t3tools/shared/speak";
 import { turnItemDetailRevision } from "@t3tools/client-runtime/work-log/item-detail";
 import type { McpAppReference } from "@t3tools/shared/mcpApp";
-import { htmlRenderFromToolItem, mcpAppFromToolItem } from "@t3tools/shared/toolOutput";
+import {
+  htmlRenderFromToolItem,
+  mcpAppFromToolItem,
+  speakFromToolItem,
+} from "@t3tools/shared/toolOutput";
 import {
   contextCompactionLabel,
   workEntryIndicatesToolFailure,
@@ -159,6 +164,15 @@ export type TimelineEntry = (
       readonly htmlRender: HtmlRenderReference;
     }
   | {
+      /** An utterance a completed `t3_speak` call asked for, shown where the call happened. */
+      readonly id: string;
+      readonly kind: "spoken";
+      readonly createdAt: string;
+      readonly runId: RunId | null;
+      readonly speak: SpeakReference;
+    }
+  | {
+      /** An MCP App a completed tool call captured, hosted where the call happened. */
       readonly id: string;
       readonly kind: "mcp-app";
       readonly createdAt: string;
@@ -779,6 +793,22 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
         createdAt,
         runId: item.runId,
         htmlRender,
+        ...attemptMetadata,
+      });
+      continue;
+    }
+
+    const speak =
+      item.type === "dynamic_tool" && item.status === "completed"
+        ? speakFromToolItem(item)
+        : undefined;
+    if (speak !== undefined) {
+      entries.push({
+        id: item.id,
+        kind: "spoken",
+        createdAt,
+        runId: item.runId,
+        speak,
         ...attemptMetadata,
       });
       continue;

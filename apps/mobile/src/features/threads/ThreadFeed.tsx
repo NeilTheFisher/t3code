@@ -148,6 +148,8 @@ import {
 } from "../../lib/videoPreviewSource";
 import { CopyTextButton } from "./CopyTextButton";
 import { Menu } from "../../components/ui/Menu";
+import { MessageTtsButton } from "./MessageTtsButton";
+import { markdownToSpokenText } from "../../lib/spokenText";
 import { copyPromptLink } from "../prompt-links/prompt-link-actions";
 import { parseReviewCommentMessageSegments } from "../review/reviewCommentSelection";
 import type { ReviewDiffTheme } from "../review/shikiReviewHighlighter";
@@ -1414,6 +1416,13 @@ function renderFeedEntry(
         })}
         {showAssistantMeta ? (
           <View className="mt-1 flex-row items-center gap-1">
+            <MessageTtsButton
+              messageId={message.id}
+              threadId={props.threadId}
+              environmentId={props.environmentId}
+              text={markdownToSpokenText(renderedText)}
+              tintColor={iconSubtleColor}
+            />
             <CopyTextButton
               accessibilityLabel="Copy message"
               text={renderedText}

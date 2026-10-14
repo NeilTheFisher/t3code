@@ -152,6 +152,7 @@ import { ComposerPopoverHost } from "./ComposerPopoverHost";
 import { ThreadFeed, type ThreadFeedHistoryControls } from "./ThreadFeed";
 import { useThreadTurnSubagents } from "./ThreadAgentsSheet";
 import { ComposerQueuedEditBanner } from "./ComposerQueuedEdit";
+import { ThreadTtsMiniPlayer } from "./ThreadTtsMiniPlayer";
 import { useThreadQueuedCount } from "./ThreadQueueControl";
 import type { ThreadContentPresentation } from "./threadContentPresentation";
 import { resolveThreadFeedSubmissionAnchor } from "./thread-feed-live-follow";
@@ -1357,6 +1358,18 @@ export const ThreadDetailScreen = function ThreadDetailScreen(props: ThreadDetai
                   ) : null}
                 </View>
 
+                {/* Narration for this thread, docked above the composer. */}
+                <View
+                  className="w-full self-center px-[12px]"
+                  style={{ maxWidth: contentMaxWidth }}
+                >
+                  <ThreadTtsMiniPlayer threadId={props.selectedThread.id} />
+                </View>
+
+                {/* Hidden (not unmounted) while a user-input request owns the
+                composer slot, so composer drafts and editor state survive.
+                A rejected creation has no thread to send to; the failure card
+                owns the slot instead. */}
                 <View style={composerSlotHidden ? { display: "none" } : undefined}>
                   {isProviderSubagent ? (
                     <View

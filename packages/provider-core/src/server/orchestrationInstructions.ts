@@ -42,6 +42,12 @@ When a chart, table, diagram, image collage, or mockup would say more than prose
 export const T3_CODE_ORCHESTRATION_INSTRUCTIONS = `
 
 ${T3_CODE_ORCHESTRATION_SECTIONS.join("\n\n")}
+
+When a chart, table, diagram, image collage, or mockup would say more than prose, build a self-contained HTML page, check it with \`html_preview\`, then publish it with \`html_render\` before your final reply. The reader sees the page above that reply, so don't announce or restate it; add only what it doesn't say.
+
+### Speaking aloud
+
+\`t3_speak\` says a short passage aloud through the reader's connected T3 Code clients' text-to-speech. Use it when the user asks to be spoken to (for example, "speak your answers out to me"), or when a short spoken summary or heads-up is more useful heard than read. Pass plain prose, not markdown, code, or lists. Only one utterance plays at a time: by default it queues behind whatever is speaking, so set \`interrupt\` only to correct something you already said. It plays only when the reader has text-to-speech enabled on a connected client.
 `;
 
 export const T3_CODE_BROWSER_TOOL_INSTRUCTIONS = `

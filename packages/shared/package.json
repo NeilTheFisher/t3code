@@ -131,6 +131,10 @@
       "types": "./src/htmlRender.ts",
       "import": "./src/htmlRender.ts"
     },
+    "./speak": {
+      "types": "./src/speak.ts",
+      "import": "./src/speak.ts"
+    },
     "./favicon": {
       "types": "./src/favicon.ts",
       "import": "./src/favicon.ts"

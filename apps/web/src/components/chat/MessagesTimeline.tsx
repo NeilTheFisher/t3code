@@ -26,7 +26,7 @@ import {
   ORCHESTRATION_V2_WORKSPACE_PREPARATION_FAILURE_CODE,
   type AssistantCitation,
   type EnvironmentId,
-  type MessageId,
+  MessageId,
   type OrchestrationV2TurnItem,
   type RunAttemptId,
   type ScopedThreadRef,
@@ -41,6 +41,7 @@ import {
   scopedThreadKey,
 } from "@t3tools/client-runtime/environment";
 import { useAudioPlayerStore } from "~/audioPlayerStore";
+import { stopPlayback, useTtsPlayer } from "~/hooks/useTtsPlayer";
 import { useAtomValue } from "@effect/atom-react";
 import { environmentThreadDetails } from "../../state/threads";
 import { resolveUserMessagePresentation } from "@t3tools/client-runtime/user-message";
@@ -161,6 +162,9 @@ import {
   XIcon,
   ZapIcon,
   RotateCcwIcon,
+  Volume2Icon,
+  PlayIcon,
+  SquareIcon,
 } from "lucide-react";
 import { ChevronDown, ChevronRight, Link as LinkIconNode } from "lucide";
 import type {
@@ -288,6 +292,7 @@ import { ContextChip, ContextChipLabel, type ContextChipKind } from "../ContextC
 import { createContextPresentationRegistry } from "../contextPresentationRegistry";
 import { useOpenPrLink } from "~/lib/openPullRequestLink";
 import { useClientSettings } from "~/hooks/useSettings";
+import { clearSpokenQueue, enqueueSpoken } from "~/spokenPlaybackQueue";
 import type { ChatMarkdownContextReference } from "../ChatMarkdown";
 import { useMediaQuery } from "~/hooks/useMediaQuery";
 import { cn } from "~/lib/utils";
@@ -2138,7 +2143,8 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
                 row.kind === "event" ||
                 row.kind === "attempt-fold" ||
                 row.kind === "html-render" ||
-                row.kind === "mcp-app"
+                row.kind === "mcp-app" ||
+                row.kind === "spoken"
               ? "pb-2"
               : "pb-4",
         (row.kind === "message" && row.message.role === "assistant") ||
@@ -2188,6 +2194,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       {row.kind === "proposed-plan" ? <ProposedPlanTimelineRow row={row} /> : null}
       {row.kind === "html-render" ? <HtmlRenderTimelineRow row={row} /> : null}
       {row.kind === "mcp-app" ? <McpAppTimelineRow row={row} /> : null}
+      {row.kind === "spoken" ? <SpokenTimelineRow row={row} /> : null}
       {row.kind === "working" ? <WorkingTimelineRow row={row} /> : null}
       {row.kind === "worktree-setup" ? <WorktreeSetupTimelineRow row={row} /> : null}
       {row.kind === "event" ? <V2EventTimelineRow row={row} /> : null}
@@ -3045,6 +3052,64 @@ function ProposedPlanTimelineRow({
         workspaceRoot={ctx.workspaceRoot}
         findActive={ctx.findActive}
       />
+    </div>
+  );
+}
+
+function SpokenTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "spoken" }> }) {
+  const { play } = useTtsPlayer();
+  const tts = useClientSettings((settings) => settings.tts);
+  const status = useAudioPlayerStore((state) => state.status);
+  const playingId = useAudioPlayerStore((state) => state.playingMessageId);
+  const [expanded, setExpanded] = useState(false);
+  const id = MessageId.make(`spoken:${row.id}`);
+  const isActive = status !== "idle" && playingId === id;
+
+  // Speak it once when it appears (gated on the Text-to-speech setting). The
+  // queue dedupes by entry id, so a re-mount never speaks it twice.
+  useEffect(() => {
+    if (!tts.enabled) return;
+    enqueueSpoken(
+      { id: row.id, text: row.speak.text },
+      { voice: tts.voice, serverUrl: tts.serverUrl, speed: row.speak.speed },
+      row.speak.interrupt === true,
+    );
+  }, [row.id, row.speak.text, row.speak.interrupt, tts.enabled, tts.voice, tts.serverUrl]);
+
+  return (
+    <div className="flex items-start gap-2 rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+      <Volume2Icon className="mt-0.5 size-3.5 shrink-0" />
+      {/* Click to expand the full utterance; the text stays selectable so it can
+          be cited like any assistant text (data-assistant-citation-source). No
+          `role="button"`: that is an excluded ancestor for citation selection. */}
+      <div
+        data-assistant-citation-source={id}
+        className={cn("min-w-0 flex-1 cursor-pointer text-left", !expanded && "truncate")}
+        onClick={() => {
+          // A drag-select is a citation, not a toggle.
+          if (window.getSelection()?.isCollapsed === false) return;
+          setExpanded((value) => !value);
+        }}
+      >
+        {row.speak.text}
+      </div>
+      <Button
+        aria-label={isActive ? "Stop playback" : "Play aloud"}
+        size="icon-xs"
+        variant="ghost"
+        onClick={() => {
+          if (isActive) {
+            stopPlayback();
+            return;
+          }
+          clearSpokenQueue();
+          void play(id, row.speak.text, null).catch(() => {
+            // Error surfaced via audioPlayerStore.
+          });
+        }}
+      >
+        {isActive ? <SquareIcon className="size-3.5" /> : <PlayIcon className="size-3.5" />}
+      </Button>
     </div>
   );
 }
