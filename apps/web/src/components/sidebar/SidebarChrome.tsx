@@ -28,6 +28,7 @@ import { isSidebarUtilityPage, useNavigateToMainApp } from "./mainAppLocation";
 import { SidebarThreadUndoNotice } from "./SidebarThreadUndoNotice";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUpdatePill";
+import { SidebarTtsPlayer } from "../chat/SidebarTtsPlayer";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 import { observeResize } from "~/lib/observeResize";
 
@@ -224,7 +225,13 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
         </>
       )}
       <SidebarThreadUndoNotice />
+      {/* One spacer owns the row's free space so the update pill and the narration
+          player stay in a single right-aligned cluster, whichever of them renders. */}
+      <SidebarMenuItem className="ml-auto shrink-0" />
       <SidebarUpdatePill />
+      <SidebarMenuItem className="hidden items-center md:flex">
+        <SidebarTtsPlayer />
+      </SidebarMenuItem>
     </SidebarMenu>
   );
 });

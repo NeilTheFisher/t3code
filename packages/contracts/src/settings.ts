@@ -324,7 +324,9 @@ export const LoadBalancingWeights = Schema.Record(
 );
 
 export const DiffColorScheme = Schema.Literals(["red-green", "blue-orange"]);
-export const DEFAULT_TTS_SERVER_URL = "http://127.0.0.1:8880";
+// Empty means "same origin": the server proxies to its local TTS service, so
+// web, desktop, mobile, and remote clients all synthesize through this server.
+export const DEFAULT_TTS_SERVER_URL = "";
 export const DEFAULT_TTS_VOICE = "af_heart";
 
 export const TtsClientSettings = Schema.Struct({

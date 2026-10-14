@@ -9,6 +9,7 @@ import { injectMcpAppCookieBootstrap, injectMcpAppThemeBootstrap } from "@t3tool
 import { decodeOtlpTraceRecords } from "@t3tools/shared/observability";
 import * as ByteSize from "effect/ByteSize";
 import * as Data from "effect/Data";
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -19,6 +20,7 @@ import * as Stream from "effect/Stream";
 import { cast, pipe } from "effect/Function";
 import {
   HttpClient,
+  HttpClientRequest,
   HttpClientResponse,
   HttpMiddleware,
   HttpRouter,
@@ -30,6 +32,7 @@ import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 import { OtlpTracer, OtlpSerialization } from "effect/observability";
 
 import * as ServerConfig from "./config.ts";
+import { ttsUpstreamPath } from "./voice/upstream.ts";
 import { ASSET_ROUTE_PREFIX, readMcpAppHtml, resolveAsset } from "./assets/AssetAccess.ts";
 import { sourceControlMediaResponse } from "./assets/sourceControlMediaResponse.ts";
 import { statMediaFile, streamMediaFile, type OpenMediaFile } from "./assets/MediaFile.ts";
@@ -382,6 +385,73 @@ export const layerOtlpTracesProxyRoute = HttpRouter.add(
       EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
     }),
     Effect.withTracerEnabled(false),
+  ),
+);
+
+const TTS_SPEECH_PATH = "/v1/audio/speech";
+
+// Proxies the OpenAI-compatible speech endpoint to the local TTS service so
+// every client (web, desktop, mobile, remote) synthesizes through this server's
+// own origin. Without it, remote and mobile clients would try the host's
+// loopback port, which only the host can reach.
+export const layerTtsSpeechRoute = HttpRouter.add(
+  "POST",
+  TTS_SPEECH_PATH,
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const httpClient = HttpClient.withScope(yield* HttpClient.HttpClient);
+    // The speech request is a small JSON body; forward it verbatim.
+    const body = yield* request.text;
+    const upstream = HttpClientRequest.make("POST")(ttsUpstreamPath(TTS_SPEECH_PATH)).pipe(
+      // Stream the audio straight through; never let an encoding layer buffer it.
+      HttpClientRequest.setHeaders({ "accept-encoding": "identity" }),
+      HttpClientRequest.bodyText(body, "application/json"),
+    );
+    const response = yield* httpClient.execute(upstream);
+    const contentType = response.headers["content-type"] ?? "audio/pcm";
+    return HttpServerResponse.stream(response.stream, {
+      status: response.status,
+      headers: {
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+      },
+      contentType,
+    });
+  }).pipe(
+    Effect.catchCause((cause) =>
+      Effect.succeed(
+        HttpServerResponse.text(`TTS proxy failed: ${Cause.pretty(cause)}`, { status: 502 }),
+      ),
+    ),
+  ),
+);
+
+const TTS_VOICES_PATH = "/v1/audio/voices";
+
+// Proxies the voice list so the settings panel can offer a dropdown instead of a
+// free-text field. The bundled service reports one voice; a multi-voice external
+// server reports all of them.
+export const layerTtsVoicesRoute = HttpRouter.add(
+  "GET",
+  TTS_VOICES_PATH,
+  Effect.gen(function* () {
+    const httpClient = HttpClient.withScope(yield* HttpClient.HttpClient);
+    const response = yield* httpClient.get(ttsUpstreamPath(TTS_VOICES_PATH));
+    const body = yield* response.text;
+    return HttpServerResponse.text(body, {
+      status: response.status,
+      contentType: "application/json",
+      headers: { "cache-control": "no-store" },
+    });
+  }).pipe(
+    Effect.catchCause(() =>
+      Effect.succeed(
+        HttpServerResponse.text('{"voices":[]}', {
+          status: 502,
+          contentType: "application/json",
+        }),
+      ),
+    ),
   ),
 );
 
