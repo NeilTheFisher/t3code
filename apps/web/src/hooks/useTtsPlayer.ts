@@ -10,11 +10,7 @@ import { useCallback } from "react";
 import { type MessageId, type ScopedThreadRef } from "@t3tools/contracts";
 import { useClientSettings } from "./useSettings";
 import { useAudioPlayerStore } from "~/audioPlayerStore";
-import {
-  markdownToSpokenText,
-  PARAGRAPH_PAUSE,
-  toSpokenParagraphs,
-} from "~/lib/markdownToSpokenText";
+import { markdownToSpokenText, toSpokenUnits } from "~/lib/markdownToSpokenText";
 import {
   convergeEstimatedDuration,
   estimateSpokenDuration,
@@ -25,6 +21,14 @@ import {
 import { streamSpeechChunks, TTS_PCM_SAMPLE_RATE } from "~/lib/ttsClient";
 
 const TITLE_MAX_CHARS = 80;
+
+/**
+ * How far ahead of the playback head synthesis may run. Keeping it close means
+ * a speed change lands on the paragraphs that are still unsynthesized, instead
+ * of a whole message already generated at the old speed.
+ */
+const SYNTHESIS_LOOKAHEAD_SECONDS = 5;
+const SYNTHESIS_LOOKAHEAD_POLL_MS = 200;
 
 /** Display excerpt of the synthesized text, prepared once at play time. */
 function excerptTitle(text: string): string {
@@ -74,17 +78,23 @@ interface EngineState {
   streamDone: boolean;
   /** Ctx time mapped to message-time 0. */
   baseTime: number;
+  /**
+   * Ctx time the next arriving chunk should play at. Chunks from a server that
+   * buffers a whole request arrive as a burst; without this they would all
+   * clamp to "now" and overlap. Kept in sync with `baseTime`.
+   */
+  nextStartTime: number;
   paused: boolean;
   /** Ctx time when playback was suspended, if paused. */
   pausedAt: number | null;
   rate: number;
-  /** Paragraph time spans [start, end) in message-time, by index. */
+  /** Spoken-unit time spans [start, end) in message-time, by index. */
   paragraphSpans: Array<{ start: number; end: number }>;
-  /** Character count of each spoken paragraph, for duration convergence. */
+  /** Character count of each spoken unit, for duration convergence. */
   spokenCharCounts: number[];
-  /** Characters whose synthesis has completed (paragraph granularity). */
+  /** Characters whose synthesis has completed (unit granularity). */
   synthesizedChars: number;
-  /** First paragraph index not yet fully synthesized. */
+  /** First spoken-unit index not yet fully synthesized. */
   nextParagraphIndex: number;
 }
 
@@ -96,6 +106,12 @@ let engine: EngineState | null = null;
 let progressHandle: number | null = null;
 /** Opening words of each spoken paragraph, for DOM highlight matching. */
 let paragraphCues: string[] = [];
+/**
+ * Set by `startPlayback` while a narration is active: applies a speed change by
+ * dropping the unplayed tail and re-synthesizing it at the new rate. Cleared on
+ * teardown, so it is null whenever the engine is idle.
+ */
+let applyRateChange: ((rate: number) => void) | null = null;
 
 /** Normalized text for cue matching: lowercase, whitespace collapsed. */
 function cueOf(paragraph: string): string {
@@ -162,6 +178,7 @@ function teardown(): void {
   stopSources();
   engine = null;
   paragraphCues = [];
+  applyRateChange = null;
   useAudioPlayerStore.getState().setActiveParagraph(null, null);
 }
 
@@ -269,6 +286,9 @@ function rescheduleAt(head: number): number {
     });
   }
 
+  // The next streamed chunk must land after everything already scheduled here.
+  e.nextStartTime = e.baseTime + e.scheduledDuration;
+
   const s = useAudioPlayerStore.getState();
   s.setProgress(target, e.duration);
   if (!e.paused && progressHandle === null) {
@@ -308,32 +328,59 @@ export function setPlaybackVolume(position: number): void {
 }
 
 /**
- * Change synthesis speed. The server synthesizes faster speech at the same
- * pitch, so the speed applies from the next paragraph request onward; the
- * current paragraph finishes at its synthesized speed. Mid-playback speed
- * changes therefore take effect within a few seconds, glitch-free.
+ * Change synthesis speed. Pitch is preserved because speed is synthesis-side,
+ * so a mid-playback change cannot ride on the already-generated audio: while a
+ * narration is active it drops the current unit and the unplayed tail and
+ * re-synthesizes them at the new rate (see `handleRateChange` in
+ * `startPlayback`).
  */
 export function setPlaybackRate(rate: number): void {
-  const e = engine;
-  if (e !== null) {
-    e.rate = rate;
-    // Re-estimate the total with the new speed so the scrub bar rescales.
-    const remaining = e.spokenCharCounts.slice(e.nextParagraphIndex).reduce((a, b) => a + b, 0);
-    e.duration = convergeEstimatedDuration({
-      scheduled: e.scheduledDuration,
-      spokenCharsSynthesized: e.synthesizedChars,
-      remainingChars: remaining,
-      fallbackCharsPerSecond: TTS_CHARS_PER_SECOND,
-      speed: rate,
-    });
-    useAudioPlayerStore.getState().setProgress(currentHead(), e.duration);
+  if (applyRateChange !== null) {
+    applyRateChange(rate);
+  } else if (engine !== null) {
+    // Nothing is playing: remember the rate for the next narration.
+    engine.rate = rate;
   }
   useAudioPlayerStore.getState().setRate(rate);
+}
+
+/** Normalized opening words of each spoken unit of the active narration. */
+export function getActiveParagraphCues(): readonly string[] {
+  return paragraphCues;
+}
+
+/** Whether spoken unit `index` of the active narration has seekable audio yet. */
+export function canSeekToParagraph(index: number): boolean {
+  return engine?.paragraphSpans[index] !== undefined;
+}
+
+/**
+ * Seek to the start of spoken unit `index` of the active narration. No-op for a
+ * unit whose audio has not been synthesized yet.
+ */
+export function seekToParagraph(index: number): void {
+  const span = engine?.paragraphSpans[index];
+  if (span === undefined) return;
+  seekPlayback(span.start);
 }
 
 export interface PlayOptions {
   voice: string;
   serverUrl: string;
+  /** Synthesis speed for this narration, overriding the shared slider. */
+  speed?: number | undefined;
+}
+
+/**
+ * Wait until the playback head is within the synthesis lookahead, so speed
+ * changes made during playback affect the paragraphs not yet synthesized.
+ * Returns immediately when already close (or at the very start).
+ */
+async function waitForSynthesisWindow(e: EngineState, signal: AbortSignal): Promise<void> {
+  while (!signal.aborted && engine === e) {
+    if (e.scheduledDuration - currentHead() <= SYNTHESIS_LOOKAHEAD_SECONDS) return;
+    await new Promise((resolve) => setTimeout(resolve, SYNTHESIS_LOOKAHEAD_POLL_MS));
+  }
 }
 
 export async function startPlayback(
@@ -348,19 +395,25 @@ export async function startPlayback(
     return;
   }
 
-  const paragraphs = toSpokenParagraphs(text);
+  const units = toSpokenUnits(text);
   const spoken = markdownToSpokenText(text);
-  if (spoken.length === 0) {
+  // Playback is driven by `units`, so a message that flattens to a non-empty
+  // string of nothing but pauses (a lone code block or rule) still has no unit
+  // to synthesize. Guard on `units` or the player would spin on "loading"
+  // forever with no chunk ever scheduled.
+  if (units.length === 0) {
     useAudioPlayerStore.getState().setError("Nothing to read aloud.", id);
     return;
   }
   // teardown() clears `paragraphCues`, so the new cues must be assigned after
   // it — assigning first left every cue null and suppressed all highlighting.
   teardown();
-  paragraphCues = paragraphs.map(cueOf);
+  paragraphCues = units.map((unit) => cueOf(unit.text));
   const controller = new AbortController();
   abortController = controller;
-  const { volume, rate } = store;
+  const { volume } = store;
+  // An agent utterance can carry its own speed; otherwise use the slider.
+  const rate = options.speed ?? store.rate;
   store.setLoading(id, excerptTitle(spoken), threadRef);
   setPlaybackVolume(volume);
 
@@ -369,9 +422,8 @@ export async function startPlayback(
     await ctx.resume();
   }
   // Estimated up front from text length so the scrub bar is stable while
-  // streaming; converges on the exact extent as paragraphs synthesize.
-  const spokenCharCounts = paragraphs.map((p) => p.length);
-  const totalChars = spokenCharCounts.reduce((a, b) => a + b, 0);
+  // streaming; converges on the exact extent as units synthesize.
+  const spokenCharCounts = units.map((unit) => unit.text.length);
   engine = {
     playingMessageId: id,
     chunks: [],
@@ -379,6 +431,7 @@ export async function startPlayback(
     duration: estimateSpokenDuration(spoken, rate),
     streamDone: false,
     baseTime: ctx.currentTime + 0.05,
+    nextStartTime: ctx.currentTime + 0.05,
     paused: false,
     pausedAt: null,
     rate,
@@ -403,31 +456,40 @@ export async function startPlayback(
     useAudioPlayerStore.getState().setProgress(currentHead(), e.duration);
   };
 
-  /** Schedule one PCM chunk for paragraph `paragraph` at the playback head. */
-  const scheduleArriving = (chunkPcm: ArrayBuffer, paragraph: number) => {
-    if (engine !== e) return;
+  /** Schedule one PCM chunk for spoken unit `unit` for worker `owner`. */
+  const scheduleArriving = (chunkPcm: ArrayBuffer, unit: number, owner: AbortController) => {
+    // A restarted worker can still deliver one last chunk after its abort;
+    // drop it so it cannot append old-speed audio behind the new timeline.
+    if (engine !== e || owner.signal.aborted) return;
     const buffer = pcmToAudioBuffer(ctx, chunkPcm);
     const at = e.scheduledDuration;
-    e.chunks.push({ buffer, at, paragraph });
+    e.chunks.push({ buffer, at, paragraph: unit });
 
-    const span = e.paragraphSpans[paragraph];
+    const span = e.paragraphSpans[unit];
     if (span === undefined) {
-      e.paragraphSpans[paragraph] = { start: at, end: at };
+      e.paragraphSpans[unit] = { start: at, end: at };
     }
     e.scheduledDuration += buffer.duration;
-    const cur = e.paragraphSpans[paragraph]!;
+    const cur = e.paragraphSpans[unit]!;
     cur.end = e.scheduledDuration;
 
+    // Chunks can arrive faster than they play (synthesis runs well ahead of
+    // realtime), so schedule each at its real-time slot but never before "now"
+    // or the previous chunk, then re-anchor the clock so later chunks keep that
+    // spacing instead of piling up at the same instant.
     const when = e.baseTime + at;
-    // After a seek to the live edge, `when` can land slightly in the
-    // past; clamp to now. Never hand start() a non-finite time.
-    const safeWhen = Number.isFinite(when) ? Math.max(ctx.currentTime, when) : ctx.currentTime;
-    if (!Number.isFinite(safeWhen)) return;
+    const now = ctx.currentTime;
+    let start = Number.isFinite(when) ? Math.max(when, now) : now;
+    if (start < e.nextStartTime) start = e.nextStartTime;
+    if (!Number.isFinite(start)) start = now;
+    if (start !== when && Number.isFinite(when)) e.baseTime = start - at;
+    e.nextStartTime = start + buffer.duration;
+
     const source = ctx.createBufferSource();
     source.buffer = buffer;
     source.connect(gain);
-    source.start(safeWhen);
-    scheduledSources.push({ source, startedAt: safeWhen, duration: buffer.duration });
+    source.start(start);
+    scheduledSources.push({ source, startedAt: start, duration: buffer.duration });
 
     const s = useAudioPlayerStore.getState();
     if (s.status === "loading" || s.status === "waking") {
@@ -436,55 +498,113 @@ export async function startPlayback(
     }
   };
 
-  // Synthesize paragraphs sequentially; one stream runs at a time, starting
-  // the next paragraph's request only after the previous audio is fully
-  // scheduled (the GPU outpaces realtime manyfold, so this still starts
-  // playing after only the first paragraph's latency). Speed is synthesis-
-  // side: the server generates faster speech at the same pitch.
-  try {
-    for (let index = 0; index < paragraphs.length; index++) {
-      const paragraphText =
-        index === paragraphs.length - 1
-          ? paragraphs[index]!
-          : `${paragraphs[index]!} [pause:${PARAGRAPH_PAUSE}s]`;
-      if (paragraphText.replace(/\[pause:[\d.]+s\]/g, "").trim().length === 0) continue;
-      const speedAtRequest = e.rate;
-      await streamSpeechChunks(
-        {
-          text: paragraphText,
-          voice: options.voice,
-          serverUrl: options.serverUrl,
-          speed: speedAtRequest,
-          signal: controller.signal,
-          onWakingUp: () => {
-            useAudioPlayerStore.getState().setWaking(id);
-          },
-        },
-        (chunkPcm) => scheduleArriving(chunkPcm, index),
-      );
-      if (engine !== e) return;
-      e.synthesizedChars += spokenCharCounts[index] ?? 0;
-      e.nextParagraphIndex = index + 1;
-      refreshEstimate();
+  /**
+   * Synthesize spoken units from `fromIndex` onward at the current rate, one
+   * request at a time. Units are sentence-sized, so each request returns its
+   * audio quickly and playback starts after the first one. Each call owns its
+   * AbortController, so a speed change can abort the running worker and start a
+   * fresh one without the old stream appending stale chunks. Synthesis stays
+   * just ahead of playback (see `waitForSynthesisWindow`).
+   */
+  const runSynthesis = (fromIndex: number, owner = new AbortController()): Promise<void> => {
+    abortController = owner;
+    return (async () => {
+      try {
+        for (let index = fromIndex; index < units.length; index++) {
+          // The first unit of a run synthesizes immediately (fast start); later
+          // ones wait until playback nears the synthesized edge, so a speed
+          // change only has to redo a short tail.
+          if (index > fromIndex) {
+            await waitForSynthesisWindow(e, owner.signal);
+            if (engine !== e || owner.signal.aborted) return;
+          }
+          const unit = units[index]!;
+          // The trailing pause is silence the server renders; drop it on the
+          // last unit so playback does not end on dead air.
+          const unitText =
+            index === units.length - 1
+              ? unit.text
+              : unit.pauseAfter > 0
+                ? `${unit.text} [pause:${unit.pauseAfter}s]`
+                : unit.text;
+          await streamSpeechChunks(
+            {
+              text: unitText,
+              voice: options.voice,
+              serverUrl: options.serverUrl,
+              speed: e.rate,
+              signal: owner.signal,
+              onWakingUp: () => {
+                useAudioPlayerStore.getState().setWaking(id);
+              },
+            },
+            (chunkPcm) => scheduleArriving(chunkPcm, index, owner),
+          );
+          if (engine !== e || owner.signal.aborted) return;
+          e.synthesizedChars += spokenCharCounts[index] ?? 0;
+          e.nextParagraphIndex = index + 1;
+          refreshEstimate();
+        }
+        if (engine !== e || owner.signal.aborted) return;
+        abortController = null; // all streams done; progress loop may now settle idle
+        // Snap the display duration to the exact synthesized extent.
+        e.streamDone = true;
+        e.duration = e.scheduledDuration;
+        useAudioPlayerStore.getState().setProgress(currentHead(), e.duration);
+      } catch (error) {
+        if (owner.signal.aborted) {
+          // Superseded by a restart or stop; that path owns the state now.
+          return;
+        }
+        abortController = null;
+        if (engine !== e) return;
+        const message = error instanceof Error ? error.message : "TTS request failed.";
+        useAudioPlayerStore.getState().setError(message, id);
+        teardown();
+        throw error;
+      }
+    })();
+  };
+
+  /**
+   * Apply a speed change to the active narration. Pitch is preserved by
+   * synthesizing at the new speed, so already-generated audio cannot be reused:
+   * keep every unit that has fully played, drop the unit under the head and the
+   * unplayed tail, and re-synthesize them at `rate`. Units are sentence-sized,
+   * so the change lands within about one request's latency.
+   */
+  const handleRateChange = (rate: number): void => {
+    e.rate = rate;
+    const head = currentHead();
+    // Last unit whose audio has finished playing before the head.
+    let keepThrough = -1;
+    for (let i = 0; i < e.paragraphSpans.length; i++) {
+      const span = e.paragraphSpans[i];
+      if (span === undefined) continue;
+      if (span.end <= head) keepThrough = i;
+      else break;
     }
-    abortController = null; // all streams done; progress loop may now settle idle
-    // Snap the display duration to the exact synthesized extent.
-    if (engine === e) {
-      e.streamDone = true;
-      e.duration = e.scheduledDuration;
-      useAudioPlayerStore.getState().setProgress(currentHead(), e.duration);
-    }
-  } catch (error) {
-    abortController = null;
-    if (controller.signal.aborted) {
-      // A subsequent play/stop already cleaned up; don't clobber its state.
-      return;
-    }
-    const message = error instanceof Error ? error.message : "TTS request failed.";
-    useAudioPlayerStore.getState().setError(message, id);
-    teardown();
-    throw error;
-  }
+    keepThrough = Math.min(keepThrough, e.nextParagraphIndex - 1);
+
+    if (abortController !== null) abortController.abort();
+
+    e.chunks = e.chunks.filter((chunk) => chunk.paragraph <= keepThrough);
+    e.paragraphSpans = e.paragraphSpans.slice(0, keepThrough + 1);
+    e.scheduledDuration = keepThrough >= 0 ? (e.paragraphSpans[keepThrough]?.end ?? 0) : 0;
+    e.synthesizedChars = spokenCharCounts.slice(0, keepThrough + 1).reduce((a, b) => a + b, 0);
+    e.nextParagraphIndex = keepThrough + 1;
+    e.streamDone = false;
+
+    // Re-anchor on the truncated timeline, then synthesize the rest anew.
+    rescheduleAt(head);
+    refreshEstimate();
+    void runSynthesis(keepThrough + 1).catch(() => {
+      // The worker already reported the failure through the store.
+    });
+  };
+  applyRateChange = handleRateChange;
+
+  await runSynthesis(0, controller);
 }
 
 export function useTtsPlayer() {
