@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { findActiveBlockIndex, normalizeWords } from "./ttsParagraphMatching";
+import {
+  findActiveBlockIndex,
+  findParagraphIndexForBlock,
+  normalizeWords,
+} from "./ttsParagraphMatching";
 
 describe("normalizeWords", () => {
   it("lowercases and strips punctuation", () => {
@@ -50,5 +54,44 @@ describe("findActiveBlockIndex", () => {
 
   it("returns -1 for an empty cue", () => {
     expect(findActiveBlockIndex(["some block"], "   ")).toBe(-1);
+  });
+
+  it("matches a cue that starts mid-block (a later sentence)", () => {
+    const blocks = ["Intro sentence. The cat sat on the mat."];
+    expect(findActiveBlockIndex(blocks, "the cat sat on the mat")).toBe(0);
+  });
+});
+
+describe("findParagraphIndexForBlock", () => {
+  it("maps a block to the paragraph whose opening words it starts with", () => {
+    const cues = ["hello world this is a", "second item"];
+    expect(findParagraphIndexForBlock(cues, "Second item of the list")).toBe(1);
+  });
+
+  it("prefers the paragraph sharing the most opening words", () => {
+    const cues = ["the cat sat", "the cat sat on the mat"];
+    expect(findParagraphIndexForBlock(cues, "The cat sat on the mat.")).toBe(1);
+  });
+
+  it("is the inverse of findActiveBlockIndex for a cue/block pair", () => {
+    const blocks = ["Release notes", "We shipped a bunch of fixes today."];
+    const cues = ["we shipped a bunch of fixes"];
+    const blockIndex = findActiveBlockIndex(blocks, cues[0]!);
+    expect(blockIndex).toBe(1);
+    expect(findParagraphIndexForBlock(cues, blocks[blockIndex]!)).toBe(0);
+  });
+
+  it("returns -1 when no paragraph shares the block's opening words", () => {
+    expect(findParagraphIndexForBlock(["totally unrelated"], "Nothing here matches")).toBe(-1);
+  });
+
+  it("returns -1 for an empty cue list or empty block text", () => {
+    expect(findParagraphIndexForBlock([], "some block")).toBe(-1);
+    expect(findParagraphIndexForBlock(["some cue"], "   ")).toBe(-1);
+  });
+
+  it("seeks the clicked line, not just the block's first line", () => {
+    const cues = ["first item", "second item"];
+    expect(findParagraphIndexForBlock(cues, "First item\nSecond item", "Second item")).toBe(1);
   });
 });

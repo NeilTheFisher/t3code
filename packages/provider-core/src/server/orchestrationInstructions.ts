@@ -27,6 +27,9 @@ Ordinary coding tasks need no T3 tools.
 
 - Answer data with a trend or comparison with a chart and show any visual the user asks for here: pass an HTML file path or inline HTML to \`html_preview\`, then \`html_render\`. A screenshot on disk or a text description doesn't show it. Never start a server for it. Page tools write only on user request. Never use them to show results. Asked for an image to post, send or use elsewhere: a \`.png\` file and its path, never \`html_render\`.
 - Never use \`preview_*\` unasked to verify or show your own edit. Use them when the current request asks for browser work, including recording edits, or names a page or tab. Don't repeat preview calls from an earlier turn. Public pages: web fetch or search unless browser work was asked; then preview tools only, no web fetch. Close a tab you opened before you reply, unless the user asked for it or uses it.`,
+  `### Speaking aloud
+
+\`t3_speak\` says a short passage aloud through the reader's connected T3 Code clients' text-to-speech. Use it when the user asks to be spoken to (for example, "speak your answers out to me"), or when a short spoken summary or heads-up is more useful heard than read. Pass plain prose, not markdown, code, or lists. Only one utterance plays at a time: by default it queues behind whatever is speaking, so set \`interrupt\` only to correct something you already said. It plays only when the reader has text-to-speech enabled on a connected client.`,
 ];
 
 export const T3_CODE_ORCHESTRATION_INSTRUCTIONS = `
