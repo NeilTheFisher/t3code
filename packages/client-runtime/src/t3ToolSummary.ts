@@ -480,6 +480,8 @@ export function summarizeT3ToolCalls(
       break;
     case "send-to-user":
       label = phrase("Sent", "send", quantity(selected.length, "message"));
+    case "speak":
+      label = phrase("Spoke", "speak", quantity(selected.length, "utterance"));
       break;
     case "capabilities":
       label = phrase("Checked", "check", `orchestration capabilities ${times}`);
