@@ -110,6 +110,8 @@ import * as MessageHandlers from "./toolkits/message/handlers.ts";
 import { HtmlPreviewTool, HtmlPreviewToolkit, HtmlRenderToolkit } from "./toolkits/html/tools.ts";
 import { MCP_HTTP_PATH } from "../httpCors.ts";
 import { requestUrl } from "../requestUrl.ts";
+import * as SpeakHandlers from "./toolkits/speak/handlers.ts";
+import { SpeakToolkit } from "./toolkits/speak/tools.ts";
 
 const mcpResourceMetadataUrl = (request: HttpServerRequest.HttpServerRequest) =>
   requestUrl(request).pipe(
@@ -1461,6 +1463,7 @@ export const layerPullRequestsToolkit = toolkitRegistration(
 ).pipe(Layer.provide(PullRequestWatchService.layer));
 
 const layerIssuesToolkit = toolkitRegistration(IssuesToolkit, IssuesHandlers.layer);
+export const layerSpeakToolkit = toolkitRegistration(SpeakToolkit, SpeakHandlers.layer);
 
 const layerDeviceStandardToolkitRegistration = toolkitRegistration(
   DeviceStandardToolkit,
@@ -1524,6 +1527,7 @@ export const layerTools = Layer.mergeAll(
   layerDeviceToolkit,
   layerHtmlToolkit,
   layerMessageToolkit,
+  layerSpeakToolkit,
 );
 
 const layerToolExposure = Layer.effect(
