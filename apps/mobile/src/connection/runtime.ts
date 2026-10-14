@@ -1,6 +1,7 @@
 import { Connection } from "@t3tools/client-runtime/connection";
 import { ShellSnapshotLoader } from "@t3tools/client-runtime/state/shell";
 import { PullRequestDiffLoader } from "@t3tools/client-runtime/state/pull-requests";
+import { layer as ttsSpeechLoaderLayer } from "@t3tools/client-runtime/state/tts";
 import {
   BoundedThreadSnapshotLoader,
   ThreadHistoryController,
@@ -21,6 +22,7 @@ const layerProvidedConnectionPlatform = ConnectionPlatform.layer.pipe(Layer.prov
 
 const layerSnapshotLoader = Layer.mergeAll(
   PullRequestDiffLoader.layer,
+  ttsSpeechLoaderLayer,
   BoundedThreadSnapshotLoader.layer,
   ShellSnapshotLoader.layer,
   ThreadHistoryController.layer,

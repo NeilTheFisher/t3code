@@ -240,6 +240,7 @@ const ANDROID_ICON_BY_SF_SYMBOL = {
   photo: IconPhoto,
   pin: IconPin,
   "pin.slash": IconPinnedOff,
+  "pause.fill": IconPlayerPause,
   play: IconPlayerPlay,
   pause: IconPlayerPause,
   plus: IconPlus,
