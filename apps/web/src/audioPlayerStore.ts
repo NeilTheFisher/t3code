@@ -68,6 +68,10 @@ export const useAudioPlayerStore = create<AudioPlayerState & AudioPlayerActions>
       errorMessageId: null,
       title,
       threadRef,
+      // Reset progress so a new playback starts its scrub bar at 0, not the
+      // previous one's final position.
+      currentTime: 0,
+      duration: 0,
       activeParagraph: null,
       activeParagraphCue: null,
     }),

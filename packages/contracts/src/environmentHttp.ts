@@ -144,6 +144,7 @@ export const EnvironmentInternalErrorReason = Schema.Literals([
   "orchestration_thread_snapshot_failed",
   "orchestration_thread_bounded_snapshot_failed",
   "orchestration_thread_history_failed",
+  "tts_synthesis_failed",
   "internal_error",
 ]);
 export type EnvironmentInternalErrorReason = typeof EnvironmentInternalErrorReason.Type;
@@ -551,6 +552,19 @@ export const AuthOtherClientSessionsRevokeResult = Schema.Struct({
 });
 export type AuthOtherClientSessionsRevokeResult = typeof AuthOtherClientSessionsRevokeResult.Type;
 
+export const TtsSpeechInput = Schema.Struct({
+  text: TrimmedNonEmptyString,
+  voice: Schema.optionalKey(Schema.String),
+  speed: Schema.optionalKey(Schema.Number),
+});
+export type TtsSpeechInput = typeof TtsSpeechInput.Type;
+
+/** Compressed Ogg Opus audio from the environment's TTS service. */
+export const TtsSpeechAudio = Schema.Uint8Array.pipe(
+  HttpApiSchema.asUint8Array({ contentType: "audio/ogg" }),
+);
+export type TtsSpeechAudio = typeof TtsSpeechAudio.Type;
+
 class EnvironmentMetadataHttpApi extends HttpApiGroup.make("metadata").add(
   HttpApiEndpoint.get("descriptor", "/.well-known/t3/environment", {
     success: ExecutionEnvironmentDescriptor,
@@ -923,6 +937,15 @@ export class EnvironmentVoiceHttpApi extends HttpApiGroup.make("voice")
     }).middleware(EnvironmentAuthenticatedAuth),
   ) {}
 
+/** Assistant-message playback fetches compressed audio over HTTP, not the RPC socket. */
+class EnvironmentTtsHttpApi extends HttpApiGroup.make("tts").add(
+  HttpApiEndpoint.post("speech", "/api/tts/speech", {
+    headers: OptionalBearerHeaders,
+    payload: TtsSpeechInput,
+    success: TtsSpeechAudio,
+    error: [EnvironmentAuthInvalidError, EnvironmentScopeRequiredError, EnvironmentInternalError],
+  }).middleware(EnvironmentAuthenticatedAuth),
+) {}
 class EnvironmentConnectHttpApi extends HttpApiGroup.make("connect")
   .add(
     HttpApiEndpoint.post("linkProof", "/api/connect/link-proof", {
@@ -1010,6 +1033,7 @@ export class EnvironmentHttpApi extends HttpApi.make("environment")
   .add(EnvironmentMcpOAuthHttpApi)
   .add(EnvironmentOrchestrationHttpApi)
   .add(EnvironmentPullRequestsHttpApi)
+  .add(EnvironmentTtsHttpApi)
   .add(EnvironmentProjectsHttpApi)
   .add(EnvironmentVoiceHttpApi)
   .add(EnvironmentConnectHttpApi)
