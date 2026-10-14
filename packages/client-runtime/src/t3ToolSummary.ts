@@ -1804,6 +1804,23 @@ export function summarizeT3ToolCalls(
           );
       break;
     }
+    case "speak": {
+      const count = selected.length;
+      label = done
+        ? resolve(
+            msg(
+              "{count, plural, one {Spoke {count} utterance} other {Spoke {count} utterances}}",
+              { count },
+            ),
+          )
+        : resolve(
+            msg(
+              "{count, plural, one {Tried to speak {count} utterance} other {Tried to speak {count} utterances}}",
+              { count },
+            ),
+          );
+      break;
+    }
   }
   return { label, failedCount };
 }

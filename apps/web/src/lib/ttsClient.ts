@@ -1,13 +1,12 @@
 /**
- * Fetch layer for the local Kokoro-FastAPI server's OpenAI-compatible TTS
- * endpoint. Pure: no React, no store coupling, no logging side-effects.
+ * Fetch layer for the local OpenAI-compatible TTS endpoint. Pure: no React, no
+ * store coupling, no logging side-effects.
  *
- * The server is expected to be reachable at `serverUrl` (loopback by default).
- * See ~/projects/Kokoro-FastAPI for the reference implementation.
+ * The server is expected to be reachable at `serverUrl` (loopback by default);
+ * the setup repo serves Paradee there from its `paradee-tts/` service.
  *
- * An on-demand proxy may sit in front of the server (see the setup repo's
- * kokoro-proxy/): while it wakes the container it replies 503 + Retry-After.
- * Poll until the server is up before surfacing an error to the caller.
+ * A server may reply 503 while an on-demand backend wakes up; poll until it is
+ * up before surfacing an error to the caller.
  *
  * Streaming: with `stream: true` + `response_format: "pcm"` the server emits
  * raw s16le mono 24kHz chunks as they are synthesized (and stops generating on

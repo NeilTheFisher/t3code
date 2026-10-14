@@ -23,12 +23,14 @@ import { extractToolActivityPresentation } from "@t3tools/client-runtime/work-lo
 import { classifyToolActivity, collectToolFilePaths } from "@t3tools/shared/toolActivity";
 import { formatReadToolLabel, formatSearchToolLabel } from "@t3tools/shared/toolActivityCopy";
 import type { HtmlRenderReference } from "@t3tools/shared/htmlRender";
+import type { SpeakReference } from "@t3tools/shared/speak";
 import { turnItemDetailRevision } from "@t3tools/client-runtime/work-log/item-detail";
 import type { McpAppReference } from "@t3tools/shared/mcpApp";
 import {
   htmlRenderFromToolItem,
   mcpAppFromToolItem,
   sentMessageFromToolItem,
+  speakFromToolItem,
 } from "@t3tools/shared/toolOutput";
 import {
   contextCompactionLabel,
@@ -139,6 +141,15 @@ export type TimelineEntry = (
       readonly htmlRender: HtmlRenderReference;
     }
   | {
+      /** An utterance a completed `t3_speak` call asked for, shown where the call happened. */
+      readonly id: string;
+      readonly kind: "spoken";
+      readonly createdAt: string;
+      readonly runId: RunId | null;
+      readonly speak: SpeakReference;
+    }
+  | {
+      /** An MCP App a completed tool call captured, hosted where the call happened. */
       readonly id: string;
       readonly kind: "sent-message";
       readonly createdAt: string;
@@ -734,6 +745,27 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
         ? sentMessageFromToolItem(item)
         : undefined;
     if (sentMessage !== undefined) {
+    const speak =
+      item.type === "dynamic_tool" && item.status === "completed"
+        ? speakFromToolItem(item)
+        : undefined;
+    if (speak !== undefined) {
+      entries.push({
+        id: item.id,
+        kind: "spoken",
+        createdAt,
+        runId: item.runId,
+        speak,
+        ...attemptMetadata,
+      });
+      continue;
+    }
+
+    const mcpApp =
+      item.type === "dynamic_tool" && item.status === "completed"
+        ? mcpAppFromToolItem(item)
+        : undefined;
+    if (mcpApp !== undefined) {
       entries.push({
         id: item.id,
         kind: "sent-message",

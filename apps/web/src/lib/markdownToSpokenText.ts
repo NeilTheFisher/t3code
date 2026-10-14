@@ -4,8 +4,9 @@
  * syntax that would otherwise be read aloud, and inlines `[pause:Ns]` tags at
  * structural boundaries (the Kokoro endpoint renders them as silence).
  *
- * Two shapes: a flat spoken string (single-request playback) and paragraphs
- * (per-paragraph streaming + playback highlighting). Pure, no dependencies.
+ * Three shapes: a flat spoken string, merged paragraphs, and sentence-sized
+ * spoken units (streaming playback + line-level seek/highlight matching). Pure,
+ * no dependencies.
  */
 
 /** Pause lengths (seconds) at markdown structural boundaries. */
@@ -20,6 +21,11 @@ const KEEP_TEXT = "$1";
 /** All syntax stripping + intra-paragraph pause inlining, one line per input line. */
 function convertLines(markdown: string): string[] {
   let text = markdown;
+
+  // A literal `[pause:Ns]` in the message text is prose, not our directive —
+  // the speech server would otherwise render it as that many seconds of
+  // silence. Neutralize it before we inline our own tags further down.
+  text = text.replace(/\[pause:[\d.]+s\]/gi, " ");
 
   // Fenced code blocks: drop the contents entirely — code read aloud is noise,
   // and Kokoro can mangle it. Pause where the block stood.
@@ -120,4 +126,159 @@ export function toSpokenParagraphs(markdown: string): string[] {
 /** Flat spoken text for the whole message. */
 export function markdownToSpokenText(markdown: string): string {
   return toSpokenParagraphs(markdown).join(` [pause:${PARAGRAPH_PAUSE}s] `);
+}
+
+/** One synthesized piece: its text plus any silence to append after it. */
+export interface SpokenUnit {
+  readonly text: string;
+  readonly pauseAfter: number;
+}
+
+/**
+ * Upper bound on a unit. The speech server synthesizes a whole request before
+ * emitting any bytes, so a unit's length is its time-to-first-audio; keeping
+ * units short is what makes playback start quickly and speed changes take
+ * effect. Sentences under this length stay whole; longer ones are cut at word
+ * boundaries.
+ */
+const MAX_UNIT_CHARS = 160;
+
+const TRAILING_PAUSE = /\[pause:([\d.]+)s\]\s*$/;
+const PAUSE_ONLY_LINE = /^\[pause:([\d.]+)s\]$/;
+
+type LineKind = "blank" | "heading" | "listItem" | "pause" | "plain";
+
+interface ParsedLine {
+  kind: LineKind;
+  text: string;
+  pause: number;
+}
+
+/** Classify one converted line — structural lines carry their own pause tag. */
+function parseLine(line: string): ParsedLine {
+  if (line.length === 0) return { kind: "blank", text: "", pause: 0 };
+  const pauseOnly = PAUSE_ONLY_LINE.exec(line);
+  if (pauseOnly !== null) return { kind: "pause", text: "", pause: Number(pauseOnly[1]) };
+  const trailing = TRAILING_PAUSE.exec(line);
+  if (trailing !== null) {
+    const pause = Number(trailing[1]);
+    const text = line.slice(0, trailing.index).trim();
+    if (pause === Number(HEADING_PAUSE)) return { kind: "heading", text, pause };
+    if (pause === Number(LIST_ITEM_PAUSE)) return { kind: "listItem", text, pause };
+    return { kind: "plain", text, pause };
+  }
+  return { kind: "plain", text: line, pause: 0 };
+}
+
+/** Split a line into sentence-sized pieces, hard-wrapping any that run long. */
+function splitLine(line: string): string[] {
+  const pieces: string[] = [];
+  for (const sentence of splitSentences(line)) {
+    if (sentence.length <= MAX_UNIT_CHARS) pieces.push(sentence);
+    else pieces.push(...hardWrap(sentence, MAX_UNIT_CHARS));
+  }
+  return pieces;
+}
+
+/** Sentences end at `.`/`!`/`?`/`…` followed by whitespace; keep pause tags. */
+function splitSentences(text: string): string[] {
+  const sentences: string[] = [];
+  let start = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (!/[.!?…]/.test(text[i]!)) continue;
+    const next = text[i + 1];
+    if (next !== undefined && !/\s/.test(next)) continue;
+    let end = i + 1;
+    while (end < text.length && /\s/.test(text[end]!)) end += 1;
+    const pause = /^\[pause:[\d.]+s\]/.exec(text.slice(end));
+    if (pause !== null) end += pause[0].length;
+    const sentence = text.slice(start, end).trim();
+    if (sentence.length > 0) sentences.push(sentence);
+    start = end;
+    i = end - 1;
+  }
+  const tail = text.slice(start).trim();
+  if (tail.length > 0) sentences.push(tail);
+  return sentences;
+}
+
+/** Greedily pack words into pieces no longer than `maxChars`. */
+function hardWrap(text: string, maxChars: number): string[] {
+  const pieces: string[] = [];
+  let current = "";
+  for (const word of text.split(/\s+/).filter((w) => w.length > 0)) {
+    const candidate = current.length === 0 ? word : `${current} ${word}`;
+    if (current.length > 0 && candidate.length > maxChars) {
+      pieces.push(current);
+      current = word;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current.length > 0) pieces.push(current);
+  return pieces;
+}
+
+/** Append a line's piece(s), giving only the last piece the line's pause. */
+function pushLine(units: SpokenUnit[], lineText: string, trailingPause: number): void {
+  const pieces = splitLine(lineText);
+  for (let i = 0; i < pieces.length; i++) {
+    units.push({ text: pieces[i]!, pauseAfter: i === pieces.length - 1 ? trailingPause : 0 });
+  }
+}
+
+/**
+ * Spoken units for streaming playback and seek/highlight matching. Unlike
+ * `toSpokenParagraphs`, each structural line (heading, list item) is its own
+ * unit and every paragraph is split into sentence-sized units, so each is a
+ * small, quickly-synthesized request that also maps to one rendered line.
+ * Trailing pauses land on the last unit of their paragraph or item.
+ */
+export function toSpokenUnits(markdown: string): SpokenUnit[] {
+  const lines = convertLines(markdown).map(parseLine);
+  const units: SpokenUnit[] = [];
+  // Consecutive plain lines are one paragraph; its pause goes on the last line.
+  let paragraph: ParsedLine[] = [];
+  let leadingPause = 0;
+
+  const flushParagraph = () => {
+    for (let i = 0; i < paragraph.length; i++) {
+      const line = paragraph[i]!;
+      const isLast = i === paragraph.length - 1;
+      const pause = (isLast ? Number(PARAGRAPH_PAUSE) : 0) + line.pause;
+      pushLine(units, line.text, pause);
+    }
+    paragraph = [];
+  };
+
+  for (const line of lines) {
+    switch (line.kind) {
+      case "blank":
+        flushParagraph();
+        break;
+      case "pause":
+        // A standalone silence (code block, rule): extend the nearest unit.
+        if (paragraph.length > 0) paragraph[paragraph.length - 1]!.pause += line.pause;
+        else if (units.length > 0) {
+          const last = units[units.length - 1]!;
+          units[units.length - 1] = { ...last, pauseAfter: last.pauseAfter + line.pause };
+        } else leadingPause += line.pause;
+        break;
+      case "heading":
+      case "listItem":
+        flushParagraph();
+        pushLine(units, line.text, line.pause);
+        break;
+      case "plain":
+        paragraph.push(line);
+        break;
+    }
+  }
+  flushParagraph();
+
+  if (leadingPause > 0 && units.length > 0) {
+    const first = units[0]!;
+    units[0] = { ...first, text: `[pause:${leadingPause}s] ${first.text}` };
+  }
+  return units.filter((unit) => unit.text.length > 0);
 }

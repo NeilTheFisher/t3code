@@ -11,6 +11,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
 import { useAudioPlayerStore } from "~/audioPlayerStore";
 import { useTtsPlayer } from "~/hooks/useTtsPlayer";
+import { clearSpokenQueue } from "~/spokenPlaybackQueue";
 import { stackedThreadToast, toastManager, type ToastId } from "../ui/toast";
 
 export const MessagePlayButton = memo(function MessagePlayButton({
@@ -92,6 +93,8 @@ export const MessagePlayButton = memo(function MessagePlayButton({
       stop();
       return;
     }
+    // A user-initiated play takes over from any queued agent speech.
+    clearSpokenQueue();
     void play(messageId, trimmed, threadRef).catch(() => {
       // Error already surfaced via the store + effect above.
     });
