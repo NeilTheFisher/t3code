@@ -1,4 +1,8 @@
 import type { EnvironmentId, GerritSettings } from "@t3tools/contracts";
+import {
+  isAtomCommandInterrupted,
+  squashAtomCommandFailure,
+} from "@t3tools/client-runtime/state/runtime";
 import { useState } from "react";
 
 import { useEnvironmentSettings } from "../../hooks/useSettings";
@@ -7,6 +11,7 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
+import { toastManager } from "../ui/toast";
 
 /**
  * Gerrit's HTTP token for one environment. Reads and writes go over SSH and need none of it; this
@@ -24,6 +29,7 @@ export function GerritCredentialsSettings({
   const saved = useEnvironmentSettings(environmentId, (settings) => settings.gerrit);
   const updateSettings = useAtomCommand(serverEnvironment.updateSettings, {
     label: "save Gerrit token",
+    reportFailure: false,
   });
   const [token, setToken] = useState("");
   const [saving, setSaving] = useState(false);
@@ -37,8 +43,17 @@ export function GerritCredentialsSettings({
       const result = await updateSettings({ environmentId, input: { patch: { gerrit: next } } });
       if (result._tag === "Success") {
         setToken("");
+        toastManager.add({ type: "success", title: "Gerrit token saved" });
         onSaved();
+        return;
       }
+      if (isAtomCommandInterrupted(result)) return;
+      const error = squashAtomCommandFailure(result);
+      toastManager.add({
+        type: "error",
+        title: "Gerrit token not saved",
+        description: error instanceof Error ? error.message : "An error occurred.",
+      });
     } finally {
       setSaving(false);
     }

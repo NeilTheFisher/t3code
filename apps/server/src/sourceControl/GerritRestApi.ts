@@ -62,15 +62,12 @@ const RawAccountSchema = Schema.Struct({
   name: Schema.optional(Schema.NullOr(Schema.String)),
 });
 
-const RawFileInfoSchema = Schema.Struct({
-  reviewed: Schema.optional(Schema.Boolean),
-});
-
 const decodeComments = decodeJsonResult(
   Schema.Record(Schema.String, Schema.Array(RawCommentSchema)),
 );
 const decodeAccounts = decodeJsonResult(Schema.Array(RawAccountSchema));
-const decodeFiles = decodeJsonResult(Schema.Record(Schema.String, RawFileInfoSchema));
+/** `?reviewed` answers with the paths the caller has reviewed, nothing else. */
+const decodeReviewedPaths = decodeJsonResult(Schema.Array(Schema.String));
 
 export interface GerritRestComment {
   readonly id: string;
@@ -146,7 +143,7 @@ export class GerritRestApi extends Context.Service<
     readonly listComments: (
       input: GerritRestTarget & { readonly change: number },
     ) => Effect.Effect<ReadonlyArray<GerritRestComment>, GerritRestApiError>;
-    readonly listFiles: (
+    readonly listReviewedFiles: (
       input: GerritRestTarget & { readonly change: number },
     ) => Effect.Effect<ReadonlyArray<GerritRestFile>, GerritRestApiError>;
     readonly listReviewers: (
@@ -307,28 +304,27 @@ export const make = Effect.gen(function* () {
       body: input.review,
     }).pipe(Effect.asVoid);
 
-  const listFiles: GerritRestApi["Service"]["listFiles"] = (input) =>
+  // Gerrit answers the plain files listing without per-file `reviewed`; the flag lives behind the
+  // `?reviewed` query, which returns the paths this caller has marked reviewed on the current patch
+  // set. Everything it omits is unreviewed.
+  const listReviewedFiles: GerritRestApi["Service"]["listReviewedFiles"] = (input) =>
     requestText(input, {
-      operation: "listFiles",
+      operation: "listReviewedFiles",
       method: "GET",
-      path: `/a/changes/${input.change}/revisions/current/files/`,
+      path: `/a/changes/${input.change}/revisions/current/files/?reviewed`,
     }).pipe(
       Effect.flatMap((text) => {
-        const decoded = decodeFiles(text);
+        const decoded = decodeReviewedPaths(text);
         if (!Result.isSuccess(decoded)) {
           return Effect.fail(
             new GerritRestApiError({
-              operation: "listFiles",
+              operation: "listReviewedFiles",
               detail: "Gerrit returned unreadable files.",
               cause: decoded.failure,
             }),
           );
         }
-        const files: Array<GerritRestFile> = [];
-        for (const [path, file] of Object.entries(decoded.success)) {
-          files.push({ path, reviewed: file.reviewed === true });
-        }
-        return Effect.succeed(files);
+        return Effect.succeed(decoded.success.map((path) => ({ path, reviewed: true })));
       }),
     );
 
@@ -418,7 +414,7 @@ export const make = Effect.gen(function* () {
 
   return GerritRestApi.of({
     listComments,
-    listFiles,
+    listReviewedFiles,
     listReviewers,
     postReview,
     searchAccounts,

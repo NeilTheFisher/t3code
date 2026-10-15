@@ -63,7 +63,7 @@ import {
 import { searchableSetting, sourceControlHostSettingsSearchId } from "./settingsSearch";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
-import { sourceControlIcon } from "~/sourceControlPresentation";
+import { getSourceControlPresentationForKind } from "~/sourceControlPresentation";
 
 const EMPTY_DISCOVERY_RESULT: SourceControlDiscoveryResult = {
   versionControlSystems: [],
@@ -155,10 +155,27 @@ function RedactedAccount(props: { readonly account: string | null }) {
   );
 }
 
+/**
+ * Gerrit authenticates with the SSH key itself, which its probe cannot judge, so it reports auth
+ * as `unknown` by design while still being available. That is the provider working, not a problem,
+ * so unlike every other host's `unknown` it does not read as a warning.
+ */
+function isAvailableWithUnjudgedAuth(
+  item: VcsDiscoveryItem | SourceControlProviderDiscoveryItem,
+): boolean {
+  return isProviderDiscoveryItem(item) && item.kind === "gerrit" && item.auth.status === "unknown";
+}
+
 function itemStatusDot(item: VcsDiscoveryItem | SourceControlProviderDiscoveryItem): string {
   if (isVcsNotReady(item)) return "bg-muted-foreground/35";
   if (item.status !== "available") return "bg-warning";
-  if (isProviderDiscoveryItem(item) && item.auth.status !== "authenticated") return "bg-warning";
+  if (
+    isProviderDiscoveryItem(item) &&
+    item.auth.status !== "authenticated" &&
+    !isAvailableWithUnjudgedAuth(item)
+  ) {
+    return "bg-warning";
+  }
   return "bg-success";
 }
 
@@ -178,7 +195,11 @@ function SourceControlItemMark({
   readonly item: VcsDiscoveryItem | SourceControlProviderDiscoveryItem;
 }) {
   const dotClassName = itemStatusDot(item);
-  const icon = sourceControlItemIcon(item);
+  // Kind-based rather than a registry `find`, so a host that ships no client definition (Gerrit in
+  // this fork) still gets its own mark instead of falling through to the bare status dot.
+  const Icon = isProviderDiscoveryItem(item)
+    ? getSourceControlPresentationForKind(item.kind).Icon
+    : VCS_ICONS[item.kind];
 
   if (!icon) {
     return <span className={cn("size-2 shrink-0 rounded-full", dotClassName)} aria-hidden />;
@@ -216,6 +237,13 @@ function itemSummary({
   }
 
   if (auth) {
+    // A host whose probe cannot judge auth (Gerrit's SSH key) explains itself instead of reading
+    // as a failure; "Could not verify" would send the reader looking for a problem that is not one.
+    if (isAvailableWithUnjudgedAuth(item)) {
+      const authDetail = optionLabel(auth.detail);
+      return <span>{authDetail ?? item.installHint}</span>;
+    }
+
     if (auth.status === "authenticated") {
       const authDetail = optionLabel(auth.detail);
       return (
@@ -269,7 +297,8 @@ function DiscoveryItemRow({
 }) {
   const version = optionLabel(item.version);
   const enabled = isProviderDiscoveryItem(item)
-    ? item.status === "available" && item.auth.status === "authenticated"
+    ? item.status === "available" &&
+      (item.auth.status === "authenticated" || isAvailableWithUnjudgedAuth(item))
     : item.status === "available" && item.implemented;
   const auth = isProviderDiscoveryItem(item) ? item.auth : null;
   const authStatus = auth ? authPresentation(auth) : null;
