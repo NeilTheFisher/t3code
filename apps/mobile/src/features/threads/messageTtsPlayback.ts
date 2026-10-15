@@ -309,7 +309,12 @@ function seekToUnit(index: number) {
   audio.skipTo(target);
   setActiveBlockFor(target);
   setProgress(elapsedBefore(target), totalDuration());
+  // Seeking while paused resumes, so a tap always plays.
   if (state.status === "playing") audio.play();
+  else if (state.status === "paused") {
+    audio.play();
+    setState({ ...state, status: "playing" });
+  }
 }
 
 /** Seek to a fraction of the whole narration, used by the mini-player scrub bar. */
@@ -357,6 +362,13 @@ export function skipNarration(deltaSeconds: number) {
   seekToRatio((progress.currentTime + deltaSeconds) / total);
 }
 
+/** Stable short hash of a unit's text, so edited messages don't reuse stale audio. */
+function hashText(text: string): string {
+  let hash = 5381;
+  for (let i = 0; i < text.length; i += 1) hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0;
+  return (hash >>> 0).toString(36);
+}
+
 async function fetchSegment(
   text: string,
   messageId: string,
@@ -364,6 +376,14 @@ async function fetchSegment(
   environmentId: EnvironmentId,
   forGeneration: number,
 ): Promise<string | null> {
+  const file = new File(
+    Paths.cache,
+    `t3-tts-${messageId.replace(/[^a-zA-Z0-9._-]/g, "_")}-${index}-${hashText(text)}.ogg`,
+  );
+  // Reuse audio already synthesized for this unit (an earlier narration, or a
+  // seek back and forth), so repeated seeking is instant.
+  if (file.exists) return file.uri;
+
   const result = await runAtomCommand(
     appAtomRegistry,
     requestTtsSpeech,
@@ -374,10 +394,6 @@ async function fetchSegment(
   if (forGeneration !== generation) return null;
   if (result._tag === "Failure") throw squashAtomCommandFailure(result);
 
-  const file = new File(
-    Paths.cache,
-    `t3-tts-${messageId.replace(/[^a-zA-Z0-9._-]/g, "_")}-${index}.ogg`,
-  );
   if (file.exists) file.delete();
   file.create({ overwrite: true });
   await file.write(result.value);
@@ -385,6 +401,14 @@ async function fetchSegment(
 }
 
 /** Fetch and queue the remaining segments while the playlist plays. */
+/** How many segments are synthesized concurrently, so the whole message becomes
+    seekable quickly instead of one sentence at a time. */
+const FETCH_WINDOW = 3;
+
+type FetchedSegment =
+  | { readonly ok: true; readonly uri: string | null }
+  | { readonly ok: false; readonly error: unknown };
+
 async function fetchRemaining(
   environmentId: EnvironmentId,
   messageId: string,
@@ -392,17 +416,27 @@ async function fetchRemaining(
 ) {
   if (activeFetchGeneration === forGeneration) return;
   activeFetchGeneration = forGeneration;
+  const inFlight = new Map<number, Promise<FetchedSegment>>();
+  const start = (index: number) => {
+    if (index >= units.length || inFlight.has(index)) return;
+    inFlight.set(
+      index,
+      fetchSegment(units[index]!.text, messageId, index, environmentId, forGeneration).then(
+        (uri): FetchedSegment => ({ ok: true, uri }),
+        (error): FetchedSegment => ({ ok: false, error }),
+      ),
+    );
+  };
   try {
     while (forGeneration === generation && fetchedCount < units.length) {
+      for (let i = fetchedCount; i < fetchedCount + FETCH_WINDOW; i += 1) start(i);
       const index = fetchedCount;
-      const uri = await fetchSegment(
-        units[index]!.text,
-        messageId,
-        index,
-        environmentId,
-        forGeneration,
-      );
-      if (forGeneration !== generation || uri === null) return;
+      const settled = await inFlight.get(index)!;
+      inFlight.delete(index);
+      if (forGeneration !== generation) return;
+      if (!settled.ok) throw settled.error;
+      const uri = settled.uri;
+      if (uri === null) return;
 
       const audio = getPlaylist();
       audio.add({ uri });
@@ -417,6 +451,10 @@ async function fetchRemaining(
         setActiveBlockFor(target);
         setProgress(elapsedBefore(target), totalDuration());
         if (state.status === "playing") audio.play();
+        else if (state.status === "paused") {
+          audio.play();
+          setState({ ...state, status: "playing" });
+        }
         continue;
       }
 
