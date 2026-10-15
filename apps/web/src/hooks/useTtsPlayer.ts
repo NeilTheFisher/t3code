@@ -444,6 +444,8 @@ export async function startPlayback(
 
   /** Recompute the display duration estimate from synthesized evidence. */
   const refreshEstimate = () => {
+    // Let the highlight mark newly synthesized paragraphs clickable.
+    useAudioPlayerStore.getState().setSynthesizedParagraphs(e.nextParagraphIndex);
     if (e.streamDone) return;
     const remaining = spokenCharCounts.slice(e.nextParagraphIndex).reduce((a, b) => a + b, 0);
     e.duration = convergeEstimatedDuration({
@@ -550,6 +552,7 @@ export async function startPlayback(
         // Snap the display duration to the exact synthesized extent.
         e.streamDone = true;
         e.duration = e.scheduledDuration;
+        useAudioPlayerStore.getState().setSynthesizedParagraphs(e.nextParagraphIndex);
         useAudioPlayerStore.getState().setProgress(currentHead(), e.duration);
       } catch (error) {
         if (owner.signal.aborted) {
