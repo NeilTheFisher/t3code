@@ -203,13 +203,17 @@ function startProgressLoop(): void {
     const head = currentHead();
     store.setProgress(head, e.duration);
 
-    // Paragraph highlighting: the span containing the playback head.
-    const active = e.paragraphSpans.findIndex((span) => head >= span.start && head < span.end);
-    if ((store.activeParagraph ?? -1) !== active) {
-      store.setActiveParagraph(
-        active >= 0 ? active : null,
-        active >= 0 ? (paragraphCues[active] ?? null) : null,
-      );
+    // Paragraph highlighting: the span containing the playback head. Skipped
+    // while a seek is pending so it can't overwrite the highlight that was set
+    // optimistically on click, before the head reaches the target.
+    if (e.pendingSeekParagraph === null && e.pendingSeekTime === null) {
+      const active = e.paragraphSpans.findIndex((span) => head >= span.start && head < span.end);
+      if ((store.activeParagraph ?? -1) !== active) {
+        store.setActiveParagraph(
+          active >= 0 ? active : null,
+          active >= 0 ? (paragraphCues[active] ?? null) : null,
+        );
+      }
     }
 
     // Only settle when the stream is fully scheduled AND every source has
@@ -379,8 +383,12 @@ export function seekToParagraph(index: number): void {
   if (e === null) return;
   if (useAudioPlayerStore.getState().status === "paused") togglePausePlayback();
   // Reflect the seek immediately: highlight the clicked paragraph now, before
-  // its audio (and the progress loop) catches up.
-  useAudioPlayerStore.getState().setActiveParagraph(index, paragraphCues[index] ?? null);
+  // its audio (and the progress loop) catches up. Skip when the cue is unknown,
+  // so we don't clear the store's cue and drop the highlight.
+  const cue = paragraphCues[index];
+  if (cue !== undefined) {
+    useAudioPlayerStore.getState().setActiveParagraph(index, cue);
+  }
   const span = e.paragraphSpans[index];
   if (span !== undefined) {
     seekPlayback(span.start);
