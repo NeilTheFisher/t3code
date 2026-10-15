@@ -365,7 +365,9 @@ export function getActiveParagraphCues(): readonly string[] {
 
 /** Whether spoken unit `index` of the active narration has seekable audio yet. */
 export function canSeekToParagraph(index: number): boolean {
-  return engine?.paragraphSpans[index] !== undefined;
+  // A paragraph being synthesized on demand counts as seekable right away, so
+  // its cursor appears the moment it is clicked.
+  return engine?.paragraphSpans[index] !== undefined || engine?.pendingSeekParagraph === index;
 }
 
 /**
@@ -376,6 +378,9 @@ export function seekToParagraph(index: number): void {
   const e = engine;
   if (e === null) return;
   if (useAudioPlayerStore.getState().status === "paused") togglePausePlayback();
+  // Reflect the seek immediately: highlight the clicked paragraph now, before
+  // its audio (and the progress loop) catches up.
+  useAudioPlayerStore.getState().setActiveParagraph(index, paragraphCues[index] ?? null);
   const span = e.paragraphSpans[index];
   if (span !== undefined) {
     seekPlayback(span.start);
