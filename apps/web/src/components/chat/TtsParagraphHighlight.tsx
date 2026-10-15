@@ -103,6 +103,9 @@ export const TtsParagraphHighlight = memo(function TtsParagraphHighlight({
   // Last scroll request consumed by this message, so a click in the mini-player
   // forces a reveal even when the cue did not change.
   const consumedScrollRequestRef = useRef(0);
+  // Auto-scroll follows the narration only for its first paragraph; after that
+  // the reader scrolls freely and the highlight never yanks the page back.
+  const autoScrolledRef = useRef(false);
   const status = useAudioPlayerStore((s) => s.status);
   const playingId = useAudioPlayerStore((s) => s.playingMessageId);
   const cue = useAudioPlayerStore((s) => s.activeParagraphCue);
@@ -116,6 +119,10 @@ export const TtsParagraphHighlight = memo(function TtsParagraphHighlight({
   useEffect(() => {
     const container = ref.current?.parentElement;
     if (container === null || container === undefined) return;
+
+    if (!active) {
+      autoScrolledRef.current = false;
+    }
 
     const blocks = Array.from(container.querySelectorAll<HTMLElement>(BLOCK_SELECTOR));
     const cues = active ? getActiveParagraphCues() : [];
@@ -138,8 +145,9 @@ export const TtsParagraphHighlight = memo(function TtsParagraphHighlight({
     // already on screen. A mini-player click bumps the request to force it.
     const forceScroll = scrollRequest !== consumedScrollRequestRef.current;
     consumedScrollRequestRef.current = scrollRequest;
-    if (forceScroll || !isBlockVisible(match)) {
+    if (forceScroll || (!autoScrolledRef.current && !isBlockVisible(match))) {
       scrollBlockIntoView(match);
+      autoScrolledRef.current = true;
     }
   }, [active, cue, scrollRequest, synthesizedParagraphs]);
 
