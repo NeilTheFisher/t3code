@@ -2397,18 +2397,15 @@ code {
     visibility: visible;
   }
 }
-/* TTS paragraph highlight: the assistant block currently being spoken. */
+/* TTS paragraph highlight: the assistant block currently being spoken. Pure
+   background overlay — no padding or margin — so it never shifts the text or a
+   list marker. */
 .tts-active-paragraph {
   transition:
     background-color 300ms ease,
     border-radius 300ms ease;
-  background-color: color-mix(in srgb, var(--primary) 7%, transparent);
+  background-color: color-mix(in srgb, var(--primary) 8%, transparent);
   border-radius: 0.375rem;
-  box-shadow: inset 2px 0 0 0 color-mix(in srgb, var(--primary) 45%, transparent);
-  /* Room for the inset accent bar so it does not clip the first letter. The
-     negative margin keeps the text from shifting when the highlight moves. */
-  padding-left: 0.5rem;
-  margin-left: -0.5rem;
 }
 @media (prefers-reduced-motion: reduce) {
   .tts-active-paragraph {
