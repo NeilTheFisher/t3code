@@ -478,7 +478,7 @@ export const make = Effect.gen(function* () {
   /** The root comment of a thread, which names the path and line a reply is anchored to. */
   /** The host and SSH user a REST call is made for, both read from the project's git remote. */
   const restTarget = (cwd: string, host: string, operation: string) =>
-    cli.viewer(cwd).pipe(
+    cli.viewer(cwd, host).pipe(
       Effect.map((username) => ({ host, username })),
       Effect.mapError(fail(operation)),
     );
@@ -517,7 +517,8 @@ export const make = Effect.gen(function* () {
 
     // Gerrit authenticates with the SSH key named by the checkout's remote, so the account
     // follows the project rather than the process.
-    getViewer: (input) => cli.viewer(input.cwd).pipe(Effect.mapError(fail("getViewer"))),
+    getViewer: (input) =>
+      cli.viewer(input.cwd, input.host).pipe(Effect.mapError(fail("getViewer"))),
 
     listChangeRequests: (input) =>
       readChanges(
@@ -742,12 +743,10 @@ export const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const target = yield* restTarget(input.cwd, input.host, "getFilesViewed");
         const files = yield* rest
-          .listFiles({ ...target, change: input.number })
+          .listReviewedFiles({ ...target, change: input.number })
           .pipe(Effect.mapError(failRest("getFilesViewed")));
         return {
-          files: files.flatMap((file) =>
-            file.reviewed ? [{ path: file.path, state: "viewed" as const }] : [],
-          ),
+          files: files.map((file) => ({ path: file.path, state: "viewed" as const })),
           truncated: false,
         };
       }),
