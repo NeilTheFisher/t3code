@@ -58,7 +58,7 @@ export const ThreadTtsMiniPlayer = memo(function ThreadTtsMiniPlayer(props: {
           <SymbolView
             name="chevron.left"
             size={16}
-            tintColorClassName="foreground"
+            tintColorClassName="accent-icon-muted"
             type="monochrome"
           />
         </Pressable>
@@ -97,7 +97,7 @@ export const ThreadTtsMiniPlayer = memo(function ThreadTtsMiniPlayer(props: {
           <SymbolView
             name="chevron.right"
             size={16}
-            tintColorClassName="foreground"
+            tintColorClassName="accent-icon-muted"
             type="monochrome"
           />
         </Pressable>
@@ -134,7 +134,7 @@ export const ThreadTtsMiniPlayer = memo(function ThreadTtsMiniPlayer(props: {
           accessibilityHint="Cycles through narration speeds"
           hitSlop={6}
           onPress={cycleRate}
-          className="h-9 justify-center rounded-full border border-border bg-subtle px-2.5 active:opacity-70"
+          className="h-9 w-14 items-center justify-center rounded-full border border-border bg-subtle active:opacity-70"
         >
           <Text className="font-t3-medium text-xs tabular-nums text-foreground">{rate}×</Text>
         </Pressable>
