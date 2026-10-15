@@ -52,10 +52,7 @@ export function SidebarTtsPlayer() {
         )}
       </button>
       <div className="h-1 w-14 shrink-0 overflow-hidden rounded-full bg-border/60">
-        <div
-          className="h-full rounded-full bg-primary transition-[width] duration-200"
-          style={{ width: `${seekPercent}%` }}
-        />
+        <div className="h-full rounded-full bg-primary" style={{ width: `${seekPercent}%` }} />
       </div>
 
       {/* Full controls, popped up on hover/focus. */}
