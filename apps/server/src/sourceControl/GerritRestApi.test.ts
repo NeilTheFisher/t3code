@@ -184,19 +184,19 @@ describe("GerritRestApi", () => {
     ),
   );
 
-  it.effect("lists files with their reviewed flags", () =>
+  it.effect("lists the files Gerrit has marked reviewed", () =>
     withServer(
       (_request, response) => {
-        json(response, JSON.stringify({ "a.js": { reviewed: true }, "b.js": {} }));
+        json(response, JSON.stringify(["a.js", "dir/b.js"]));
       },
       (api) =>
         Effect.gen(function* () {
-          const files = yield* api.listFiles({ ...target, change: 1 });
+          const files = yield* api.listReviewedFiles({ ...target, change: 1 });
           assert.deepStrictEqual(files, [
             { path: "a.js", reviewed: true },
-            { path: "b.js", reviewed: false },
+            { path: "dir/b.js", reviewed: true },
           ]);
-          assert.ok(recorded[0]?.url.endsWith("/a/changes/1/revisions/current/files/"));
+          assert.ok(recorded[0]?.url.endsWith("/a/changes/1/revisions/current/files/?reviewed"));
         }),
     ),
   );
