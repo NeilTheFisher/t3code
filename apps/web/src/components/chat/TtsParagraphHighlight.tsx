@@ -116,6 +116,21 @@ export const TtsParagraphHighlight = memo(function TtsParagraphHighlight({
 
   const active = playingId === messageId && status !== "idle" && cue !== null;
 
+  // Clickability only: which blocks can be clicked to seek. Re-runs as
+  // synthesis advances so newly-synthesized paragraphs become clickable, but
+  // never touches the highlight, so it can't flicker.
+  useEffect(() => {
+    const container = ref.current?.parentElement;
+    if (container === null || container === undefined) return;
+    const blocks = Array.from(container.querySelectorAll<HTMLElement>(BLOCK_SELECTOR));
+    const cues = active ? getActiveParagraphCues() : [];
+    for (const block of blocks) {
+      const paragraph = active ? findParagraphIndexForBlock(cues, blockText(block)) : -1;
+      block.classList.toggle(CLICKABLE_CLASS, paragraph >= 0 && canSeekToParagraph(paragraph));
+    }
+  }, [active, synthesizedParagraphs]);
+
+  // Highlight + scroll: only on a new active paragraph or an explicit reveal.
   useEffect(() => {
     const container = ref.current?.parentElement;
     if (container === null || container === undefined) return;
@@ -125,14 +140,7 @@ export const TtsParagraphHighlight = memo(function TtsParagraphHighlight({
     }
 
     const blocks = Array.from(container.querySelectorAll<HTMLElement>(BLOCK_SELECTOR));
-    const cues = active ? getActiveParagraphCues() : [];
-    for (const block of blocks) {
-      block.classList.remove(HIGHLIGHT_CLASS);
-      // A block is clickable to seek only when it maps to a spoken paragraph
-      // with audio already synthesized.
-      const paragraph = active ? findParagraphIndexForBlock(cues, blockText(block)) : -1;
-      block.classList.toggle(CLICKABLE_CLASS, paragraph >= 0 && canSeekToParagraph(paragraph));
-    }
+    for (const block of blocks) block.classList.remove(HIGHLIGHT_CLASS);
     if (!active || cue === null || cue.length === 0) return;
 
     const matchIndex = findActiveBlockIndex(blocks.map(blockText), cue);
@@ -141,15 +149,15 @@ export const TtsParagraphHighlight = memo(function TtsParagraphHighlight({
 
     match.classList.add(HIGHLIGHT_CLASS);
 
-    // Follow the narration, but leave the page alone when the new block is
-    // already on screen. A mini-player click bumps the request to force it.
+    // Follow the narration once after play, then never again; a mini-player
+    // click bumps the request to force a reveal.
     const forceScroll = scrollRequest !== consumedScrollRequestRef.current;
     consumedScrollRequestRef.current = scrollRequest;
     if (forceScroll || (!autoScrolledRef.current && !isBlockVisible(match))) {
       scrollBlockIntoView(match);
       autoScrolledRef.current = true;
     }
-  }, [active, cue, scrollRequest, synthesizedParagraphs]);
+  }, [active, cue, scrollRequest]);
 
   // Delegated click: any matched block seeks to its paragraph. A single
   // listener survives the markdown DOM re-rendering under us.
