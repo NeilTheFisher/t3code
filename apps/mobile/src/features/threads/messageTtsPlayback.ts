@@ -454,7 +454,17 @@ export async function playMessageTts(
       );
     }
 
-    const firstUri = await fetchSegment(units[0]!.text, messageId, 0, environmentId, forGeneration);
+    // One retry: the first request after a reconnect can stall and time out, and
+    // one retry makes that invisible rather than an apparent hang.
+    let firstUri: string | null = null;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        firstUri = await fetchSegment(units[0]!.text, messageId, 0, environmentId, forGeneration);
+        break;
+      } catch (error) {
+        if (attempt === 1 || forGeneration !== generation) throw error;
+      }
+    }
     if (firstUri === null) return;
 
     const audio = getPlaylist();
