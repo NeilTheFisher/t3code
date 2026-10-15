@@ -86,10 +86,15 @@ export function splitSpokenUnits(spokenText: string): string[] {
 }
 
 const FENCE_OPEN = /^\s*(?:`{3,}|~{3,})/;
+/** A top-level list item line (no indent), so nested items stay with their parent. */
+const TOP_LEVEL_LIST_ITEM = /^(?:[-*+]|\d+[.)])[ \t]+\S/;
 
 /**
- * Top-level markdown blocks — paragraphs, headings, list runs, tables,
- * blockquotes — split on blank lines and never inside a fenced code block.
+ * Top-level markdown blocks — paragraphs, headings, list items, tables,
+ * blockquotes — split on blank lines and never inside a fenced code block. Each
+ * top-level list item is its own block so it can be highlighted and seeked
+ * individually; the item's own marker is kept so ordered numbering survives
+ * being rendered on its own.
  *
  * Rendering and speech share this list, so a spoken unit maps back to the exact
  * block it came from: that block is what gets highlighted while it plays and
@@ -132,6 +137,7 @@ export function splitMarkdownBlocks(markdown: string): string[] {
       flush();
       continue;
     }
+    if (TOP_LEVEL_LIST_ITEM.test(line) && current.length > 0) flush();
     current.push(line);
   }
   flush();
