@@ -48,14 +48,14 @@ export const ThreadTtsMiniPlayer = memo(function ThreadTtsMiniPlayer(props: {
   };
 
   return (
-    <View className="mb-1.5 rounded-2xl border border-border bg-card px-3 py-1.5">
+    <View className="mb-1.5 rounded-2xl border border-border bg-card px-3 py-1">
       <View className="flex-row items-center gap-1.5">
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Skip narration back 15 seconds"
           hitSlop={8}
           onPress={() => skipNarration(-SKIP_SECONDS)}
-          className="size-8 items-center justify-center rounded-full active:opacity-60"
+          className="size-7 items-center justify-center rounded-full active:opacity-60"
         >
           <SymbolView
             name="chevron.left"
@@ -75,7 +75,7 @@ export const ThreadTtsMiniPlayer = memo(function ThreadTtsMiniPlayer(props: {
             if (isPlaying) pauseMessageTts();
             else if (isPaused) resumeMessageTts();
           }}
-          className="size-9 items-center justify-center rounded-full border border-border bg-subtle active:opacity-70"
+          className="size-8 items-center justify-center rounded-full border border-border bg-subtle active:opacity-70"
         >
           {isLoading ? (
             <ActivityIndicator size="small" />
@@ -94,7 +94,7 @@ export const ThreadTtsMiniPlayer = memo(function ThreadTtsMiniPlayer(props: {
           accessibilityLabel="Skip narration forward 15 seconds"
           hitSlop={8}
           onPress={() => skipNarration(SKIP_SECONDS)}
-          className="size-8 items-center justify-center rounded-full active:opacity-60"
+          className="size-7 items-center justify-center rounded-full active:opacity-60"
         >
           <SymbolView
             name="chevron.right"
@@ -129,7 +129,7 @@ export const ThreadTtsMiniPlayer = memo(function ThreadTtsMiniPlayer(props: {
                 max: Math.max(1, Math.round(duration)),
                 now: Math.round(currentTime),
               }}
-              className="h-9 flex-1 justify-center"
+              className="h-8 flex-1 justify-center"
             >
               <View className="h-1 overflow-hidden rounded-full bg-subtle-strong">
                 <View
@@ -150,7 +150,7 @@ export const ThreadTtsMiniPlayer = memo(function ThreadTtsMiniPlayer(props: {
           accessibilityHint="Cycles through narration speeds"
           hitSlop={6}
           onPress={cycleRate}
-          className="h-8 w-12 items-center justify-center rounded-full border border-border bg-subtle active:opacity-70"
+          className="h-7 w-11 items-center justify-center rounded-full border border-border bg-subtle active:opacity-70"
         >
           <Text className="font-t3-medium text-xs tabular-nums text-foreground">{rate}×</Text>
         </Pressable>
@@ -160,7 +160,7 @@ export const ThreadTtsMiniPlayer = memo(function ThreadTtsMiniPlayer(props: {
           accessibilityLabel="Stop narration"
           hitSlop={8}
           onPress={stopMessageTts}
-          className="size-8 items-center justify-center active:opacity-70"
+          className="size-7 items-center justify-center active:opacity-70"
         >
           <SymbolView
             name="xmark"
