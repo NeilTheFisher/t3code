@@ -306,7 +306,13 @@ function seekToUnit(index: number) {
   pendingSeekUnit = null;
   const audio = getPlaylist();
   ignoreFinishUntil = Date.now() + 600;
-  audio.skipTo(target);
+  if (audio.currentIndex === target) {
+    // Already on this track, so skipTo would no-op; rewind it to restart. This
+    // is what makes tapping the paragraph you started on seek back to its start.
+    void audio.seekTo(0).catch(() => undefined);
+  } else {
+    audio.skipTo(target);
+  }
   setActiveBlockFor(target);
   setProgress(elapsedBefore(target), totalDuration());
   // Seeking while paused resumes, so a tap always plays.
@@ -401,14 +407,6 @@ async function fetchSegment(
 }
 
 /** Fetch and queue the remaining segments while the playlist plays. */
-/** How many segments are synthesized concurrently, so the whole message becomes
-    seekable quickly instead of one sentence at a time. */
-const FETCH_WINDOW = 3;
-
-type FetchedSegment =
-  | { readonly ok: true; readonly uri: string | null }
-  | { readonly ok: false; readonly error: unknown };
-
 async function fetchRemaining(
   environmentId: EnvironmentId,
   messageId: string,
@@ -416,27 +414,17 @@ async function fetchRemaining(
 ) {
   if (activeFetchGeneration === forGeneration) return;
   activeFetchGeneration = forGeneration;
-  const inFlight = new Map<number, Promise<FetchedSegment>>();
-  const start = (index: number) => {
-    if (index >= units.length || inFlight.has(index)) return;
-    inFlight.set(
-      index,
-      fetchSegment(units[index]!.text, messageId, index, environmentId, forGeneration).then(
-        (uri): FetchedSegment => ({ ok: true, uri }),
-        (error): FetchedSegment => ({ ok: false, error }),
-      ),
-    );
-  };
   try {
     while (forGeneration === generation && fetchedCount < units.length) {
-      for (let i = fetchedCount; i < fetchedCount + FETCH_WINDOW; i += 1) start(i);
       const index = fetchedCount;
-      const settled = await inFlight.get(index)!;
-      inFlight.delete(index);
-      if (forGeneration !== generation) return;
-      if (!settled.ok) throw settled.error;
-      const uri = settled.uri;
-      if (uri === null) return;
+      const uri = await fetchSegment(
+        units[index]!.text,
+        messageId,
+        index,
+        environmentId,
+        forGeneration,
+      );
+      if (forGeneration !== generation || uri === null) return;
 
       const audio = getPlaylist();
       audio.add({ uri });
