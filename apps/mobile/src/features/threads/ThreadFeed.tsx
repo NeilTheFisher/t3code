@@ -880,47 +880,28 @@ const NarratedAssistantBody = memo(function NarratedAssistantBody(props: {
     <View>
       {props.blocks.map((block, index) => {
         const active = index === props.activeBlock;
+        // Tapping a paragraph or list item seeks to it — no separate control.
+        // The wrapper adds no padding, so narration never shifts the layout; it
+        // only tints the block under the playback head.
         return (
-          <View key={`narrate-block:${index}`} className="flex-row items-start">
-            {/* Explicit seek control in the left gutter; the paragraph itself is
-                also tappable (see the Pressable below). */}
-            <View className="-ml-6 w-7 items-center pt-1">
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Read aloud from this section"
-                hitSlop={8}
-                onPress={() => seekToBlock(index)}
-                className={cn(
-                  "size-7 items-center justify-center rounded-full",
-                  active ? "bg-primary" : "bg-subtle",
-                )}
-              >
-                <SymbolView
-                  name="play"
-                  size={10}
-                  tintColorClassName={active ? "accent-primary-foreground" : "accent-icon-muted"}
-                  type="monochrome"
-                />
-              </Pressable>
-            </View>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Seek narration to this section"
-              onPress={() => seekToBlock(index)}
-              className={cn("-mx-2 flex-1 rounded-lg px-2 py-0.5", active && "bg-primary/10")}
-            >
-              <AssistantMarkdownContent
-                markdown={block}
-                environmentId={props.environmentId}
-                markdownStyles={props.markdownStyles}
-                linkHandlers={props.linkHandlers}
-                onUseArtifactTemplate={props.onUseArtifactTemplate}
-                renderImage={props.renderImage}
-                skills={props.skills}
-                selectable={false}
-              />
-            </Pressable>
-          </View>
+          <Pressable
+            key={`narrate-block:${index}`}
+            accessibilityRole="button"
+            accessibilityLabel="Seek narration to this section"
+            onPress={() => seekToBlock(index)}
+            className={cn("-mx-2 rounded-md px-2", active && "bg-primary/10")}
+          >
+            <AssistantMarkdownContent
+              markdown={block}
+              environmentId={props.environmentId}
+              markdownStyles={props.markdownStyles}
+              linkHandlers={props.linkHandlers}
+              onUseArtifactTemplate={props.onUseArtifactTemplate}
+              renderImage={props.renderImage}
+              skills={props.skills}
+              selectable={false}
+            />
+          </Pressable>
         );
       })}
     </View>
