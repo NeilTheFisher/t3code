@@ -3,7 +3,12 @@ import { memo } from "react";
 import { ActivityIndicator, Pressable, type ColorValue } from "react-native";
 
 import { SymbolView } from "../../components/AppSymbol";
-import { playMessageTts, stopMessageTts, useMessageTtsStatus } from "./messageTtsPlayback";
+import {
+  blocksHaveSpeech,
+  playMessageTts,
+  stopMessageTts,
+  useMessageTtsStatus,
+} from "./messageTtsPlayback";
 
 /**
  * Play/stop control for an assistant message. One module-level player drives
@@ -13,21 +18,22 @@ export const MessageTtsButton = memo(function MessageTtsButton(props: {
   readonly messageId: MessageId;
   readonly threadId: string;
   readonly environmentId: EnvironmentId;
-  readonly text: string;
+  readonly blocks: readonly string[];
   readonly tintColor?: ColorValue;
 }) {
   const { isLoading, isPlaying } = useMessageTtsStatus(props.messageId);
-  const disabled = props.text.trim().length === 0;
+  const disabled = !blocksHaveSpeech(props.blocks);
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={isPlaying ? "Stop playback" : "Play message aloud"}
-      accessibilityState={{ busy: isLoading, selected: isPlaying }}
+      accessibilityState={{ busy: isLoading, selected: isPlaying, disabled }}
       disabled={disabled}
       hitSlop={8}
       onPress={() => {
         if (isPlaying) stopMessageTts();
-        else void playMessageTts(props.messageId, props.threadId, props.environmentId, props.text);
+        else
+          void playMessageTts(props.messageId, props.threadId, props.environmentId, props.blocks);
       }}
       className="size-7 items-center justify-center"
     >
