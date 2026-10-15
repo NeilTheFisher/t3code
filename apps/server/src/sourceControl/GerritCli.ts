@@ -136,8 +136,12 @@ export interface GerritReviewJsonInput {
 export class GerritCli extends Context.Service<
   GerritCli,
   {
-    /** The account the SSH key authenticates as, which is what involvement filters compare to. */
-    readonly viewer: (cwd: string) => Effect.Effect<string, GerritCliError>;
+    /**
+     * The account the SSH key authenticates as, which is what involvement filters compare to.
+     * `host` selects which remote to read the user from; without it a checkout with any second
+     * remote (e.g. a GitHub mirror) can resolve to that remote's user instead of Gerrit's.
+     */
+    readonly viewer: (cwd: string, host?: string) => Effect.Effect<string, GerritCliError>;
     readonly queryChanges: (
       input: GerritQueryInput,
     ) => Effect.Effect<GerritChangePage, GerritCliError>;
@@ -373,9 +377,9 @@ export const make = Effect.gen(function* () {
       stdin: JSON.stringify(input.review),
     }).pipe(Effect.asVoid);
 
-  const viewer: GerritCli["Service"]["viewer"] = (cwd) =>
+  const viewer: GerritCli["Service"]["viewer"] = (cwd, host) =>
     Effect.gen(function* () {
-      const connection = yield* connectionFor(cwd, "");
+      const connection = yield* connectionFor(cwd, host ?? "");
       if (connection === null) return localUser;
       if (connection.user !== null) return connection.user;
       return (yield* effectiveSshUser(cwd, connection.host)) ?? localUser;

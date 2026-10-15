@@ -56,5 +56,8 @@ export function getSourceControlPresentation(
 
 export function getSourceControlPresentationForKind(kind: string): SourceControlPresentation {
   const definition = sourceControlClients.get(kind);
-  return presentDefinition(definition, definition.label);
+  const presentation = presentDefinition(definition, definition.label);
+  // Gerrit ships no client definition in this fork, so the registry lookup above misses it and
+  // would draw the generic change request glyph; keep its own mark.
+  return kind === "gerrit" ? { ...presentation, Icon: GerritIcon } : presentation;
 }
