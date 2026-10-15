@@ -182,6 +182,9 @@ export const TtsParagraphHighlight = memo(function TtsParagraphHighlight({
       );
       if (paragraph < 0) return;
       seekToParagraph(paragraph);
+      // Show the seek affordance on the clicked block immediately, before its
+      // audio (and the synthesis-progress re-run) catches up.
+      block.classList.add(CLICKABLE_CLASS);
     },
     [messageId],
   );
