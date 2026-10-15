@@ -149,7 +149,8 @@ import {
 import { CopyTextButton } from "./CopyTextButton";
 import { Menu } from "../../components/ui/Menu";
 import { MessageTtsButton } from "./MessageTtsButton";
-import { markdownToSpokenText } from "../../lib/spokenText";
+import { markdownToSpokenText, splitMarkdownBlocks } from "../../lib/spokenText";
+import { seekToBlock, useThreadTtsNarration } from "./messageTtsPlayback";
 import { copyPromptLink } from "../prompt-links/prompt-link-actions";
 import { parseReviewCommentMessageSegments } from "../review/reviewCommentSelection";
 import type { ReviewDiffTheme } from "../review/shikiReviewHighlighter";
@@ -842,6 +843,82 @@ const AssistantMarkdownContent = memo(function AssistantMarkdownContent(props: {
   });
 });
 
+/**
+ * Assistant message body. While the message is being narrated it is split into
+ * its top-level markdown blocks: the block under the playback head is
+ * highlighted and tapping any block seeks the narration to it. Otherwise it
+ * renders exactly as before through `AssistantMarkdownContent`.
+ */
+const NarratedAssistantBody = memo(function NarratedAssistantBody(props: {
+  readonly markdown: string;
+  readonly blocks: ReadonlyArray<string>;
+  readonly isNarrating: boolean;
+  readonly activeBlock: number | null;
+  readonly environmentId: EnvironmentId;
+  readonly markdownStyles: MarkdownStyleSet;
+  readonly linkHandlers: MarkdownLinkHandlers;
+  readonly onUseArtifactTemplate?: ((template: CodexArtifactTemplate) => void) | undefined;
+  readonly renderImage: MarkdownImageRenderer;
+  readonly skills?: ReadonlyArray<SelectableMarkdownSkill> | undefined;
+}) {
+  if (!props.isNarrating) {
+    return (
+      <AssistantMarkdownContent
+        markdown={props.markdown}
+        environmentId={props.environmentId}
+        markdownStyles={props.markdownStyles}
+        linkHandlers={props.linkHandlers}
+        onUseArtifactTemplate={props.onUseArtifactTemplate}
+        renderImage={props.renderImage}
+        skills={props.skills}
+      />
+    );
+  }
+  return (
+    <View>
+      {props.blocks.map((block, index) => {
+        const active = index === props.activeBlock;
+        return (
+          <View key={`narrate-block:${index}`} className="flex-row items-start">
+            {/* Seek control lives in the left gutter so the native markdown
+                keeps text selection and links, and the text never shifts. */}
+            <View className="-ml-6 w-7 items-center pt-1">
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Read aloud from this section"
+                hitSlop={8}
+                onPress={() => seekToBlock(index)}
+                className={cn(
+                  "size-7 items-center justify-center rounded-full",
+                  active ? "bg-primary" : "bg-subtle",
+                )}
+              >
+                <SymbolView
+                  name="play"
+                  size={10}
+                  tintColorClassName={active ? "primary-foreground" : "muted-foreground"}
+                  type="monochrome"
+                />
+              </Pressable>
+            </View>
+            <View className={cn("-mx-2 flex-1 rounded-lg px-2 py-0.5", active && "bg-primary/10")}>
+              <AssistantMarkdownContent
+                markdown={block}
+                environmentId={props.environmentId}
+                markdownStyles={props.markdownStyles}
+                linkHandlers={props.linkHandlers}
+                onUseArtifactTemplate={props.onUseArtifactTemplate}
+                renderImage={props.renderImage}
+                skills={props.skills}
+              />
+            </View>
+          </View>
+        );
+      })}
+    </View>
+  );
+});
+
 function useMarkdownStyles(): MarkdownStyleSets {
   const { appearance } = useAppearancePreferences();
   const nativeMarkdownTypography = useMemo(
@@ -987,6 +1064,10 @@ function renderFeedEntry(
     readonly terminalAssistantMessageIds: ReadonlySet<string>;
     readonly unsettledTurnId: RunId | null;
     readonly failedRunIds: ReadonlySet<RunId>;
+    /** Message being narrated in this thread, if any. */
+    readonly narratingMessageId: string | null;
+    /** Markdown block under the narration playback head, in that message. */
+    readonly activeBlock: number | null;
     readonly onCopyWorkRow: (rowId: string, value: string) => void;
     readonly onToggleWorkGroup: (groupId: string, anchorKey?: string) => void;
     readonly onToggleWorkRow: (rowId: string, anchorKey?: string, groupId?: string) => void;
@@ -1367,6 +1448,12 @@ function renderFeedEntry(
       return null;
     }
 
+    const blocks = splitMarkdownBlocks(renderedText);
+
+    // Assistant messages hit the same Android unclamped-pass bug as user
+    // bubbles: wide markdown blocks cause children to be positioned at
+    // intrinsic width before the container is clamped, overlapping the
+    // timestamp/copy button row. Pinning the width removes that pass.
     const enterAnimated = isFreshTimestamp(message.createdAt);
     return (
       <Animated.View
@@ -1380,8 +1467,11 @@ function renderFeedEntry(
       >
         {renderedText.trim().length > 0 ? (
           <MarkdownImageAvailableWidthContext value={props.markdownContentWidth}>
-            <AssistantMarkdownContent
+            <NarratedAssistantBody
               markdown={renderedText}
+              blocks={blocks}
+              isNarrating={props.narratingMessageId === message.id}
+              activeBlock={props.narratingMessageId === message.id ? props.activeBlock : null}
               environmentId={props.environmentId}
               markdownStyles={styles}
               linkHandlers={props.markdownLinkHandlers}
@@ -1420,7 +1510,7 @@ function renderFeedEntry(
               messageId={message.id}
               threadId={props.threadId}
               environmentId={props.environmentId}
-              text={markdownToSpokenText(renderedText)}
+              blocks={blocks}
               tintColor={iconSubtleColor}
             />
             <CopyTextButton
@@ -1682,6 +1772,11 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   const duoColumns = useNativeWorkspaceColumnsSupported() && isDuoDevice(deviceType);
   const openPullRequest = useOpenPullRequest();
   const navigation = useNavigation();
+  // State-only: re-renders the feed when the narration head crosses a block,
+  // not on every playback tick.
+  const narration = useThreadTtsNarration(props.threadId);
+  const narratingMessageId = narration?.messageId ?? null;
+  const narrationBlock = narration?.activeBlock ?? null;
   const { themeAppearance } = useAppearancePreferences();
   const copyFeedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const disclosureSettleFrameRef = useRef<number | null>(null);
@@ -2042,47 +2137,85 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   // LegendList does not invalidate visible rows when only the renderItem closure changes.
   // Include turn completion so unchanged message rows reveal their footer and spacing
   // even when the final message update arrives before the turn settles.
-  const listAppearanceData = {
-    worktreeSetup: props.worktreeSetup,
-    setupWorkingStartedAt: props.setupWorkingStartedAt,
-    dispatchingMessageId: props.dispatchingMessageId,
-    unsettledTurnId,
-    copiedRowId,
-    expandedWorkGroups,
-    expandedWorkRows,
-    workRowSizing,
-    iconSubtleColor,
-    markdownStyles,
-    reviewCommentColors,
-    themeAppearance,
-    userBubbleColor,
-    viewportWidth,
-    contentWidth,
-    skills: props.skills,
-    workflowOpening,
-  };
-  const reportHeaderMaterialVisibility = (visible: boolean) => {
-    if (headerMaterialVisibleRef.current === visible) {
-      return;
-    }
-    headerMaterialVisibleRef.current = visible;
-    onHeaderMaterialVisibilityChange?.(visible);
-  };
-  const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    reportHeaderMaterialVisibility(event.nativeEvent.contentOffset.y + anchorTopInset > 6);
-    // Only the actual end re-arms follow: its broader maintain-scroll
-    // threshold is large enough for a streaming chunk to pull a user back
-    // before their upward drag escapes.
-    const listState = listRef.current?.getState();
-    if (listState) {
-      transitionEndFollow({
-        type: "scroll",
-        isAtEnd: listState.isAtEnd,
-        userScrollSessionActive: userScrollSessionRef.current,
-      });
-    }
-  };
-  const clearUserScrollSettle = () => {
+  const listAppearanceData = useMemo(
+    () => ({
+      worktreeSetup: props.worktreeSetup,
+      setupWorkingStartedAt: props.setupWorkingStartedAt,
+      dispatchingMessageId: props.dispatchingMessageId,
+      unsettledTurnId,
+      copiedRowId,
+      expandedWorkGroups,
+      expandedWorkRows,
+      workRowSizing,
+      iconSubtleColor,
+      markdownStyles,
+      reviewCommentColors,
+      themeAppearance,
+      userBubbleColor,
+      viewportWidth,
+      contentWidth,
+      skills: props.skills,
+      workflowOpening: props.workflowOpening,
+      narratingMessageId,
+      narrationBlock,
+    }),
+    [
+      props.worktreeSetup,
+      props.setupWorkingStartedAt,
+      props.dispatchingMessageId,
+      unsettledTurnId,
+      copiedRowId,
+      expandedWorkGroups,
+      expandedWorkRows,
+      workRowSizing,
+      iconSubtleColor,
+      markdownStyles,
+      reviewCommentColors,
+      themeAppearance,
+      userBubbleColor,
+      viewportWidth,
+      contentWidth,
+      props.skills,
+      props.workflowOpening,
+      narratingMessageId,
+      narrationBlock,
+    ],
+  );
+  const reportHeaderMaterialVisibility = useCallback(
+    (visible: boolean) => {
+      if (headerMaterialVisibleRef.current === visible) {
+        return;
+      }
+      headerMaterialVisibleRef.current = visible;
+      onHeaderMaterialVisibilityChange?.(visible);
+    },
+    [onHeaderMaterialVisibilityChange],
+  );
+  const handleScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      // anchorTopInset, not topContentInset: under automatic insets the list
+      // rests at contentOffset.y = -headerHeight (the inset lives only in
+      // UIKit's adjustedContentInset, so topContentInset is 0 here). Add the
+      // header height back or the material toggles a full header too late.
+      reportHeaderMaterialVisibility(event.nativeEvent.contentOffset.y + anchorTopInset > 6);
+      // LegendList recomputes its inset-aware end distance before invoking
+      // this handler, so getState() is current. Only the actual end re-arms
+      // follow: its broader maintain-scroll threshold is large enough for a
+      // streaming chunk to pull a user back before their upward drag escapes.
+      // A live user-scroll session still wins even if the first scroll event
+      // remains inside LegendList's at-end tolerance.
+      const listState = listRef.current?.getState();
+      if (listState) {
+        transitionEndFollow({
+          type: "scroll",
+          isAtEnd: listState.isAtEnd,
+          userScrollSessionActive: userScrollSessionRef.current,
+        });
+      }
+    },
+    [reportHeaderMaterialVisibility, anchorTopInset, listRef, transitionEndFollow],
+  );
+  const clearUserScrollSettle = useCallback(() => {
     if (userScrollSettleTimerRef.current !== null) {
       clearTimeout(userScrollSettleTimerRef.current);
       userScrollSettleTimerRef.current = null;
@@ -2424,54 +2557,107 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
         threadId={props.threadId}
         workspaceRoot={props.workspaceRoot}
       >
-        <ThreadMediaVisibility>
-          {renderFeedEntry(info, {
-            environmentId: props.environmentId,
-            dispatchingMessageId: props.dispatchingMessageId,
-            onEditPendingMessage: props.onEditPendingMessage,
-            onUseArtifactTemplate: props.onUseArtifactTemplate,
-            threadId: props.threadId,
-            copiedRowId,
-            expandedWorkRows,
-            workRowSizing,
-            workGroupScrollPositions,
-            terminalAssistantMessageIds,
-            unsettledTurnId,
-            failedRunIds,
-            onCopyWorkRow,
-            onToggleWorkGroup,
-            onToggleWorkRow,
-            onToggleTurnFold,
-            onPressPreview,
-            onPressVideo,
-            markdownLinkHandlers,
-            renderMarkdownImage,
-            renderViewedImage,
-            renderReasoning,
-            iconSubtleColor,
-            screenColor,
-            userBubbleColor,
-            markdownStyles,
-            reviewCommentColors,
-            reviewCommentBubbleWidth,
-            themeAppearance,
-            duoColumns,
-            userBubbleMaxWidth,
-            markdownContentWidth,
-            contentWidth,
-            threadTitle: props.threadTitle,
-            skills: props.skills,
-            workspaceRoot: props.workspaceRoot,
-            workflowOpening,
-          })}
-          {props.worktreeSetup && info.index === setupAnchorIndex ? (
-            <WorktreeSetupCard key={props.threadId} {...props.worktreeSetup} />
-          ) : props.setupWorkingStartedAt && info.index === setupAnchorIndex ? (
-            <WorktreeWorkingHeader startedAt={props.setupWorkingStartedAt} />
-          ) : null}
-        </ThreadMediaVisibility>
-      </MessageImageGalleryScope>
-    </Animated.View>
+        <MessageImageGalleryScope
+          entry={info.item}
+          environmentId={props.environmentId}
+          threadId={props.threadId}
+          workspaceRoot={props.workspaceRoot}
+        >
+          <ThreadMediaVisibility>
+            {renderFeedEntry(info, {
+              environmentId: props.environmentId,
+              dispatchingMessageId: props.dispatchingMessageId,
+              onEditPendingMessage: props.onEditPendingMessage,
+              onUseArtifactTemplate: props.onUseArtifactTemplate,
+              threadId: props.threadId,
+              copiedRowId,
+              expandedWorkRows,
+              workRowSizing,
+              workGroupScrollPositions,
+              terminalAssistantMessageIds,
+              unsettledTurnId,
+              failedRunIds,
+              narratingMessageId,
+              activeBlock: narrationBlock,
+              onCopyWorkRow,
+              onToggleWorkGroup,
+              onToggleWorkRow,
+              onToggleTurnFold,
+              onPressPreview,
+              onPressVideo,
+              markdownLinkHandlers,
+              renderMarkdownImage,
+              renderViewedImage,
+              renderReasoning,
+              iconSubtleColor,
+              screenColor,
+              userBubbleColor,
+              markdownStyles,
+              reviewCommentColors,
+              reviewCommentBubbleWidth,
+              themeAppearance,
+              usesNativeWorkspaceColumns,
+              userBubbleMaxWidth,
+              markdownContentWidth,
+              contentWidth,
+              threadTitle: props.threadTitle,
+              skills: props.skills,
+              workspaceRoot: props.workspaceRoot,
+            })}
+            {props.worktreeSetup && info.index === setupAnchorIndex ? (
+              <WorktreeSetupCard key={props.threadId} {...props.worktreeSetup} />
+            ) : props.setupWorkingStartedAt && info.index === setupAnchorIndex ? (
+              <WorktreeWorkingHeader startedAt={props.setupWorkingStartedAt} />
+            ) : null}
+          </ThreadMediaVisibility>
+        </MessageImageGalleryScope>
+      </Animated.View>
+    ),
+    [
+      props.worktreeSetup,
+      props.setupWorkingStartedAt,
+      props.threadId,
+      setupAnchorIndex,
+      props.dispatchingMessageId,
+      props.onEditPendingMessage,
+      copiedRowId,
+      disclosureToggleSettling,
+      expandedWorkRows,
+      workRowSizing,
+      workGroupScrollPositions,
+      terminalAssistantMessageIds,
+      unsettledTurnId,
+      failedRunIds,
+      narratingMessageId,
+      narrationBlock,
+      iconSubtleColor,
+      screenColor,
+      userBubbleColor,
+      markdownStyles,
+      reviewCommentColors,
+      reviewCommentBubbleWidth,
+      themeAppearance,
+      usesNativeWorkspaceColumns,
+      userBubbleMaxWidth,
+      markdownContentWidth,
+      contentWidth,
+      onCopyWorkRow,
+      markdownLinkHandlers,
+      onPressPreview,
+      onPressVideo,
+      onToggleTurnFold,
+      onToggleWorkGroup,
+      onToggleWorkRow,
+      props.environmentId,
+      props.onUseArtifactTemplate,
+      props.threadId,
+      props.threadTitle,
+      props.skills,
+      props.workspaceRoot,
+      renderMarkdownImage,
+      renderViewedImage,
+      renderReasoning,
+    ],
   );
 
   if (props.contentPresentation.kind === "unavailable" && props.queuedMessages.length === 0) {
