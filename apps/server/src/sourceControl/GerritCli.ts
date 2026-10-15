@@ -136,8 +136,12 @@ export interface GerritReviewJsonInput {
 export class GerritCli extends Context.Service<
   GerritCli,
   {
-    /** The account the SSH key authenticates as, which is what involvement filters compare to. */
-    readonly viewer: (cwd: string) => Effect.Effect<string, GerritCliError>;
+    /**
+     * The account the SSH key authenticates as, which is what involvement filters compare to.
+     * `host` selects which remote to read the user from; without it a checkout with any second
+     * remote (e.g. a GitHub mirror) can resolve to that remote's user instead of Gerrit's.
+     */
+    readonly viewer: (cwd: string, host?: string) => Effect.Effect<string, GerritCliError>;
     readonly queryChanges: (
       input: GerritQueryInput,
     ) => Effect.Effect<GerritChangePage, GerritCliError>;
@@ -222,15 +226,17 @@ function classifyVcsError(error: VcsError, input: GerritErrorContext): GerritCli
   });
 }
 
-/** @public Service construction is part of the canonical Effect module API. */
+/** @public */
 export const make = Effect.gen(function* () {
   const process = yield* VcsProcess.VcsProcess;
   const connections = yield* Ref.make(new Map<string, GerritConnection | null>());
   const localUser = NodeOS.userInfo().username;
 
   /** The connection for a checkout, from its remotes; cached because a listing asks per thread. */
-  const connectionFor = (cwd: string, host: string): Effect.Effect<GerritConnection | null> =>
-    Effect.gen(function* () {
+  const connectionFor = Effect.fn("GerritCli.connectionFor")(function* (
+    cwd: string,
+    host: string,
+  ): Effect.fn.Return<GerritConnection | null> {
       const key = `${cwd}\u0000${host}`;
       const cached = (yield* Ref.get(connections)).get(key);
       if (cached !== undefined) return cached;
@@ -267,8 +273,10 @@ export const make = Effect.gen(function* () {
    * one and otherwise whatever `~/.ssh/config` resolves `User` to (often the local user, but not
    * always). `ssh -G` prints the effective configuration without connecting.
    */
-  const effectiveSshUser = (cwd: string, host: string): Effect.Effect<string | null> =>
-    Effect.gen(function* () {
+  const effectiveSshUser = Effect.fn("GerritCli.effectiveSshUser")(function* (
+    cwd: string,
+    host: string,
+  ): Effect.fn.Return<string | null> {
       const output = yield* process
         .run({
           operation: "GerritCli.sshUser",
@@ -332,8 +340,9 @@ export const make = Effect.gen(function* () {
     });
   };
 
-  const queryChanges: GerritCli["Service"]["queryChanges"] = (input) =>
-    Effect.gen(function* () {
+  const queryChanges: GerritCli["Service"]["queryChanges"] = Effect.fn(
+    "GerritCli.queryChanges",
+  )(function* (input) {
       const base: GerritErrorContext = {
         operation: "query",
         command: "ssh",
@@ -373,9 +382,9 @@ export const make = Effect.gen(function* () {
       stdin: JSON.stringify(input.review),
     }).pipe(Effect.asVoid);
 
-  const viewer: GerritCli["Service"]["viewer"] = (cwd) =>
-    Effect.gen(function* () {
-      const connection = yield* connectionFor(cwd, "");
+  const viewer: GerritCli["Service"]["viewer"] = Effect.fn("GerritCli.viewer")(
+    function* (cwd, host) {
+      const connection = yield* connectionFor(cwd, host ?? "");
       if (connection === null) return localUser;
       if (connection.user !== null) return connection.user;
       return (yield* effectiveSshUser(cwd, connection.host)) ?? localUser;
