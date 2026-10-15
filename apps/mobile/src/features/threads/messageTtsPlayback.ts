@@ -10,7 +10,7 @@ import { File, Paths } from "expo-file-system";
 import { useSyncExternalStore } from "react";
 import { Alert } from "react-native";
 
-import { splitSpokenUnits } from "../../lib/spokenText";
+import { markdownToSpokenText, splitSpokenUnits } from "../../lib/spokenText";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { requestTtsSpeech } from "../../state/tts";
 
@@ -18,8 +18,16 @@ export type MessageTtsStatus = "idle" | "loading" | "playing" | "paused";
 
 /** Display excerpt of the synthesized text, prepared once at play time. */
 const TITLE_MAX_CHARS = 80;
-/** Kokoro's rough speaking rate, used only until real segment durations arrive. */
+/** Kokoro's rough speaking rate, used only to estimate durations up front. */
 const ESTIMATED_CHARS_PER_SECOND = 15;
+/** Selectable narration speeds; 1x is the default. */
+export const NARRATION_RATES = [1, 1.25, 1.5, 2] as const;
+
+/** One synthesized sentence, tagged with the markdown block it was read from. */
+interface SpokenUnit {
+  readonly text: string;
+  readonly block: number;
+}
 
 interface MessageTtsState {
   readonly messageId: string | null;
@@ -28,6 +36,9 @@ interface MessageTtsState {
   readonly title: string | null;
   readonly status: MessageTtsStatus;
   readonly error: string | null;
+  /** Markdown block currently being read, for the in-thread highlight. */
+  readonly activeBlock: number | null;
+  readonly rate: number;
 }
 
 const IDLE: MessageTtsState = {
@@ -36,6 +47,8 @@ const IDLE: MessageTtsState = {
   title: null,
   status: "idle",
   error: null,
+  activeBlock: null,
+  rate: 1,
 };
 
 let state: MessageTtsState = IDLE;
@@ -55,12 +68,16 @@ let progress: MessageTtsProgress = { currentTime: 0, duration: 0 };
 const progressListeners = new Set<() => void>();
 
 // Segment playback. The endpoint returns a whole request's audio at once, so
-// the message is split into sentence-sized segments that are fetched in order
-// and appended to one playlist: the first segment starts playing while later
-// ones are still being synthesized, instead of waiting for the whole message.
+// the message is split into sentence-sized units that are fetched in order and
+// appended to one playlist: the first unit starts playing while later ones are
+// still being synthesized. Each unit remembers its markdown block, so the block
+// under the playback head can be highlighted and tapped to seek.
 let playlist: AudioPlaylist | null = null;
-let segments: string[] = [];
-let nextFetchIndex = 0;
+let units: SpokenUnit[] = [];
+/** First unit index for each markdown block, or undefined when it has no speech. */
+let blockStarts: number[] = [];
+/** How many units have been fetched and added to the playlist, in order. */
+let fetchedCount = 0;
 let observedDurations: number[] = [];
 /** Bumped on every stop/play so in-flight fetches are discarded. */
 let generation = 0;
@@ -68,9 +85,23 @@ let generation = 0;
 let activeFetchGeneration = -1;
 /** The playlist ran out of queued tracks while more are still being fetched. */
 let awaitingResume = false;
+/** A seek to a unit not yet fetched, applied once its audio arrives. */
+let pendingSeekUnit: number | null = null;
+/** Chosen speed, kept across narrations. */
+let currentRate = 1;
 
 function setState(next: MessageTtsState) {
-  if (next === state) return;
+  if (
+    next.messageId === state.messageId &&
+    next.threadId === state.threadId &&
+    next.title === state.title &&
+    next.status === state.status &&
+    next.error === state.error &&
+    next.activeBlock === state.activeBlock &&
+    next.rate === state.rate
+  ) {
+    return;
+  }
   state = next;
   for (const listener of listeners) listener();
 }
@@ -112,8 +143,24 @@ function estimateSeconds(chars: number): number {
   return chars / ESTIMATED_CHARS_PER_SECOND;
 }
 
-function sum(values: readonly number[]): number {
-  return values.reduce((total, value) => total + value, 0);
+/** Unit duration: the real one once seen, otherwise a length estimate. */
+function unitDuration(index: number): number {
+  const observed = observedDurations[index];
+  if (observed !== undefined && Number.isFinite(observed) && observed > 0) return observed;
+  return estimateSeconds(units[index]?.text.length ?? 0);
+}
+
+/** Playback time elapsed before unit `index` (observed durations + estimates). */
+function elapsedBefore(index: number): number {
+  let total = 0;
+  for (let i = 0; i < index; i += 1) total += unitDuration(i);
+  return total;
+}
+
+function totalDuration(): number {
+  let total = 0;
+  for (let index = 0; index < units.length; index += 1) total += unitDuration(index);
+  return total;
 }
 
 function readPlaybackError(error: unknown): string | null {
@@ -128,12 +175,21 @@ function readPlaybackError(error: unknown): string | null {
 
 type PlaylistStatusEvent = AudioPlaylistStatus & { readonly error?: unknown };
 
+function setActiveBlockFor(index: number) {
+  const block = units[index]?.block ?? null;
+  if (block !== state.activeBlock) setState({ ...state, activeBlock: block });
+}
+
+function updateProgress(index: number, currentTime: number) {
+  setProgress(elapsedBefore(index) + currentTime, totalDuration());
+}
+
 function onPlaylistStatus(status: PlaylistStatusEvent) {
   if (state.messageId === null) return;
   const errorMessage = readPlaybackError(status.error);
   if (errorMessage !== null) {
     stopMessageTts();
-    setState({ ...IDLE, error: errorMessage });
+    setState({ ...IDLE, rate: currentRate, error: errorMessage });
     Alert.alert("Playback failed", errorMessage);
     return;
   }
@@ -142,31 +198,19 @@ function onPlaylistStatus(status: PlaylistStatusEvent) {
   if (Number.isFinite(status.duration) && status.duration > 0) {
     observedDurations[index] = status.duration;
   }
-  updateProgress(index, status.currentTime ?? 0, status.duration ?? 0);
+  setActiveBlockFor(index);
+  updateProgress(index, status.currentTime ?? 0);
 
   if (status.didJustFinish) {
     // ExoPlayer reaches "ended" both at the true end and when it catches up to
     // the fetch head; only the former means the message is done.
-    if (nextFetchIndex >= segments.length) stopMessageTts();
+    if (nextFetchIndex() >= units.length) stopMessageTts();
     else awaitingResume = true;
   }
 }
 
-function updateProgress(index: number, currentTime: number, currentDuration: number) {
-  const completedDuration = sum(observedDurations.slice(0, index));
-  const completedChars = segments.slice(0, index).reduce((total, s) => total + s.length, 0);
-  // Calibrate the remaining estimate from the segments already played, so the
-  // bar converges on the real length instead of trusting the fallback rate.
-  const observedCharsPerSecond = completedDuration > 0 ? completedChars / completedDuration : 0;
-  const charsPerSecond =
-    observedCharsPerSecond > 0 ? observedCharsPerSecond : ESTIMATED_CHARS_PER_SECOND;
-  const remainingChars = segments.slice(index + 1).reduce((total, s) => total + s.length, 0);
-  const currentExtent =
-    currentDuration > 0 ? currentDuration : (segments[index]?.length ?? 0) / charsPerSecond;
-  setProgress(
-    completedDuration + currentTime,
-    completedDuration + currentExtent + remainingChars / charsPerSecond,
-  );
+function nextFetchIndex(): number {
+  return fetchedCount;
 }
 
 function getPlaylist(): AudioPlaylist {
@@ -177,18 +221,49 @@ function getPlaylist(): AudioPlaylist {
   return playlist;
 }
 
+/**
+ * Build the spoken units for a message's markdown blocks. Returns an empty unit
+ * list when nothing in the message would be spoken (for example, only code).
+ */
+function buildUnits(blocks: readonly string[]): {
+  units: SpokenUnit[];
+  blockStarts: number[];
+  spoken: string;
+} {
+  const nextUnits: SpokenUnit[] = [];
+  const nextBlockStarts: number[] = [];
+  const spokenParts: string[] = [];
+  blocks.forEach((block, blockIndex) => {
+    const spoken = markdownToSpokenText(block).trim();
+    if (spoken.length === 0) return;
+    const parts = splitSpokenUnits(spoken);
+    if (parts.length === 0) return;
+    nextBlockStarts[blockIndex] = nextUnits.length;
+    for (const part of parts) nextUnits.push({ text: part, block: blockIndex });
+    spokenParts.push(spoken);
+  });
+  return { units: nextUnits, blockStarts: nextBlockStarts, spoken: spokenParts.join(" ") };
+}
+
+/** Whether a message's blocks contain anything that can be read aloud. */
+export function blocksHaveSpeech(blocks: readonly string[]): boolean {
+  return blocks.some((block) => markdownToSpokenText(block).trim().length > 0);
+}
+
 export function stopMessageTts() {
   generation += 1;
   awaitingResume = false;
+  pendingSeekUnit = null;
   if (playlist !== null) {
     playlist.pause();
     playlist.clear();
   }
-  segments = [];
-  nextFetchIndex = 0;
+  units = [];
+  blockStarts = [];
+  fetchedCount = 0;
   observedDurations = [];
   setProgress(0, 0);
-  setState(IDLE);
+  setState({ ...IDLE, rate: currentRate });
 }
 
 export function pauseMessageTts() {
@@ -201,6 +276,57 @@ export function resumeMessageTts() {
   if (playlist === null || state.status !== "paused") return;
   playlist.play();
   setState({ ...state, status: "playing" });
+}
+
+/** Change the narration speed. Applies to the current and later segments. */
+export function setNarrationRate(rate: number) {
+  currentRate = rate;
+  if (playlist !== null) playlist.playbackRate = rate;
+  if (state.messageId !== null) setState({ ...state, rate });
+}
+
+/** Move the playback head to unit `index`, or arm it if its audio is unfetched. */
+function seekToUnit(index: number) {
+  if (state.messageId === null || units.length === 0) return;
+  const target = Math.max(0, Math.min(index, units.length - 1));
+  if (target >= fetchedCount) {
+    pendingSeekUnit = target;
+    return;
+  }
+  pendingSeekUnit = null;
+  const audio = getPlaylist();
+  audio.skipTo(target);
+  setActiveBlockFor(target);
+  setProgress(elapsedBefore(target), totalDuration());
+}
+
+/** Seek to a fraction of the whole narration, used by the mini-player scrub bar. */
+export function seekToRatio(ratio: number) {
+  if (units.length === 0 || !Number.isFinite(ratio)) return;
+  const target = Math.max(0, Math.min(1, ratio)) * totalDuration();
+  let accumulated = 0;
+  for (let index = 0; index < units.length; index += 1) {
+    accumulated += unitDuration(index);
+    if (accumulated >= target) {
+      seekToUnit(index);
+      return;
+    }
+  }
+  seekToUnit(units.length - 1);
+}
+
+/** Seek to the first spoken unit of a message block (tap-to-seek in the thread). */
+export function seekToBlock(blockIndex: number) {
+  const start = blockStarts[blockIndex];
+  if (start === undefined) return;
+  seekToUnit(start);
+}
+
+/** Skip the playback head forward or back by `deltaSeconds`. */
+export function skipNarration(deltaSeconds: number) {
+  const total = totalDuration();
+  if (units.length === 0 || total <= 0) return;
+  seekToRatio((progress.currentTime + deltaSeconds) / total);
 }
 
 async function fetchSegment(
@@ -239,10 +365,10 @@ async function fetchRemaining(
   if (activeFetchGeneration === forGeneration) return;
   activeFetchGeneration = forGeneration;
   try {
-    while (forGeneration === generation && nextFetchIndex < segments.length) {
-      const index = nextFetchIndex;
+    while (forGeneration === generation && fetchedCount < units.length) {
+      const index = fetchedCount;
       const uri = await fetchSegment(
-        segments[index]!,
+        units[index]!.text,
         messageId,
         index,
         environmentId,
@@ -252,14 +378,25 @@ async function fetchRemaining(
 
       const audio = getPlaylist();
       audio.add({ uri });
-      nextFetchIndex = index + 1;
+      fetchedCount = index + 1;
 
-      // If playback had already drained the queue, resume at the new track.
+      // A seek that landed past the fetch head takes priority over resuming.
+      if (pendingSeekUnit !== null && pendingSeekUnit < fetchedCount) {
+        const target = pendingSeekUnit;
+        pendingSeekUnit = null;
+        audio.skipTo(target);
+        setActiveBlockFor(target);
+        setProgress(elapsedBefore(target), totalDuration());
+        if (state.status === "playing") audio.play();
+        continue;
+      }
+
       if (awaitingResume) {
         awaitingResume = false;
         if (state.status === "playing") {
           audio.skipTo(index);
           audio.play();
+          setActiveBlockFor(index);
         }
       }
     }
@@ -278,8 +415,11 @@ export async function playMessageTts(
   messageId: string,
   threadId: string,
   environmentId: EnvironmentId,
-  text: string,
+  blocks: readonly string[],
 ): Promise<void> {
+  const built = buildUnits(blocks);
+  if (built.units.length === 0) return;
+
   if (state.messageId === messageId) {
     if (state.status === "paused") {
       resumeMessageTts();
@@ -291,20 +431,20 @@ export async function playMessageTts(
     }
   }
 
-  const nextSegments = splitSpokenUnits(text);
-  if (nextSegments.length === 0) return;
-
   stopMessageTts();
   const forGeneration = generation;
-  segments = nextSegments;
+  units = built.units;
+  blockStarts = built.blockStarts;
   setState({
     messageId,
     threadId,
-    title: excerptTitle(text),
+    title: excerptTitle(built.spoken),
     status: "loading",
     error: null,
+    activeBlock: null,
+    rate: currentRate,
   });
-  setProgress(0, estimateSeconds(text.length));
+  setProgress(0, totalDuration());
 
   try {
     if (!audioModeConfigured) {
@@ -314,26 +454,15 @@ export async function playMessageTts(
       );
     }
 
-    const firstUri = await fetchSegment(
-      nextSegments[0]!,
-      messageId,
-      0,
-      environmentId,
-      forGeneration,
-    );
+    const firstUri = await fetchSegment(units[0]!.text, messageId, 0, environmentId, forGeneration);
     if (firstUri === null) return;
 
     const audio = getPlaylist();
+    audio.playbackRate = currentRate;
     audio.add({ uri: firstUri });
-    nextFetchIndex = 1;
+    fetchedCount = 1;
     audio.play();
-    setState({
-      messageId,
-      threadId,
-      title: excerptTitle(text),
-      status: "playing",
-      error: null,
-    });
+    setState({ ...state, status: "playing", activeBlock: units[0]!.block });
     void fetchRemaining(environmentId, messageId, forGeneration);
   } catch (cause) {
     if (forGeneration !== generation) return;
@@ -353,22 +482,28 @@ export function useMessageTtsStatus(messageId: string) {
   };
 }
 
+/**
+ * The playback state for `threadId`, or null when this thread is not narrating.
+ * Subscribes to progress too, so the mini-player scrub bar follows the head.
+ */
 export interface ThreadTtsPlayback {
-  readonly messageId: string | null;
+  readonly messageId: string;
   readonly title: string | null;
   readonly status: MessageTtsStatus;
   readonly isLoading: boolean;
   readonly isPlaying: boolean;
   readonly isPaused: boolean;
+  readonly rate: number;
   readonly currentTime: number;
   readonly duration: number;
 }
 
-/** The playback state for `threadId`, or null when this thread is not narrating. */
 export function useThreadTtsPlayback(threadId: string): ThreadTtsPlayback | null {
   const snapshot = useSyncExternalStore(subscribe, getState, getState);
   const progressSnapshot = useSyncExternalStore(subscribeProgress, getProgress, getProgress);
-  if (snapshot.threadId !== threadId || snapshot.status === "idle") return null;
+  if (snapshot.threadId !== threadId || snapshot.status === "idle" || snapshot.messageId === null) {
+    return null;
+  }
   return {
     messageId: snapshot.messageId,
     title: snapshot.title,
@@ -376,7 +511,26 @@ export function useThreadTtsPlayback(threadId: string): ThreadTtsPlayback | null
     isLoading: snapshot.status === "loading",
     isPlaying: snapshot.status === "playing",
     isPaused: snapshot.status === "paused",
+    rate: snapshot.rate,
     currentTime: progressSnapshot.currentTime,
     duration: progressSnapshot.duration,
   };
+}
+
+/**
+ * State-only narration view for the feed: which message is narrating and which
+ * block is under the playback head. Excludes progress so the feed does not
+ * re-render on every 250ms tick — only when the head crosses into a new block.
+ */
+export interface ThreadTtsNarration {
+  readonly messageId: string;
+  readonly activeBlock: number | null;
+}
+
+export function useThreadTtsNarration(threadId: string): ThreadTtsNarration | null {
+  const snapshot = useSyncExternalStore(subscribe, getState, getState);
+  if (snapshot.threadId !== threadId || snapshot.status === "idle" || snapshot.messageId === null) {
+    return null;
+  }
+  return { messageId: snapshot.messageId, activeBlock: snapshot.activeBlock };
 }
