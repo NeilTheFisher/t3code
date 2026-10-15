@@ -813,6 +813,7 @@ const AssistantMarkdownContent = memo(function AssistantMarkdownContent(props: {
   readonly onUseArtifactTemplate?: ((template: CodexArtifactTemplate) => void) | undefined;
   readonly renderImage: MarkdownImageRenderer;
   readonly skills?: ReadonlyArray<SelectableMarkdownSkill> | undefined;
+  readonly selectable?: boolean;
 }) {
   const liveMarkdown = useLiveThreadLinkLabels(props.markdown, props.environmentId);
   const segments = useMemo(() => splitCodexArtifactTemplateMarkdown(liveMarkdown), [liveMarkdown]);
@@ -836,6 +837,7 @@ const AssistantMarkdownContent = memo(function AssistantMarkdownContent(props: {
         markdown={markdown}
         skills={props.skills}
         textStyle={props.markdownStyles.nativeTextStyle}
+        selectable={props.selectable}
         {...props.linkHandlers}
         renderImage={props.renderImage}
       />
@@ -880,8 +882,8 @@ const NarratedAssistantBody = memo(function NarratedAssistantBody(props: {
         const active = index === props.activeBlock;
         return (
           <View key={`narrate-block:${index}`} className="flex-row items-start">
-            {/* Seek control lives in the left gutter so the native markdown
-                keeps text selection and links, and the text never shifts. */}
+            {/* Explicit seek control in the left gutter; the paragraph itself is
+                also tappable (see the Pressable below). */}
             <View className="-ml-6 w-7 items-center pt-1">
               <Pressable
                 accessibilityRole="button"
@@ -896,12 +898,17 @@ const NarratedAssistantBody = memo(function NarratedAssistantBody(props: {
                 <SymbolView
                   name="play"
                   size={10}
-                  tintColorClassName={active ? "primary-foreground" : "muted-foreground"}
+                  tintColorClassName={active ? "accent-primary-foreground" : "accent-icon-muted"}
                   type="monochrome"
                 />
               </Pressable>
             </View>
-            <View className={cn("-mx-2 flex-1 rounded-lg px-2 py-0.5", active && "bg-primary/10")}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Seek narration to this section"
+              onPress={() => seekToBlock(index)}
+              className={cn("-mx-2 flex-1 rounded-lg px-2 py-0.5", active && "bg-primary/10")}
+            >
               <AssistantMarkdownContent
                 markdown={block}
                 environmentId={props.environmentId}
@@ -910,8 +917,9 @@ const NarratedAssistantBody = memo(function NarratedAssistantBody(props: {
                 onUseArtifactTemplate={props.onUseArtifactTemplate}
                 renderImage={props.renderImage}
                 skills={props.skills}
+                selectable={false}
               />
-            </View>
+            </Pressable>
           </View>
         );
       })}
