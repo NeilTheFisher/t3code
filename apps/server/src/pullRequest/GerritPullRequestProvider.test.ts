@@ -43,7 +43,7 @@ type QueryChanges = GerritCli.GerritCli["Service"]["queryChanges"];
 type Review = GerritCli.GerritCli["Service"]["review"];
 type ReviewJson = GerritCli.GerritCli["Service"]["reviewJson"];
 type UpdateMessage = GerritRestApi.GerritRestApi["Service"]["updateMessage"];
-type ListFiles = GerritRestApi.GerritRestApi["Service"]["listFiles"];
+type ListReviewedFiles = GerritRestApi.GerritRestApi["Service"]["listReviewedFiles"];
 type SetFileReviewed = GerritRestApi.GerritRestApi["Service"]["setFileReviewed"];
 type ListReviewers = GerritRestApi.GerritRestApi["Service"]["listReviewers"];
 type SearchAccounts = GerritRestApi.GerritRestApi["Service"]["searchAccounts"];
@@ -67,7 +67,7 @@ function makeProvider(input: {
   readonly review?: Review;
   readonly reviewJson?: ReviewJson;
   readonly updateMessage?: UpdateMessage;
-  readonly listFiles?: ListFiles;
+  readonly listReviewedFiles?: ListReviewedFiles;
   readonly setFileReviewed?: SetFileReviewed;
   readonly listReviewers?: ListReviewers;
   readonly searchAccounts?: SearchAccounts;
@@ -87,7 +87,7 @@ function makeProvider(input: {
         }),
         Layer.mock(GerritRestApi.GerritRestApi)({
           listComments: () => Effect.succeed([]),
-          listFiles: input.listFiles ?? (() => Effect.succeed([])),
+          listReviewedFiles: input.listReviewedFiles ?? (() => Effect.succeed([])),
           listReviewers: input.listReviewers ?? (() => Effect.succeed([])),
           postReview: () => Effect.void,
           searchAccounts: input.searchAccounts ?? (() => Effect.succeed([])),
@@ -249,16 +249,12 @@ describe("checks", () => {
 });
 
 describe("viewed files", () => {
-  it.effect("reports only the files Gerrit marked reviewed", () => {
-    const listFiles = () =>
-      Effect.succeed([
-        { path: "a.js", reviewed: true },
-        { path: "b.js", reviewed: false },
-      ]);
+  it.effect("reports the files Gerrit has marked reviewed", () => {
+    const listReviewedFiles = () => Effect.succeed([{ path: "a.js", reviewed: true }]);
     return Effect.gen(function* () {
       const provider = yield* makeProvider({
         queryChanges: () => Effect.succeed(page()),
-        listFiles,
+        listReviewedFiles,
       });
       const result = yield* provider.getFilesViewed!(changeRef);
       expect(result).toEqual({ files: [{ path: "a.js", state: "viewed" }], truncated: false });
