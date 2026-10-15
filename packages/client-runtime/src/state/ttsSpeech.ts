@@ -17,8 +17,9 @@ import { type RemoteEnvironmentRequestError } from "../rpc/http.ts";
 import { executeAuthenticatedEnvironmentHttpRequest } from "./environmentHttpAuth.ts";
 import { createEnvironmentCommand } from "./runtime.ts";
 
-// First synthesis on an on-demand TTS server can take about a minute to wake.
-const DEFAULT_TTS_TIMEOUT_MS = 180_000;
+// A synthesis request is one sentence and the server is normally warm, so a long
+// wait only turns a stalled request into an apparent infinite spinner.
+const DEFAULT_TTS_TIMEOUT_MS = 30_000;
 
 export const fetchEnvironmentTtsSpeech = Effect.fn("clientRuntime.state.fetchEnvironmentTtsSpeech")(
   function* (input: {
@@ -82,8 +83,7 @@ export function createTtsSpeechCommand<R, ER>(
 ) {
   return createEnvironmentCommand(runtime, {
     label: "tts:speech",
-    execute: (speech: TtsSpeechInput) =>
-      Effect.gen(function* () {
+    execute: Effect.fn("TtsSpeech.execute")(function* (speech: TtsSpeechInput) {
         const supervisor = yield* EnvironmentSupervisor.EnvironmentSupervisor;
         const loader = yield* TtsSpeechLoader;
         const prepared = yield* SubscriptionRef.get(supervisor.prepared);
