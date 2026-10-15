@@ -31,6 +31,12 @@ interface AudioPlayerState {
   activeParagraphCue: string | null;
   /** Bumped by the mini-player to ask the highlight to reveal the active block. */
   scrollToActiveRequest: number;
+  /**
+   * How many spoken units have audio synthesized so far. Grows as playback
+   * proceeds, and lets the highlight mark newly seekable paragraphs clickable
+   * without re-running on every progress tick.
+   */
+  synthesizedParagraphs: number;
 }
 
 interface AudioPlayerActions {
@@ -44,6 +50,7 @@ interface AudioPlayerActions {
   setVolume: (volume: number) => void;
   setRate: (rate: number) => void;
   setActiveParagraph: (index: number | null, cue: string | null) => void;
+  setSynthesizedParagraphs: (count: number) => void;
   requestScrollToActiveParagraph: () => void;
 }
 export const useAudioPlayerStore = create<AudioPlayerState & AudioPlayerActions>((set) => ({
@@ -60,6 +67,7 @@ export const useAudioPlayerStore = create<AudioPlayerState & AudioPlayerActions>
   activeParagraph: null,
   activeParagraphCue: null,
   scrollToActiveRequest: 0,
+  synthesizedParagraphs: 0,
   setLoading: (id, title, threadRef) =>
     set({
       status: "loading",
@@ -74,6 +82,7 @@ export const useAudioPlayerStore = create<AudioPlayerState & AudioPlayerActions>
       duration: 0,
       activeParagraph: null,
       activeParagraphCue: null,
+      synthesizedParagraphs: 0,
     }),
   setWaking: (id) =>
     set({ status: "waking", playingMessageId: id, error: null, errorMessageId: null }),
@@ -87,6 +96,7 @@ export const useAudioPlayerStore = create<AudioPlayerState & AudioPlayerActions>
       threadRef: null,
       activeParagraph: null,
       activeParagraphCue: null,
+      synthesizedParagraphs: 0,
     }),
   setError: (message, id) =>
     set({
@@ -97,11 +107,14 @@ export const useAudioPlayerStore = create<AudioPlayerState & AudioPlayerActions>
       errorMessageId: id,
       activeParagraph: null,
       activeParagraphCue: null,
+      synthesizedParagraphs: 0,
     }),
   setProgress: (currentTime, duration) => set({ currentTime, duration }),
   setVolume: (volume) => set({ volume }),
   setRate: (rate) => set({ rate }),
   setActiveParagraph: (index, cue) => set({ activeParagraph: index, activeParagraphCue: cue }),
+  setSynthesizedParagraphs: (count) =>
+    set((state) => (state.synthesizedParagraphs === count ? {} : { synthesizedParagraphs: count })),
   requestScrollToActiveParagraph: () =>
     set((state) => ({ scrollToActiveRequest: state.scrollToActiveRequest + 1 })),
 }));
