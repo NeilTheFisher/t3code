@@ -84,3 +84,56 @@ export function splitSpokenUnits(spokenText: string): string[] {
   }
   return units;
 }
+
+const FENCE_OPEN = /^\s*(?:`{3,}|~{3,})/;
+
+/**
+ * Top-level markdown blocks — paragraphs, headings, list runs, tables,
+ * blockquotes — split on blank lines and never inside a fenced code block.
+ *
+ * Rendering and speech share this list, so a spoken unit maps back to the exact
+ * block it came from: that block is what gets highlighted while it plays and
+ * what seeks when tapped.
+ */
+export function splitMarkdownBlocks(markdown: string): string[] {
+  const blocks: string[] = [];
+  let current: string[] = [];
+  let fenceChar: string | null = null;
+  let fenceLength = 0;
+
+  const flush = () => {
+    const block = current.join("\n").trim();
+    if (block.length > 0) blocks.push(block);
+    current = [];
+  };
+
+  for (const line of markdown.replace(/\r\n?/g, "\n").split("\n")) {
+    if (fenceChar === null && FENCE_OPEN.test(line)) {
+      const trimmed = line.trimStart();
+      fenceChar = trimmed[0]!;
+      fenceLength = trimmed.length - trimmed.replace(/^[`~]+/, "").length;
+      current.push(line);
+      continue;
+    }
+    if (fenceChar !== null) {
+      current.push(line);
+      const trimmed = line.trim();
+      if (
+        trimmed.length >= fenceLength &&
+        trimmed[0] === fenceChar &&
+        trimmed.split("").every((char) => char === fenceChar)
+      ) {
+        fenceChar = null;
+        fenceLength = 0;
+      }
+      continue;
+    }
+    if (line.trim().length === 0) {
+      flush();
+      continue;
+    }
+    current.push(line);
+  }
+  flush();
+  return blocks;
+}
