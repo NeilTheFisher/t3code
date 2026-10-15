@@ -296,17 +296,17 @@ function seekToUnit(index: number) {
   if (state.messageId === null || units.length === 0) return;
   const target = Math.max(0, Math.min(index, units.length - 1));
   if (target >= fetchedCount) {
+    // Not fetched yet: arm the seek and reflect it immediately, so the bar and
+    // highlight jump now and playback follows as the audio arrives.
     pendingSeekUnit = target;
+    setActiveBlockFor(target);
+    setProgress(elapsedBefore(target), totalDuration());
     return;
   }
   pendingSeekUnit = null;
   const audio = getPlaylist();
   ignoreFinishUntil = Date.now() + 600;
   audio.skipTo(target);
-  // skipTo only changes the current track and can no-op when the target is
-  // already current, so also rewind within the track to force a restart (this
-  // is what makes "seek back to the paragraph I started on" work).
-  void audio.seekTo(0).catch(() => undefined);
   setActiveBlockFor(target);
   setProgress(elapsedBefore(target), totalDuration());
   if (state.status === "playing") audio.play();
@@ -414,7 +414,6 @@ async function fetchRemaining(
         pendingSeekUnit = null;
         ignoreFinishUntil = Date.now() + 600;
         audio.skipTo(target);
-        void audio.seekTo(0).catch(() => undefined);
         setActiveBlockFor(target);
         setProgress(elapsedBefore(target), totalDuration());
         if (state.status === "playing") audio.play();
