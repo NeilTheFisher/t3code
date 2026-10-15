@@ -112,6 +112,12 @@ let paragraphCues: string[] = [];
  * teardown, so it is null whenever the engine is idle.
  */
 let applyRateChange: ((rate: number) => void) | null = null;
+/**
+ * Set by `startPlayback` while a narration is active: seeks to a paragraph whose
+ * audio doesn't exist yet by synthesizing it immediately (out of order) instead
+ * of waiting for the sequential stream to reach it.
+ */
+let restartFromParagraph: ((index: number) => void) | null = null;
 
 /** Normalized text for cue matching: lowercase, whitespace collapsed. */
 function cueOf(paragraph: string): string {
@@ -179,6 +185,7 @@ function teardown(): void {
   engine = null;
   paragraphCues = [];
   applyRateChange = null;
+  restartFromParagraph = null;
   useAudioPlayerStore.getState().setActiveParagraph(null, null);
 }
 
@@ -370,12 +377,18 @@ export function seekToParagraph(index: number): void {
   if (e === null) return;
   if (useAudioPlayerStore.getState().status === "paused") togglePausePlayback();
   const span = e.paragraphSpans[index];
-  if (span === undefined) {
-    e.pendingSeekParagraph = index;
-    e.pendingSeekTime = null;
+  if (span !== undefined) {
+    seekPlayback(span.start);
     return;
   }
-  seekPlayback(span.start);
+  // No audio for this paragraph yet: synthesize it now (out of order) rather
+  // than waiting for the sequential stream to reach it.
+  if (restartFromParagraph !== null) {
+    restartFromParagraph(index);
+  } else {
+    e.pendingSeekParagraph = index;
+    e.pendingSeekTime = null;
+  }
 }
 
 export interface PlayOptions {
@@ -615,6 +628,31 @@ export async function startPlayback(
     });
   };
   applyRateChange = handleRateChange;
+
+  /**
+   * Seek to a paragraph with no audio yet: keep everything already synthesized,
+   * drop nothing else, and synthesize from the target directly (skipping the
+   * units in between), so it starts within one request. The pending-paragraph
+   * jump in `scheduleArriving` then re-anchors the clock onto it.
+   */
+  const handleSeekToParagraph = (index: number): void => {
+    const keepThrough = e.nextParagraphIndex - 1;
+    if (abortController !== null) abortController.abort();
+    e.chunks = e.chunks.filter((chunk) => chunk.paragraph <= keepThrough);
+    e.paragraphSpans = e.paragraphSpans.slice(0, Math.max(0, keepThrough + 1));
+    e.scheduledDuration = keepThrough >= 0 ? (e.paragraphSpans[keepThrough]?.end ?? 0) : 0;
+    e.synthesizedChars = spokenCharCounts.slice(0, keepThrough + 1).reduce((a, b) => a + b, 0);
+    e.nextParagraphIndex = Math.max(0, keepThrough + 1);
+    e.streamDone = false;
+    e.pendingSeekParagraph = index;
+    e.pendingSeekTime = null;
+    rescheduleAt(e.scheduledDuration);
+    refreshEstimate();
+    void runSynthesis(index).catch(() => {
+      // The worker already reported the failure through the store.
+    });
+  };
+  restartFromParagraph = handleSeekToParagraph;
 
   await runSynthesis(0, controller);
 }
