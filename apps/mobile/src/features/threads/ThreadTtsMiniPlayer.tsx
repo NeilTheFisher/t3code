@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useState } from "react";
 import { ActivityIndicator, Pressable, View } from "react-native";
 
 import { AppText as Text } from "../../components/AppText";
@@ -7,6 +7,7 @@ import {
   NARRATION_RATES,
   pauseMessageTts,
   resumeMessageTts,
+  seekToRatio,
   setNarrationRate,
   skipNarration,
   stopMessageTts,
@@ -35,6 +36,7 @@ export const ThreadTtsMiniPlayer = memo(function ThreadTtsMiniPlayer(props: {
   readonly threadId: string;
 }) {
   const playback = useThreadTtsPlayback(props.threadId);
+  const [barWidth, setBarWidth] = useState(0);
   if (playback === null) return null;
 
   const { isLoading, isPlaying, isPaused, currentTime, duration, rate } = playback;
@@ -108,19 +110,33 @@ export const ThreadTtsMiniPlayer = memo(function ThreadTtsMiniPlayer(props: {
           </Text>
           <View className="flex-row items-center gap-2">
             <View
-              accessibilityRole="progressbar"
-              accessibilityLabel="Narration progress"
+              onLayout={(event) => setBarWidth(event.nativeEvent.layout.width)}
+              onStartShouldSetResponderCapture={() => true}
+              onMoveShouldSetResponderCapture={() => true}
+              onResponderGrant={(event) => {
+                const x = event.nativeEvent.locationX;
+                if (barWidth > 0 && Number.isFinite(x)) seekToRatio(x / barWidth);
+              }}
+              onResponderMove={(event) => {
+                const x = event.nativeEvent.locationX;
+                if (barWidth > 0 && Number.isFinite(x)) seekToRatio(x / barWidth);
+              }}
+              accessibilityRole="adjustable"
+              accessibilityLabel="Narration position"
+              accessibilityHint="Drag to seek"
               accessibilityValue={{
                 min: 0,
                 max: Math.max(1, Math.round(duration)),
                 now: Math.round(currentTime),
               }}
-              className="h-1 flex-1 overflow-hidden rounded-full bg-subtle-strong"
+              className="h-11 flex-1 justify-center"
             >
-              <View
-                className="h-full rounded-full bg-primary"
-                style={{ width: `${Math.round(progressFraction * 100)}%` }}
-              />
+              <View className="h-1 overflow-hidden rounded-full bg-subtle-strong">
+                <View
+                  className="h-full rounded-full bg-primary"
+                  style={{ width: `${Math.round(progressFraction * 100)}%` }}
+                />
+              </View>
             </View>
             <Text className="text-2xs tabular-nums text-foreground-muted">
               {formatTime(currentTime)}

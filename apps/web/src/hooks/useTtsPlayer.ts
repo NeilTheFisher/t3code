@@ -96,6 +96,14 @@ interface EngineState {
   synthesizedChars: number;
   /** First spoken-unit index not yet fully synthesized. */
   nextParagraphIndex: number;
+  /**
+   * A seek past the synthesized extent, applied once synthesis reaches it, so
+   * "seek anywhere" works while synthesis catches up instead of clamping to the
+   * live edge.
+   */
+  pendingSeekTime: number | null;
+  /** A seek to a paragraph with no audio yet, applied when its audio arrives. */
+  pendingSeekParagraph: number | null;
 }
 
 let audioContext: AudioContext | null = null;
@@ -306,11 +314,16 @@ function rescheduleAt(head: number): number {
 export function seekPlayback(seconds: number): void {
   const e = engine;
   if (e === null || !Number.isFinite(seconds)) return;
-  // The scrub bar is driven by the text-length estimate, which can exceed
-  // the synthesized-so-far extent while the stream is still filling. Seeking
-  // past the buffer would anchor the clock ahead of the arrival timeline
-  // and schedule later chunks at negative context times (which start()
-  // throws on); rescheduleAt clamps to the live edge.
+  // Seeking past the synthesized extent can't schedule yet: remember the target
+  // and jump to it once synthesis reaches it (rescheduleAt clamps to the live
+  // edge for now). This is what makes "seek anywhere" work while it fills in.
+  if (seconds > e.scheduledDuration) {
+    e.pendingSeekTime = seconds;
+    e.pendingSeekParagraph = null;
+    rescheduleAt(e.scheduledDuration);
+    return;
+  }
+  e.pendingSeekTime = null;
   rescheduleAt(seconds);
 }
 
@@ -355,12 +368,18 @@ export function canSeekToParagraph(index: number): boolean {
 }
 
 /**
- * Seek to the start of spoken unit `index` of the active narration. No-op for a
- * unit whose audio has not been synthesized yet.
+ * Seek to the start of spoken unit `index` of the active narration. A unit with
+ * no audio yet is remembered and jumped to when its audio arrives.
  */
 export function seekToParagraph(index: number): void {
-  const span = engine?.paragraphSpans[index];
-  if (span === undefined) return;
+  const e = engine;
+  if (e === null) return;
+  const span = e.paragraphSpans[index];
+  if (span === undefined) {
+    e.pendingSeekParagraph = index;
+    e.pendingSeekTime = null;
+    return;
+  }
   seekPlayback(span.start);
 }
 
@@ -439,6 +458,8 @@ export async function startPlayback(
     spokenCharCounts,
     synthesizedChars: 0,
     nextParagraphIndex: 0,
+    pendingSeekTime: null,
+    pendingSeekParagraph: null,
   };
   const e = engine;
 
@@ -492,6 +513,18 @@ export async function startPlayback(
     source.connect(gain);
     source.start(start);
     scheduledSources.push({ source, startedAt: start, duration: buffer.duration });
+
+    // A seek that was waiting for its audio to exist: jump now that it does.
+    if (e.pendingSeekParagraph !== null && unit >= e.pendingSeekParagraph) {
+      const target = e.pendingSeekParagraph;
+      e.pendingSeekParagraph = null;
+      const targetSpan = e.paragraphSpans[target];
+      if (targetSpan !== undefined) rescheduleAt(targetSpan.start);
+    } else if (e.pendingSeekTime !== null && e.scheduledDuration >= e.pendingSeekTime) {
+      const target = e.pendingSeekTime;
+      e.pendingSeekTime = null;
+      rescheduleAt(target);
+    }
 
     const s = useAudioPlayerStore.getState();
     if (s.status === "loading" || s.status === "waking") {
