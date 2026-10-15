@@ -26,13 +26,32 @@ describe("splitSpokenUnits", () => {
 });
 
 describe("splitMarkdownBlocks", () => {
-  it("splits paragraphs on blank lines and keeps headings and lists whole", () => {
+  it("splits paragraphs on blank lines, keeps headings, and splits list items", () => {
     const md = "# Title\n\nFirst para.\n\n- one\n- two\n\nLast para.";
     expect(splitMarkdownBlocks(md)).toEqual([
       "# Title",
       "First para.",
-      "- one\n- two",
+      "- one",
+      "- two",
       "Last para.",
+    ]);
+  });
+
+  it("keeps a numbered item's own marker so numbering survives on its own", () => {
+    const md = "Next steps:\n\n1. First.\n2. Second.\n3. Third.";
+    expect(splitMarkdownBlocks(md)).toEqual([
+      "Next steps:",
+      "1. First.",
+      "2. Second.",
+      "3. Third.",
+    ]);
+  });
+
+  it("keeps a list item's wrapped continuation lines with the item", () => {
+    const md = "1. First line\n   wrapped onto a second line\n2. Second.";
+    expect(splitMarkdownBlocks(md)).toEqual([
+      "1. First line\n   wrapped onto a second line",
+      "2. Second.",
     ]);
   });
 
