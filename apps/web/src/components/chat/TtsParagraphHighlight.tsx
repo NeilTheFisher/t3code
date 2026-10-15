@@ -107,6 +107,9 @@ export const TtsParagraphHighlight = memo(function TtsParagraphHighlight({
   const playingId = useAudioPlayerStore((s) => s.playingMessageId);
   const cue = useAudioPlayerStore((s) => s.activeParagraphCue);
   const scrollRequest = useAudioPlayerStore((s) => s.scrollToActiveRequest);
+  // Grows as more paragraphs are synthesized, so blocks that become seekable
+  // ahead of the playback head are (re)marked clickable.
+  const synthesizedParagraphs = useAudioPlayerStore((s) => s.synthesizedParagraphs);
 
   const active = playingId === messageId && status !== "idle" && cue !== null;
 
@@ -138,7 +141,7 @@ export const TtsParagraphHighlight = memo(function TtsParagraphHighlight({
     if (forceScroll || !isBlockVisible(match)) {
       scrollBlockIntoView(match);
     }
-  }, [active, cue, scrollRequest]);
+  }, [active, cue, scrollRequest, synthesizedParagraphs]);
 
   // Delegated click: any matched block seeks to its paragraph. A single
   // listener survives the markdown DOM re-rendering under us.
