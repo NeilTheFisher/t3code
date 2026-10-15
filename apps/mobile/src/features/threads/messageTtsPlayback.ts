@@ -87,6 +87,8 @@ let activeFetchGeneration = -1;
 let awaitingResume = false;
 /** A seek to a unit not yet fetched, applied once its audio arrives. */
 let pendingSeekUnit: number | null = null;
+/** Ignore a `didJustFinish` until this time; a seek emits one for the old track. */
+let ignoreFinishUntil = 0;
 /** Chosen speed, kept across narrations. */
 let currentRate = 1;
 
@@ -202,10 +204,14 @@ function onPlaylistStatus(status: PlaylistStatusEvent) {
   updateProgress(index, status.currentTime ?? 0);
 
   if (status.didJustFinish) {
-    // ExoPlayer reaches "ended" both at the true end and when it catches up to
-    // the fetch head; only the former means the message is done.
-    if (nextFetchIndex() >= units.length) stopMessageTts();
-    else awaitingResume = true;
+    // A skip emits a finish for the track being left; ignore it so seeking back
+    // to an earlier paragraph doesn't end the narration.
+    if (Date.now() >= ignoreFinishUntil) {
+      // ExoPlayer reaches "ended" both at the true end and when it catches up to
+      // the fetch head; only the former means the message is done.
+      if (nextFetchIndex() >= units.length) stopMessageTts();
+      else awaitingResume = true;
+    }
   }
 }
 
@@ -295,9 +301,15 @@ function seekToUnit(index: number) {
   }
   pendingSeekUnit = null;
   const audio = getPlaylist();
+  ignoreFinishUntil = Date.now() + 600;
   audio.skipTo(target);
+  // skipTo only changes the current track and can no-op when the target is
+  // already current, so also rewind within the track to force a restart (this
+  // is what makes "seek back to the paragraph I started on" work).
+  void audio.seekTo(0).catch(() => undefined);
   setActiveBlockFor(target);
   setProgress(elapsedBefore(target), totalDuration());
+  if (state.status === "playing") audio.play();
 }
 
 /** Seek to a fraction of the whole narration, used by the mini-player scrub bar. */
@@ -317,7 +329,23 @@ export function seekToRatio(ratio: number) {
 
 /** Seek to the first spoken unit of a message block (tap-to-seek in the thread). */
 export function seekToBlock(blockIndex: number) {
-  const start = blockStarts[blockIndex];
+  let start = blockStarts[blockIndex];
+  if (start === undefined) {
+    // A block with no speech of its own (a code fence, an image) still seeks:
+    // fall back to the nearest block that does.
+    for (let offset = 1; offset < blockStarts.length; offset += 1) {
+      const after = blockStarts[blockIndex + offset];
+      if (after !== undefined) {
+        start = after;
+        break;
+      }
+      const before = blockStarts[blockIndex - offset];
+      if (before !== undefined) {
+        start = before;
+        break;
+      }
+    }
+  }
   if (start === undefined) return;
   seekToUnit(start);
 }
@@ -384,7 +412,9 @@ async function fetchRemaining(
       if (pendingSeekUnit !== null && pendingSeekUnit < fetchedCount) {
         const target = pendingSeekUnit;
         pendingSeekUnit = null;
+        ignoreFinishUntil = Date.now() + 600;
         audio.skipTo(target);
+        void audio.seekTo(0).catch(() => undefined);
         setActiveBlockFor(target);
         setProgress(elapsedBefore(target), totalDuration());
         if (state.status === "playing") audio.play();
