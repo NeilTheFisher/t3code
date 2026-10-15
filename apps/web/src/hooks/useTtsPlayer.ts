@@ -22,14 +22,6 @@ import { streamSpeechChunks, TTS_PCM_SAMPLE_RATE } from "~/lib/ttsClient";
 
 const TITLE_MAX_CHARS = 80;
 
-/**
- * How far ahead of the playback head synthesis may run. Keeping it close means
- * a speed change lands on the paragraphs that are still unsynthesized, instead
- * of a whole message already generated at the old speed.
- */
-const SYNTHESIS_LOOKAHEAD_SECONDS = 5;
-const SYNTHESIS_LOOKAHEAD_POLL_MS = 200;
-
 /** Display excerpt of the synthesized text, prepared once at play time. */
 function excerptTitle(text: string): string {
   const trimmed = text.trim().replace(/\s+/g, " ");
@@ -314,6 +306,8 @@ function rescheduleAt(head: number): number {
 export function seekPlayback(seconds: number): void {
   const e = engine;
   if (e === null || !Number.isFinite(seconds)) return;
+  // Seeking while paused resumes playback, so a click always plays.
+  if (useAudioPlayerStore.getState().status === "paused") togglePausePlayback();
   // Seeking past the synthesized extent can't schedule yet: remember the target
   // and jump to it once synthesis reaches it (rescheduleAt clamps to the live
   // edge for now). This is what makes "seek anywhere" work while it fills in.
@@ -374,6 +368,7 @@ export function canSeekToParagraph(index: number): boolean {
 export function seekToParagraph(index: number): void {
   const e = engine;
   if (e === null) return;
+  if (useAudioPlayerStore.getState().status === "paused") togglePausePlayback();
   const span = e.paragraphSpans[index];
   if (span === undefined) {
     e.pendingSeekParagraph = index;
@@ -388,18 +383,6 @@ export interface PlayOptions {
   serverUrl: string;
   /** Synthesis speed for this narration, overriding the shared slider. */
   speed?: number | undefined;
-}
-
-/**
- * Wait until the playback head is within the synthesis lookahead, so speed
- * changes made during playback affect the paragraphs not yet synthesized.
- * Returns immediately when already close (or at the very start).
- */
-async function waitForSynthesisWindow(e: EngineState, signal: AbortSignal): Promise<void> {
-  while (!signal.aborted && engine === e) {
-    if (e.scheduledDuration - currentHead() <= SYNTHESIS_LOOKAHEAD_SECONDS) return;
-    await new Promise((resolve) => setTimeout(resolve, SYNTHESIS_LOOKAHEAD_POLL_MS));
-  }
 }
 
 export async function startPlayback(
@@ -538,21 +521,14 @@ export async function startPlayback(
    * request at a time. Units are sentence-sized, so each request returns its
    * audio quickly and playback starts after the first one. Each call owns its
    * AbortController, so a speed change can abort the running worker and start a
-   * fresh one without the old stream appending stale chunks. Synthesis stays
-   * just ahead of playback (see `waitForSynthesisWindow`).
+   * fresh one without the old stream appending stale chunks. Synthesis runs
+   * through the whole message eagerly so any paragraph is seekable.
    */
   const runSynthesis = (fromIndex: number, owner = new AbortController()): Promise<void> => {
     abortController = owner;
     return (async () => {
       try {
         for (let index = fromIndex; index < units.length; index++) {
-          // The first unit of a run synthesizes immediately (fast start); later
-          // ones wait until playback nears the synthesized edge, so a speed
-          // change only has to redo a short tail.
-          if (index > fromIndex) {
-            await waitForSynthesisWindow(e, owner.signal);
-            if (engine !== e || owner.signal.aborted) return;
-          }
           const unit = units[index]!;
           // The trailing pause is silence the server renders; drop it on the
           // last unit so playback does not end on dead air.
