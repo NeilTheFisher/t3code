@@ -175,6 +175,7 @@ import {
 import { searchableSetting } from "./settingsSearch";
 import { PanelAnimationsPreview } from "./PanelAnimationsPreview";
 import { ProjectFavicon } from "../ProjectFavicon";
+import { TtsModelPicker } from "./TtsModelPicker";
 
 const ENVIRONMENT_IDENTIFICATION_LABELS: Record<EnvironmentIdentificationMode, string> = {
   artwork: "Artwork",
@@ -3370,6 +3371,8 @@ export function GeneralSettingsPanel() {
             </div>
           }
         />
+
+        <TtsModelPicker serverUrl={settings.tts.serverUrl} />
 
         {ttsVoices.length > 1 ? (
           <SettingsRow
