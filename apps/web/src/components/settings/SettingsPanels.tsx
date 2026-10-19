@@ -1249,6 +1249,32 @@ export function ChatSettingsPanel() {
         />
 
         <SettingsRow
+          title="Autoplay spoken messages"
+          description="Automatically read a t3_speak message aloud the first time the agent sends one. Turn off to only play from the play button."
+          resetAction={
+            settings.tts.autoplay !== DEFAULT_UNIFIED_SETTINGS.tts.autoplay ? (
+              <SettingResetButton
+                label="TTS autoplay"
+                onClick={() =>
+                  updateSettings({
+                    tts: { ...settings.tts, autoplay: DEFAULT_UNIFIED_SETTINGS.tts.autoplay },
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.tts.autoplay}
+              onCheckedChange={(checked) =>
+                updateSettings({ tts: { ...settings.tts, autoplay: Boolean(checked) } })
+              }
+              aria-label="Autoplay spoken messages"
+            />
+          }
+        />
+
+        <SettingsRow
           title="Server URL"
           description="Leave blank to synthesize through this server (recommended). Set a URL to use an external OpenAI-compatible TTS server, e.g. http://127.0.0.1:8880."
           resetAction={
