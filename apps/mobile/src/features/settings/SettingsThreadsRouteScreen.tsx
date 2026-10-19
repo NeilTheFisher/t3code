@@ -47,6 +47,7 @@ export function SettingsThreadsRouteScreen() {
           contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 18) + 18 }}
         >
           <AutoSettleSettingsRows />
+          <SpokenSettingsSection />
           <BetaSettingsSection />
           <LegacySettingsSection />
         </ScrollView>
@@ -238,6 +239,39 @@ function AutoSettleSettingsRows() {
           </View>
         </SettingsSection>
       ) : null}
+    </View>
+  );
+}
+
+/**
+ * Device-local beta toggles, the counterpart of web's Working section (beta)
+ * in Settings → General.
+ */
+/**
+ * Device-local counterpart of web's Settings → General → Text-to-speech →
+ * Autoplay. Mobile has no client-settings sync, so this lives in mobile
+ * preferences and defaults to on.
+ */
+function SpokenSettingsSection() {
+  const savePreferences = useAtomSet(updateMobilePreferencesAtom);
+  const preferences = useAtomValue(mobilePreferencesAtom);
+  const speakAutoplay =
+    !AsyncResult.isSuccess(preferences) || preferences.value.speakAutoplay !== false;
+
+  return (
+    <View className="gap-3">
+      <SettingsSection title="Spoken messages">
+        <SettingsSwitchRow
+          icon="speaker.wave.2"
+          label="Autoplay spoken messages"
+          value={speakAutoplay}
+          onValueChange={(value) => savePreferences({ speakAutoplay: value })}
+        />
+      </SettingsSection>
+      <Text className="px-2 text-sm text-foreground-muted">
+        Automatically read a t3_speak message aloud the first time the agent sends one. Turn off to
+        only play from the play button.
+      </Text>
     </View>
   );
 }

@@ -192,6 +192,7 @@ import {
 import * as OrchestrationHttp from "./orchestration-v2/http.ts";
 import * as ProjectHttp from "./project/http.ts";
 import * as TtsHttp from "./voice/http.ts";
+import { layerManagedTts } from "./voice/managedTts.ts";
 import * as NetService from "@t3tools/shared/Net";
 import * as RelayClient from "@t3tools/shared/relayClient";
 import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale";
@@ -713,6 +714,9 @@ const layerMakeRoutes = Layer.mergeAll(
     ServerHttp.layerTtsSpeechRoute,
     ServerHttp.layerTtsVoicesRoute,
     ServerHttp.layerTtsModelsRoute,
+    // Starts the host's paradee-tts service as a supervised child (or adopts
+    // one already answering the bind) so TTS ships with the server.
+    layerManagedTts,
     ServerHttp.layerAssetRoute,
     ServerHttp.layerAttachmentUploadRoute,
     DeviceHubProxy.layer,

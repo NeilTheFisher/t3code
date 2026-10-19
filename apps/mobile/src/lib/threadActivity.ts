@@ -65,10 +65,12 @@ import { formatDuration } from "@t3tools/shared/orchestrationTiming";
 import { truncate } from "@t3tools/shared/String";
 import type { HtmlRenderReference } from "@t3tools/shared/htmlRender";
 import type { McpAppReference } from "@t3tools/shared/mcpApp";
+import type { SpeakReference } from "@t3tools/shared/speak";
 import {
   compactDynamicToolOutput,
   htmlRenderFromToolItem,
   mcpAppFromToolItem,
+  speakFromToolItem,
 } from "@t3tools/shared/toolOutput";
 import * as DateTime from "effect/DateTime";
 
@@ -189,12 +191,20 @@ type RawThreadFeedEntry =
       readonly itemId: TurnItemId;
       readonly revision: string;
       readonly app: McpAppReference;
+    }
+  | {
+      /** An utterance a completed `t3_speak` call asked for, with audio output. */
+      readonly type: "spoken";
+      readonly id: string;
+      readonly createdAt: string;
+      readonly runId: RunId | null;
+      readonly speak: SpeakReference;
     };
 
 export type ThreadFeedEntry = ThreadFeedEntryContent & { readonly continuesWorkLog?: boolean };
 
 type ThreadFeedEntryContent =
-  | Extract<RawThreadFeedEntry, { type: "message" | "html-render" | "mcp-app" }>
+  | Extract<RawThreadFeedEntry, { type: "message" | "html-render" | "mcp-app" | "spoken" }>
   | {
       readonly type: "activity-group";
       readonly id: string;
@@ -1095,7 +1105,8 @@ function deriveThreadFeedRunFolds(
         ? (entry.message.runId ?? runlessKey)
         : entry.type === "activity-group" ||
             entry.type === "html-render" ||
-            entry.type === "mcp-app"
+            entry.type === "mcp-app" ||
+            entry.type === "spoken"
           ? (entry.runId ?? runlessKey)
           : null;
     if (!ownRunId) continue;
@@ -1156,6 +1167,7 @@ function deriveThreadFeedRunFolds(
             entry.id !== terminalAssistantId &&
             entry.type !== "html-render" &&
             entry.type !== "mcp-app" &&
+            entry.type !== "spoken" &&
             !(
               entry.type === "activity-group" &&
               entry.activities.some(
@@ -2066,6 +2078,22 @@ export function buildThreadFeed(
       projectedEntriesCache.set(row, { attemptId, entry });
       entries.push(entry);
       entryRows.push(index);
+      continue;
+    }
+    const speak =
+      item.type === "dynamic_tool" && item.status === "completed"
+        ? speakFromToolItem(item)
+        : undefined;
+    if (speak) {
+      const entry: RawThreadFeedEntry = {
+        type: "spoken",
+        id: `spoken:${row.visibility}:${row.sourceThreadId}:${row.sourceItemId}`,
+        createdAt,
+        runId: item.runId,
+        speak,
+      };
+      projectedEntriesCache.set(row, { attemptId, entry });
+      entries.push(entry);
       continue;
     }
     if (item.type === "user_message" || item.type === "assistant_message") {

@@ -298,6 +298,7 @@ export const DEFAULT_TTS_VOICE = "af_heart";
 
 export const TtsClientSettings = Schema.Struct({
   enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  autoplay: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   serverUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_TTS_SERVER_URL))),
   voice: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_TTS_VOICE))),
 });

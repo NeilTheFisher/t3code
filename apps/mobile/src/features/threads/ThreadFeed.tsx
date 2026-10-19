@@ -212,6 +212,7 @@ import { resolveThreadFeedFixedItemSize } from "./thread-feed-item-size";
 import { htmlRenderFrameHeight } from "@t3tools/shared/htmlRender";
 import { htmlRenderRowHeight, ThreadHtmlRender } from "./HtmlRenderWebView";
 import { ThreadMcpApp } from "./McpAppWebView";
+import { ThreadSpokenRow } from "./ThreadSpokenRow";
 import { useMarkdownCodeHighlight } from "./markdownCodeHighlightState";
 import {
   assetEnvironment,
@@ -1140,6 +1141,18 @@ function renderFeedEntry(
         revision={entry.revision}
         app={entry.app}
         width={props.contentWidth}
+      />
+    );
+  }
+
+  if (entry.type === "spoken") {
+    return (
+      <ThreadSpokenRow
+        entryId={entry.id}
+        threadId={props.threadId}
+        environmentId={props.environmentId}
+        speak={entry.speak}
+        tintColor={iconSubtleColor}
       />
     );
   }

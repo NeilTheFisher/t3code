@@ -3065,16 +3065,24 @@ function SpokenTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "spoken"
   const id = MessageId.make(`spoken:${row.id}`);
   const isActive = status !== "idle" && playingId === id;
 
-  // Speak it once when it appears (gated on the Text-to-speech setting). The
-  // queue dedupes by entry id, so a re-mount never speaks it twice.
+  // Speak it once when it appears (gated on the Text-to-speech and autoplay
+  // settings). The queue dedupes by entry id, so a re-mount never speaks it twice.
   useEffect(() => {
-    if (!tts.enabled) return;
+    if (!tts.enabled || tts.autoplay === false) return;
     enqueueSpoken(
       { id: row.id, text: row.speak.text },
       { voice: tts.voice, serverUrl: tts.serverUrl, speed: row.speak.speed },
       row.speak.interrupt === true,
     );
-  }, [row.id, row.speak.text, row.speak.interrupt, tts.enabled, tts.voice, tts.serverUrl]);
+  }, [
+    row.id,
+    row.speak.text,
+    row.speak.interrupt,
+    tts.enabled,
+    tts.autoplay,
+    tts.voice,
+    tts.serverUrl,
+  ]);
 
   return (
     <div className="flex items-start gap-2 rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
