@@ -172,6 +172,14 @@ export interface Preferences {
   readonly projectGroupingEnabled?: boolean;
   readonly projectGroupingMode?: SidebarProjectGroupingMode;
   readonly toolCallVisibility?: ToolCallVisibility;
+  /**
+   * Device-local counterpart of web's `tts.autoplay` client setting: whether a
+   * `t3_speak` utterance plays automatically the first time the agent sends
+   * one. Mobile has no client-settings sync, so this lives here. Undefined
+   * means on.
+   */
+  readonly speakAutoplay?: boolean;
+  /** Device-local counterpart of web's `sidebarWorkingShelfEnabled` beta. */
   readonly workingShelfEnabled?: boolean;
   /** The kind of question the Workflows tab's Needs you list was last narrowed to. */
   readonly workflowQuestionKind?: string;
@@ -266,6 +274,7 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     projectGroupingEnabled?: boolean;
     projectGroupingMode?: SidebarProjectGroupingMode;
     toolCallVisibility?: ToolCallVisibility;
+    speakAutoplay?: boolean;
     workingShelfEnabled?: boolean;
     workflowQuestionKind?: string;
     useLastProjectForNewThreads?: boolean;
@@ -412,6 +421,9 @@ function sanitizePreferences(parsed: Preferences): Preferences {
   }
   if (isToolCallVisibility(parsed.toolCallVisibility)) {
     preferences.toolCallVisibility = parsed.toolCallVisibility;
+  }
+  if (typeof parsed.speakAutoplay === "boolean") {
+    preferences.speakAutoplay = parsed.speakAutoplay;
   }
   if (typeof parsed.workingShelfEnabled === "boolean") {
     preferences.workingShelfEnabled = parsed.workingShelfEnabled;
