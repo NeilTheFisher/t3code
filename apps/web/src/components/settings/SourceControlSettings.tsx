@@ -96,6 +96,17 @@ function RedactedAccount(props: { readonly account: string | null }) {
   );
 }
 
+/**
+ * Gerrit authenticates with the SSH key itself, which its probe cannot judge, so it reports auth
+ * as `unknown` by design while still being available. That is the provider working, not a problem,
+ * so unlike every other host's `unknown` it does not read as a warning.
+ */
+function isAvailableWithUnjudgedAuth(
+  item: VcsDiscoveryItem | SourceControlProviderDiscoveryItem,
+): boolean {
+  return isProviderDiscoveryItem(item) && item.kind === "gerrit" && item.auth.status === "unknown";
+}
+
 function itemStatusDot(item: VcsDiscoveryItem | SourceControlProviderDiscoveryItem): string {
   if (isVcsNotReady(item)) return "bg-muted-foreground/35";
   if (isProviderDiscoveryItem(item)) {
