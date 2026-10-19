@@ -132,6 +132,7 @@ import IconLetterCase from "@tabler/icons-react-native/IconLetterCase";
 import IconDownload from "@tabler/icons-react-native/IconDownload";
 import IconSitemap from "@tabler/icons-react-native/IconSitemap";
 import IconUpload from "@tabler/icons-react-native/IconUpload";
+import IconVolume2 from "@tabler/icons-react-native/IconVolume2";
 import IconUserCircle from "@tabler/icons-react-native/IconUserCircle";
 import IconUserCheck from "@tabler/icons-react-native/IconUserCheck";
 import IconUserX from "@tabler/icons-react-native/IconUserX";
@@ -255,6 +256,7 @@ const ANDROID_ICON_BY_SF_SYMBOL = {
   "pin.slash": IconPinnedOff,
   play: IconPlayerPlay,
   pause: IconPlayerPause,
+  "pause.fill": IconPlayerPause,
   plus: IconPlus,
   minus: IconMinus,
   "slash.circle": IconBan,
@@ -276,6 +278,7 @@ const ANDROID_ICON_BY_SF_SYMBOL = {
   star: IconStar,
   "star.fill": IconStarFilled,
   "sun.max": IconSun,
+  "speaker.wave.2": IconVolume2,
   "stop.fill": IconPlayerStopFilled,
   target: IconTarget,
   terminal: IconTerminal2,
