@@ -8,7 +8,6 @@ import { isDevProxiedPath } from "@t3tools/shared/devProxy";
 import { injectMcpAppCookieBootstrap, injectMcpAppThemeBootstrap } from "@t3tools/shared/mcpApp";
 import { decodeOtlpTraceRecords } from "@t3tools/shared/observability";
 import * as ByteSize from "effect/ByteSize";
-import * as Data from "effect/Data";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -449,6 +448,47 @@ export const layerTtsVoicesRoute = HttpRouter.add(
     Effect.catchCause(() =>
       Effect.succeed(
         HttpServerResponse.text('{"voices":[]}', {
+          status: 502,
+          contentType: "application/json",
+        }),
+      ),
+    ),
+  ),
+);
+
+const TTS_MODELS_PATH = "/v1/models";
+
+// One wildcard proxy for the TTS model registry (list, install, delete, activate):
+// the upstream owns the path, and same-origin keeps remote clients off the host's
+// loopback port.
+export const layerTtsModelsRoute = HttpRouter.add(
+  "*",
+  `${TTS_MODELS_PATH}/*`,
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const method = request.method;
+    if (method !== "GET" && method !== "POST" && method !== "DELETE") {
+      return HttpServerResponse.text("Method Not Allowed", { status: 405 });
+    }
+    const url = HttpServerRequest.toURL(request);
+    if (Option.isNone(url)) {
+      return HttpServerResponse.text("Bad Request", { status: 400 });
+    }
+    const httpClient = HttpClient.withScope(yield* HttpClient.HttpClient);
+    const upstream = HttpClientRequest.make(method)(
+      ttsUpstreamPath(`${url.value.pathname}${url.value.search}`),
+    );
+    const response = yield* httpClient.execute(upstream);
+    const body = yield* response.text;
+    return HttpServerResponse.text(body, {
+      status: response.status,
+      contentType: "application/json",
+      headers: { "cache-control": "no-store" },
+    });
+  }).pipe(
+    Effect.catchCause(() =>
+      Effect.succeed(
+        HttpServerResponse.text('{"models":[]}', {
           status: 502,
           contentType: "application/json",
         }),
