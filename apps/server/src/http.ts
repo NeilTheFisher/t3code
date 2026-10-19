@@ -455,6 +455,49 @@ export const layerTtsVoicesRoute = HttpRouter.add(
   ),
 );
 
+const TTS_MODELS_PATH = "/v1/models";
+
+// One wildcard proxy for the TTS service's model registry: `GET /v1/models`,
+// `GET /v1/models/:id`, `POST /v1/models/:id/install`, `DELETE /v1/models/:id`,
+// and `POST /v1/models/:id/activate` all forward verbatim to the upstream, which
+// owns the request path (including the model id). Same-origin here so remote and
+// mobile clients never need the host's loopback port.
+export const layerTtsModelsRoute = HttpRouter.add(
+  "*",
+  `${TTS_MODELS_PATH}/*`,
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const method = request.method;
+    if (method !== "GET" && method !== "POST" && method !== "DELETE") {
+      return HttpServerResponse.text("Method Not Allowed", { status: 405 });
+    }
+    const url = HttpServerRequest.toURL(request);
+    if (Option.isNone(url)) {
+      return HttpServerResponse.text("Bad Request", { status: 400 });
+    }
+    const httpClient = HttpClient.withScope(yield* HttpClient.HttpClient);
+    const upstream = HttpClientRequest.make(method)(
+      ttsUpstreamPath(`${url.value.pathname}${url.value.search}`),
+    );
+    const response = yield* httpClient.execute(upstream);
+    const body = yield* response.text;
+    return HttpServerResponse.text(body, {
+      status: response.status,
+      contentType: "application/json",
+      headers: { "cache-control": "no-store" },
+    });
+  }).pipe(
+    Effect.catchCause(() =>
+      Effect.succeed(
+        HttpServerResponse.text('{"models":[]}', {
+          status: 502,
+          contentType: "application/json",
+        }),
+      ),
+    ),
+  ),
+);
+
 const UNTRACED_REQUEST_PATHS: ReadonlySet<string> = new Set([OTLP_TRACES_PROXY_PATH]);
 
 // HttpRouter.serve builds routes privately; provide the server-wide TracerDisabledWhen to the served layer.
