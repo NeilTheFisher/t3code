@@ -41,7 +41,7 @@ import {
   type ScopedMobileSettingsTarget,
 } from "./settings-scoped-server";
 import { PullRequestGlyph } from "../pull-requests/pullRequestGlyphs";
-import { AutoSettleSettingsRows } from "./ThreadSettingsSections";
+import { AutoSettleSettingsRows, SpokenSettingsSection } from "./ThreadSettingsSections";
 import { supportsSharedSettingsSync } from "@t3tools/client-runtime/state/shared-settings";
 
 type SettingsPage = "threads" | "source-control" | "worktrees" | "maintenance";
@@ -335,6 +335,7 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                       disabled={disabledFor("defaultThreadEnvMode")}
                       onPress={() => write({ defaultThreadEnvMode: choice.mode })}
                     />
+
                   ))}
                 </SettingsSection>
                 <SettingsSection
@@ -395,6 +396,7 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                   />
                 </SettingsSection>
                 <AutoSettleSettingsRows write={write} pending={pendingWrites > 0} />
+                <SpokenSettingsSection />
               </>
             ) : null}
 
