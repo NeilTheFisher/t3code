@@ -710,6 +710,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: [msg("test voice speech model transcription recognition")],
   },
   {
+    id: "thread-workspaces",
+    title: "Thread workspaces (beta)",
+    to: "/settings/general",
+    searchTerms: [
+      "workspace group threads personal work office sidebar footer strip drag organize context",
+    ],
+  },
+  {
     id: "auto-settle-inactive-threads",
     title: msg("Auto-settle inactive threads"),
     to: "/settings/threads",
@@ -822,6 +830,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: msg("Rich text composer"),
     to: "/settings/chat",
     searchTerms: [msg("composer rich text tiptap bold italic markdown styled wysiwyg")],
+  },
+  {
+    id: "composer-collapse",
+    title: "Collapse composer on scroll",
+    to: "/settings/chat",
+    searchTerms: ["composer rest resting scroll wheel conversation timeline shrink minimize"],
   },
   {
     id: "send-shortcut",
@@ -1580,7 +1594,7 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/labs": null,
   "/settings/about": null,
   "/settings/archived": "project-defaults",
-  "/settings/voice": null,
+  "/settings/voice-conversations": null,
 };
 
 const RENAMED_SETTINGS_PATHS: Readonly<Record<string, SettingsPath>> = {
