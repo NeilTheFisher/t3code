@@ -39,9 +39,8 @@ export function LinkBranchPullRequestButton({
                   title: "Could not link pull request",
                   description: error instanceof Error ? error.message : String(error),
                 });
-              } finally {
-                setPending(false);
               }
+              setPending(false);
             }}
           >
             <Link2 className="size-3" />

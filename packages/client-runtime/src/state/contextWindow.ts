@@ -72,6 +72,20 @@ export function latestProviderTurnTokenUsage(
   );
 }
 
+/** The newest compaction's after-count, used to decide whether it supersedes a live report. */
+function latestCompactionUsage(
+  entries: ReadonlyArray<{ readonly item: ThreadStructureTurnItem }>,
+): { readonly updatedAt: string } | null {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (!entry || entry.item.type !== "compaction") continue;
+    const usedTokens = asFiniteNumber(entry.item.afterTokenCount);
+    if (usedTokens === null || usedTokens < 0) continue;
+    return { updatedAt: DateTime.formatIso(entry.item.startedAt ?? entry.item.updatedAt) };
+  }
+  return null;
+}
+
 export function deriveLatestContextWindowSnapshot(
   entries: ReadonlyArray<{
     readonly item: ThreadStructureTurnItem;
@@ -79,7 +93,14 @@ export function deriveLatestContextWindowSnapshot(
   liveUsage?: OrchestrationV2ProviderTurnTokenUsage | null,
   providerThread?: Pick<OrchestrationV2ProviderThread, "contextUsage" | "updatedAt"> | null,
 ): ContextWindowSnapshot | null {
-  if (liveUsage != null) {
+  // A compaction that finished after the live report is the newer truth: the
+  // report still describes the pre-compaction context.
+  const compactionUsage = latestCompactionUsage(entries);
+  if (
+    liveUsage != null &&
+    (compactionUsage === null ||
+      Date.parse(liveUsage.updatedAt) >= Date.parse(compactionUsage.updatedAt))
+  ) {
     const usedTokens = Math.max(0, liveUsage.usedTokens);
     const maxTokens = liveUsage.maxTokens ?? null;
     const usedPercentage =

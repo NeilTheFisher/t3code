@@ -11,6 +11,7 @@ import { cn } from "~/lib/utils";
 import { modelPickerModelKey } from "./modelPickerKeys";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import { formatModelContextWindowTokens, getModelCapabilityLabels } from "../modelMetadata";
+import type { ServerProviderModel } from "@t3tools/contracts";
 
 export const ModelListRow = memo(function ModelListRow(props: {
   index: number;
@@ -31,6 +32,9 @@ export const ModelListRow = memo(function ModelListRow(props: {
   showInstanceBadge: boolean;
   showNewBadge?: boolean;
   unavailable?: boolean;
+  /** Tokens the model can hold, shown in the row's metadata tooltip when known. */
+  contextWindowTokens?: number | undefined;
+  capabilities?: ServerProviderModel["capabilities"] | undefined;
   jumpLabel?: string | null;
   disabledReason?: string | null;
   onToggleFavorite: (instanceId: ProviderInstanceId, slug: string) => void;
@@ -40,53 +44,10 @@ export const ModelListRow = memo(function ModelListRow(props: {
     name: props.name,
     subProvider: props.subProvider,
   };
+  const hasMetadata =
+    props.contextWindowTokens !== undefined ||
+    getModelCapabilityLabels(props.capabilities ?? null).length > 0;
 
-  const modelLabel = (
-    <>
-      <div className="flex min-w-0 items-center gap-2">
-        <div className="min-w-0 truncate text-xs font-medium leading-snug">
-          {props.useTriggerLabel
-            ? getTriggerDisplayModelLabel(props.model)
-            : getDisplayModelName(
-                props.model,
-                props.preferShortName ? { preferShortName: true } : undefined,
-              )}
-        </div>
-        {props.showNewBadge ? (
-          <span
-            className="shrink-0 rounded border border-update/35 bg-update/15 px-0.5 py-px text-3xs font-bold uppercase leading-none tracking-wide text-update-foreground"
-            aria-label="New model"
-          >
-            New
-          </span>
-        ) : null}
-        {props.unavailable ? (
-          <Badge variant="outline" size="sm">
-            Unavailable
-          </Badge>
-        ) : null}
-      </div>
-      {props.showProvider && (
-        <div className="mt-1 flex items-center gap-1.5">
-          <ProviderInstanceIcon
-            driverKind={props.driverKind}
-            displayName={props.providerDisplayName}
-            acpRegistryAgentId={props.acpRegistryAgentId}
-            acpRegistryIconUrl={props.acpRegistryIconUrl}
-            className="size-3"
-            iconClassName="size-3"
-          />
-          <span className="truncate text-xs font-normal leading-snug text-muted-foreground/70">
-            {providerLabel}
-          </span>
-        </div>
-      )}
-    </>
-  );
-
-  const contextWindowTokens = props.model.contextWindowTokens;
-  const capabilityLabels = getModelCapabilityLabels(props.model.capabilities ?? null);
-  const hasMetadata = contextWindowTokens !== undefined || capabilityLabels.length > 0;
   const row = (
     <ComboboxItem
       hideIndicator
@@ -114,18 +75,33 @@ export const ModelListRow = memo(function ModelListRow(props: {
         badgeClassName="right-[-0.125rem] bottom-[-0.125rem] h-3 min-w-3 px-0.5 text-5xs"
       />
       <div className="flex min-w-0 flex-1 items-center gap-2 text-left">
-        <div
-          className="min-w-0 truncate text-sm font-normal leading-snug"
-          // Names the row in full on hover only when it is cut off.
-          onPointerEnter={(event) => {
-            const name = event.currentTarget;
-            name.title = name.scrollWidth > name.clientWidth ? getDisplayModelName(model) : "";
-          }}
-        >
-          {getDisplayModelName(model)}
-          {/* The logo is decorative, so name the provider for screen readers. */}
-          <span className="sr-only">, {props.providerDisplayName}</span>
-        </div>
+        {hasMetadata ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <div
+                  className="min-w-0 truncate text-sm font-normal leading-snug"
+                  data-model-context-trigger=""
+                />
+              }
+            >
+              <ModelRowName
+                name={getDisplayModelName(model)}
+                provider={props.providerDisplayName}
+              />
+            </TooltipTrigger>
+            <TooltipPopup side="left" align="center" className="max-w-64">
+              <ModelMetadataDetails
+                contextWindowTokens={props.contextWindowTokens}
+                capabilities={props.capabilities}
+              />
+            </TooltipPopup>
+          </Tooltip>
+        ) : (
+          <div className="min-w-0 truncate text-sm font-normal leading-snug">
+            <ModelRowName name={getDisplayModelName(model)} provider={props.providerDisplayName} />
+          </div>
+        )}
         {props.isSelected ? <CheckIcon className="size-3.5 shrink-0" aria-hidden="true" /> : null}
         {props.subProvider ? (
           <span className="min-w-0 shrink truncate text-xs text-muted-foreground/70">
@@ -197,3 +173,51 @@ export const ModelListRow = memo(function ModelListRow(props: {
     </Tooltip>
   );
 });
+
+/** The row's model name; the logo is decorative, so the provider is named for screen readers. */
+function ModelRowName(props: { readonly name: string; readonly provider: string }) {
+  return (
+    <>
+      {props.name}
+      <span className="sr-only">, {props.provider}</span>
+    </>
+  );
+}
+
+/** Tokens and capabilities the model advertises, shown beside the row's name. */
+function ModelMetadataDetails(props: {
+  readonly contextWindowTokens: number | undefined;
+  readonly capabilities: ServerProviderModel["capabilities"] | undefined;
+}) {
+  const capabilityLabels = getModelCapabilityLabels(props.capabilities ?? null);
+  return (
+    <div className="space-y-1.5">
+      {props.contextWindowTokens !== undefined ? (
+        <div className="flex items-center gap-4">
+          <span className="text-muted-foreground">Context window</span>
+          <span className="ml-auto font-medium">
+            {formatModelContextWindowTokens(props.contextWindowTokens)} tokens
+          </span>
+        </div>
+      ) : null}
+      {capabilityLabels.length > 0 ? (
+        <div className="border-t border-border/60 pt-1.5">
+          <div className="mb-1 text-3xs font-medium uppercase tracking-wide text-muted-foreground/70">
+            Capabilities
+          </div>
+          <div className="flex flex-wrap gap-x-3 gap-y-1">
+            {capabilityLabels.map((label) => (
+              <span
+                key={label}
+                className="inline-flex items-center gap-1.5 whitespace-nowrap text-muted-foreground"
+              >
+                <span className="size-1 rounded-full bg-muted-foreground/70" />
+                {label}
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
