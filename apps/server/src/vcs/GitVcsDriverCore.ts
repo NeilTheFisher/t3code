@@ -7562,25 +7562,9 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         { concurrency: "unbounded" },
       );
 
-      const localTrackingBranch =
-        remoteExists && !localInputExists
-          ? yield* executeGit(
-              "GitVcsDriver.switchRef.localTrackingBranch",
-              input.cwd,
-              // `:short` prefixes a name a tag shares with `heads/`, so names are unambiguous here.
-              ["for-each-ref", "--format=%(refname:lstrip=2)\t%(upstream)", "refs/heads"],
-              {
-                timeoutMs: 5_000,
-                allowNonZeroExit: true,
-              },
-            ).pipe(
-              Effect.map((result) =>
-                result.exitCode === 0
-                  ? parseTrackingBranchByUpstreamRef(result.stdout, `refs/remotes/${input.refName}`)
-                  : null,
-              ),
-            )
-          : null;
+      // A remote ref maps to the local branch of the same name and nothing else: a
+      // differently named branch that tracks it is a different branch.
+      const localTrackingBranch = null;
 
       const localTrackedBranchCandidate =
         remoteExists && !localInputExists && !localTrackingBranch
