@@ -1,8 +1,8 @@
 import { memo, useState } from "react";
 import { ActivityIndicator, Pressable, View } from "react-native";
 
-import { AppText as Text } from "../../components/AppText";
-import { SymbolView } from "../../components/AppSymbol";
+import { AppText as Text } from "../../components/ui/AppText";
+import { SymbolView } from "../../components/ui/AppSymbol";
 import {
   NARRATION_RATES,
   pauseMessageTts,
@@ -25,12 +25,9 @@ function formatTime(seconds: number): string {
 }
 
 /**
- * Compact narration bar docked above this thread's composer while a message in
- * this thread is playing. Reads the module-level player, so it survives message
- * rows recycling and shows playback started from any play button.
- *
- * Play/pause, 15s skip back/forward, a speed pill, and stop. No volume control —
- * the device's own volume handles that.
+ * Compact narration bar docked above the composer while a message in this thread
+ * plays. Reads the module-level player, so it survives row recycling and shows
+ * playback started from any play button. Play/pause, 15s skips, speed, stop.
  */
 export const ThreadTtsMiniPlayer = memo(function ThreadTtsMiniPlayer(props: {
   readonly threadId: string;
