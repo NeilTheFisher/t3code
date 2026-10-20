@@ -2,6 +2,7 @@ import { type LiveActivity } from "expo-widgets";
 import {
   configureAndroidAgentNotifications,
   clearAndroidAgentNotifications,
+  subscribeAndroidAgentNotificationsTopic,
 } from "./androidNotifications";
 import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
@@ -47,6 +48,9 @@ import { supportsAgentAwarenessPush } from "./capabilities";
 import { makeRelayDeviceRegistrationRequest, resolveApsEnvironment } from "./registrationPayload";
 
 const REMOTE_ACTIVITY_REGISTRATION_RETRY_MS = 15_000;
+// Broadcast topic the self-hosted Android push watcher sends to. Topic pushes
+// avoid per-device FCM token registration on the host.
+const ANDROID_PUSH_TOPIC = "t3-agent-activity";
 
 const AgentAwarenessOperation = Schema.Literals([
   "read-notification-permissions",
@@ -702,35 +706,70 @@ const registerDevice = Effect.fn("remoteRegistration.registerDevice")(function* 
     return;
   }
 
-  logRegistrationDebug("device registration loading local state", { expectedGeneration });
-  const [deviceId, storedPreferences] = yield* Effect.all([
-    Effect.tryPromise({
-      try: () => loadOrCreateAgentAwarenessDeviceId(),
-      catch: (cause) =>
-        new AgentAwarenessOperationError({
-          operation: "load-device-registration-identifier",
-          cause,
-        }),
-    }),
-    Effect.tryPromise({
-      try: () => loadPreferences(),
-      catch: (cause) =>
-        new AgentAwarenessOperationError({
-          operation: "load-device-registration-preferences",
-          cause,
-        }),
-    }),
-  ]);
-  const preferences = mergeAgentAwarenessRegistrationPreferences(
-    storedPreferences,
-    input.preferencesOverride,
-  );
-  if (expectedGeneration !== deviceRegistrationGeneration) return;
-  if (relayTokenProvider && relayTokenProviderIdentity) {
-    configureAndroidAgentNotifications(
-      deviceId,
-      relayTokenProviderIdentity,
-      preferences.liveActivitiesEnabled !== false,
+    logRegistrationDebug("device registration loading local state", { expectedGeneration });
+    const [deviceId, storedPreferences] = yield* Effect.all([
+      Effect.tryPromise({
+        try: () => loadOrCreateAgentAwarenessDeviceId(),
+        catch: (cause) =>
+          new AgentAwarenessOperationError({
+            operation: "load-device-registration-identifier",
+            cause,
+          }),
+      }),
+      Effect.tryPromise({
+        try: () => loadPreferences(),
+        catch: (cause) =>
+          new AgentAwarenessOperationError({
+            operation: "load-device-registration-preferences",
+            cause,
+          }),
+      }),
+    ]);
+    const preferences = mergeAgentAwarenessRegistrationPreferences(
+      storedPreferences,
+      input.preferencesOverride,
+    );
+    if (expectedGeneration !== deviceRegistrationGeneration) return;
+    if (relayTokenProvider && relayTokenProviderIdentity) {
+      configureAndroidAgentNotifications(
+        deviceId,
+        relayTokenProviderIdentity,
+        preferences.liveActivitiesEnabled !== false,
+      );
+    }
+    const pushTokenRegistration = yield* nativePushTokenRegistration(input?.observedPushToken);
+    if (Platform.OS === "android" && pushTokenRegistration.notificationsEnabled) {
+      // The local push sender targets a topic instead of per-device tokens, so
+      // a new phone starts receiving without any setup on the host.
+      subscribeAndroidAgentNotificationsTopic(ANDROID_PUSH_TOPIC);
+    }
+    logRegistrationDebug("device registration local state ready", {
+      expectedGeneration,
+      notificationsEnabled: pushTokenRegistration.notificationsEnabled,
+    });
+    const bundleId =
+      Platform.OS === "android"
+        ? Constants.expoConfig?.android?.package?.trim()
+        : Constants.expoConfig?.ios?.bundleIdentifier?.trim();
+    yield* registerDeviceWithRelay(
+      makeRelayDeviceRegistrationRequest({
+        deviceId,
+        label:
+          Constants.deviceName?.trim() ||
+          (Platform.OS === "android" ? "Android device" : "iOS device"),
+        ...(Platform.OS === "android"
+          ? { platform: "android" as const, androidApiLevel: Number(Platform.Version) }
+          : { platform: "ios" as const, iosMajorVersion: iosMajorVersion() }),
+        appVersion: Constants.expoConfig?.version,
+        ...(bundleId ? { bundleId } : {}),
+        ...(Platform.OS === "ios"
+          ? { apsEnvironment: resolveApsEnvironment(Constants.expoConfig?.extra?.appVariant) }
+          : {}),
+        ...(pushTokenRegistration.pushToken ? { pushToken: pushTokenRegistration.pushToken } : {}),
+        notificationsEnabled: pushTokenRegistration.notificationsEnabled,
+        preferences,
+      }),
+      expectedGeneration,
     );
   }
   const pushTokenRegistration = yield* nativePushTokenRegistration(input?.observedPushToken);

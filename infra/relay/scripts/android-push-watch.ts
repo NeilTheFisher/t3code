@@ -32,12 +32,20 @@ import * as FcmClient from "../src/agentActivity/FcmClient.ts";
 import * as FcmDeliveries from "../src/agentActivity/FcmDeliveries.ts";
 import { makeAggregateState } from "../src/agentActivity/agentActivityAggregate.ts";
 
-const Device = Schema.Struct({
-  token: Schema.NonEmptyString,
-  deviceId: Schema.NonEmptyString,
-  userId: Schema.NonEmptyString,
-  packageName: Schema.NonEmptyString,
-});
+// Either one device's FCM token, or a topic every installed app subscribes to.
+// The topic form needs no per-device registration on the host.
+const Device = Schema.Union([
+  Schema.Struct({
+    token: Schema.NonEmptyString,
+    deviceId: Schema.NonEmptyString,
+    userId: Schema.NonEmptyString,
+    packageName: Schema.NonEmptyString,
+  }),
+  Schema.Struct({
+    topic: Schema.NonEmptyString,
+    packageName: Schema.NonEmptyString,
+  }),
+]);
 const Connection = Schema.Struct({
   wsUrl: Schema.NonEmptyString,
   bearerToken: Schema.NonEmptyString,
@@ -186,13 +194,14 @@ const main = Effect.gen(function* () {
           states = next;
           if ((!active && !previouslyActive && !alert) || (same && !alert)) return;
           const result = yield* sender.send({
-            token: device.token,
+            ...("topic" in device ? { topic: device.topic } : { token: device.token }),
             packageName: device.packageName,
             alert: alert !== null,
             data: fitFcmData({
               t3_kind: "agent_activity",
-              device_id: device.deviceId,
-              user_id: device.userId,
+              ...("deviceId" in device
+                ? { device_id: device.deviceId, user_id: device.userId }
+                : { broadcast: "1" }),
               updated_at: String(now),
               ...androidActivityData(aggregate),
               ...alert,
