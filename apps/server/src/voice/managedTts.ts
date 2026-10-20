@@ -10,18 +10,10 @@ import * as Schema from "effect/Schema";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 /**
- * The `paradee-tts` OpenAI-compatible speech service, supervised by the T3
- * server itself so it starts alongside it instead of as a separate unit.
- *
- * Resolution (all optional): `T3CODE_MANAGED_TTS=0` disables supervision,
- * `T3CODE_MANAGED_TTS_DIR` points at the service checkout (default
- * `<cwd>/paradee-tts`), and `TTS_HOST`/`TTS_PORT` set the bind the child
- * serves (defaults `127.0.0.1:8880`, matching the app's TTS default).
- *
- * When something already answers the bind (e.g. a leftover standalone unit),
- * the server adopts it and spawns nothing. Otherwise it starts the venv's
- * `server.py`, waits for the port to accept, and respawns on unexpected exit
- * with backoff. Shutdown kills the child.
+ * The `paradee-tts` speech service, supervised by this server. `T3CODE_MANAGED_TTS=0`
+ * disables it, `T3CODE_MANAGED_TTS_DIR` selects the checkout, `TTS_HOST`/`TTS_PORT`
+ * the bind. An already-answering bind is adopted; otherwise it spawns, waits, and
+ * respawns with backoff. Shutdown kills the child.
  */
 
 export interface ManagedTtsConfig {
@@ -38,7 +30,7 @@ const HEALTH_POLL_MS = 500;
 const HEALTH_TIMEOUT_MS = 120_000;
 const MAX_BACKOFF_MS = 30_000;
 
-/** Pure resolution so the env/dir/dir layout is unit-testable without spawning. */
+/** Pure resolution so the env/dir layout is unit-testable without spawning. */
 export function resolveManagedTtsConfig(env: NodeJS.ProcessEnv, cwd: string): ManagedTtsConfig {
   const directory = env.T3CODE_MANAGED_TTS_DIR ?? `${cwd}/paradee-tts`;
   const port = Number.parseInt(env.TTS_PORT ?? "", 10);
@@ -92,8 +84,9 @@ const tcpProbe = (host: string, port: number): Effect.Effect<boolean> =>
     socket.setTimeout(1_000, () => done(false));
   });
 
-const waitHealthy = (config: ManagedTtsConfig): Effect.Effect<void, ManagedTtsHealthTimeoutError> =>
-  Effect.gen(function* () {
+const waitHealthy = Effect.fn("ManagedTts.waitHealthy")(function* (
+  config: ManagedTtsConfig,
+): Effect.fn.Return<void, ManagedTtsHealthTimeoutError> {
     const startedAt = yield* Clock.currentTimeMillis;
     const deadline = startedAt + HEALTH_TIMEOUT_MS;
     for (;;) {
@@ -136,15 +129,13 @@ const superviseOnce = (
         child.kill({ killSignal: "SIGTERM", forceKillAfter: "5 seconds" }).pipe(Effect.ignore),
     ).pipe(
       Effect.flatMap((child) =>
-        Effect.andThen(
-          waitHealthy(config),
-          Effect.andThen(
-            Effect.logInfo(
-              `Managed TTS ready on ${config.host}:${config.port} (attempt ${attempt}).`,
-            ),
-            child.exitCode,
-          ),
-        ),
+        Effect.gen(function* () {
+          yield* waitHealthy(config);
+          yield* Effect.logInfo(
+            `Managed TTS ready on ${config.host}:${config.port} (attempt ${attempt}).`,
+          );
+          yield* child.exitCode;
+        }),
       ),
       Effect.catch((cause) =>
         Effect.logWarning("Managed TTS supervised process ended; backing off.", cause),
@@ -153,11 +144,10 @@ const superviseOnce = (
     ),
   );
 
-const supervise = (
+const supervise = Effect.fn("ManagedTts.supervise")(function* (
   config: ManagedTtsConfig,
   spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
-): Effect.Effect<void> =>
-  Effect.gen(function* () {
+): Effect.fn.Return<void> {
     if (yield* tcpProbe(config.host, config.port)) {
       yield* Effect.logInfo(
         `Managed TTS adopted an already-healthy service on ${config.host}:${config.port}.`,
