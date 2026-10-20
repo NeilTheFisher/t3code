@@ -6,6 +6,7 @@ interface AndroidAgentNotifications {
   configure(deviceId: string, userId: string, scheme: string, ongoingEnabled: boolean): void;
   clear(): void;
   setThreadOnScreen?(path: string | null): void;
+  subscribeToTopic?(topic: string): void;
   openLiveUpdateSettings?(): boolean;
   showShowcaseActivity?(scheme: string, data: Record<string, string>): void;
 }
@@ -36,6 +37,14 @@ export function showAndroidShowcaseAgentActivity(data: Record<string, string>): 
   if (!native?.showShowcaseActivity) return false;
   native.showShowcaseActivity(appScheme(), data);
   return true;
+}
+
+/**
+ * Subscribes this installation to the local push sender's broadcast topic, so
+ * a self-hosted watcher does not need this device's FCM token.
+ */
+export function subscribeAndroidAgentNotificationsTopic(topic: string): void {
+  native?.subscribeToTopic?.(topic);
 }
 
 export function clearAndroidAgentNotifications(): void {

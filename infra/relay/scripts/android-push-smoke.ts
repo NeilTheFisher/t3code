@@ -13,13 +13,20 @@ import * as WebCrypto from "../src/WebCrypto.ts";
 import * as FcmAssertionSigner from "../src/agentActivity/FcmAssertionSigner.ts";
 import * as FcmClient from "../src/agentActivity/FcmClient.ts";
 
-const Device = Schema.Struct({
-  token: Schema.NonEmptyString,
-  deviceId: Schema.NonEmptyString,
-  userId: Schema.NonEmptyString,
-  packageName: Schema.NonEmptyString,
-  deepLink: Schema.optional(Schema.NonEmptyString),
-});
+const Device = Schema.Union([
+  Schema.Struct({
+    token: Schema.NonEmptyString,
+    deviceId: Schema.NonEmptyString,
+    userId: Schema.NonEmptyString,
+    packageName: Schema.NonEmptyString,
+    deepLink: Schema.optional(Schema.NonEmptyString),
+  }),
+  Schema.Struct({
+    topic: Schema.NonEmptyString,
+    packageName: Schema.NonEmptyString,
+    deepLink: Schema.optional(Schema.NonEmptyString),
+  }),
+]);
 const decodeDevice = Schema.decodeUnknownEffect(Schema.fromJsonString(Device));
 const Phase = Schema.Literals(["running", "approval", "input", "completed", "failed", "end"]);
 const decodePhase = Schema.decodeUnknownEffect(Phase);
@@ -97,13 +104,14 @@ const main = Effect.gen(function* () {
   const result = yield* FcmClient.FcmClient.pipe(
     Effect.flatMap((client) =>
       client.send({
-        token: device.token,
+        ...("topic" in device ? { topic: device.topic } : { token: device.token }),
         packageName: device.packageName,
         alert: title !== null,
         data: {
           t3_kind: "agent_activity",
-          device_id: device.deviceId,
-          user_id: device.userId,
+          ...("deviceId" in device
+            ? { device_id: device.deviceId, user_id: device.userId }
+            : { broadcast: "1" }),
           updated_at: String(now),
           active: String(active),
           activity_title: active
