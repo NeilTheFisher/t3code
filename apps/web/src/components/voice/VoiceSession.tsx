@@ -395,6 +395,7 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
   const userTraceSequenceRef = useRef(0);
   const assistantTranscriptRef = useRef("");
   const lastCommittedAssistantTranscriptRef = useRef("");
+  const [lastCommittedAssistantTranscript, setLastCommittedAssistantTranscript] = useState("");
   const userTranscriptDeltasRef = useRef(new Map<string, string>());
   const sessionReadyRef = useRef(false);
   const panelGeometry = useVoicePanelGeometry();
@@ -417,7 +418,9 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
     const sessionId = traceSessionIdRef.current;
     const text = transcript.trim();
     if (!sessionId || text.length === 0) return;
-    activeUserTraceEntryIdRef.current ??= `user-turn-${Date.now().toString(36)}-${(++userTraceSequenceRef.current).toString(36)}`;
+    if (activeUserTraceEntryIdRef.current === null) {
+      activeUserTraceEntryIdRef.current = `user-turn-${Date.now().toString(36)}-${(++userTraceSequenceRef.current).toString(36)}`;
+    }
     useVoiceTraceStore.getState().upsertEntry(sessionId, activeUserTraceEntryIdRef.current, {
       kind: "user",
       title: "You",
@@ -729,6 +732,7 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
     activeUserTraceEntryIdRef.current = null;
     assistantTranscriptRef.current = "";
     lastCommittedAssistantTranscriptRef.current = "";
+    setLastCommittedAssistantTranscript("");
     userTranscriptDeltasRef.current.clear();
     sessionReadyRef.current = false;
 
@@ -777,6 +781,7 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
             setAssistantTranscript("");
             assistantTranscriptRef.current = "";
             lastCommittedAssistantTranscriptRef.current = "";
+            setLastCommittedAssistantTranscript("");
             break;
           case "conversation.item.input_audio_transcription.delta":
             if (typeof event.delta === "string") {
@@ -812,6 +817,7 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
               setAssistantTranscript(transcript);
               appendTrace({ kind: "assistant", title: "OpenAI", text: transcript });
               lastCommittedAssistantTranscriptRef.current = transcript;
+              setLastCommittedAssistantTranscript(transcript);
             }
             break;
           }
@@ -859,6 +865,7 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
                 text: assistantTranscriptRef.current,
               });
               lastCommittedAssistantTranscriptRef.current = assistantTranscriptRef.current;
+              setLastCommittedAssistantTranscript(assistantTranscriptRef.current);
             }
             if (toolQueueRef.current.length === 0 && toolsInFlightRef.current === 0) {
               setStatus("listening");
@@ -1059,7 +1066,7 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
                 className="flex-1"
                 entries={displayTraceSession?.entries ?? []}
                 streamingAssistantText={
-                  assistantTranscript === lastCommittedAssistantTranscriptRef.current
+                  assistantTranscript === lastCommittedAssistantTranscript
                     ? undefined
                     : assistantTranscript
                 }

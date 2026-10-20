@@ -47,8 +47,17 @@ import {
   useRef,
   useState,
   type ReactNode,
+  useCallback,
 } from "react";
-import { Platform, Pressable, RefreshControl, ScrollView, View } from "react-native";
+import {
+  Alert,
+  Platform,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  TextInput,
+  View,
+} from "react-native";
 import Animated, {
   FadeIn,
   FadeOut,

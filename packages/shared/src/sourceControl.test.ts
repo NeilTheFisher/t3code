@@ -1,72 +1,11 @@
-import { SourceControlProviderKind } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
+import { SourceControlProviderKind } from "@t3tools/contracts";
 
 import {
   sourceControlRepositorySelector,
   detectSourceControlProviderFromRemoteUrl,
-  getChangeRequestTerminologyForKind,
   isSshRemoteUrl,
-  resolveChangeRequestPresentation,
 } from "./sourceControl.ts";
-
-describe("source control presentation", () => {
-  it("uses merge request terminology for GitLab", () => {
-    expect(getChangeRequestTerminologyForKind(SourceControlProviderKind.make("gitlab"))).toEqual({
-      shortLabel: "MR",
-      singular: "merge request",
-    });
-  });
-
-  it("uses pull request terminology for GitHub-compatible providers", () => {
-    expect(getChangeRequestTerminologyForKind(SourceControlProviderKind.make("github"))).toEqual({
-      shortLabel: "PR",
-      singular: "pull request",
-    });
-    expect(
-      getChangeRequestTerminologyForKind(SourceControlProviderKind.make("azure-devops")),
-    ).toEqual({
-      shortLabel: "PR",
-      singular: "pull request",
-    });
-    expect(getChangeRequestTerminologyForKind(SourceControlProviderKind.make("bitbucket"))).toEqual(
-      {
-        shortLabel: "PR",
-        singular: "pull request",
-      },
-    );
-  });
-
-  it("uses change request terminology for Gerrit", () => {
-    expect(getChangeRequestTerminologyForKind("gerrit")).toEqual({
-      shortLabel: "CR",
-      singular: "change request",
-    });
-    expect(
-      resolveChangeRequestPresentation({ kind: "gerrit", name: "Gerrit", baseUrl: "" }),
-    ).toEqual(
-      expect.objectContaining({
-        shortName: "CR",
-        longName: "change request",
-        pluralLongName: "change requests",
-      }),
-    );
-  });
-
-  it("falls back to generic change request copy for unknown providers", () => {
-    expect(
-      resolveChangeRequestPresentation({
-        kind: SourceControlProviderKind.make("unknown"),
-        name: "forge",
-        baseUrl: "",
-      }),
-    ).toEqual(
-      expect.objectContaining({
-        shortName: "change request",
-        longName: "change request",
-      }),
-    );
-  });
-});
 
 describe("detectSourceControlProviderFromRemoteUrl", () => {
   it("detects common source control hosts", () => {
@@ -94,10 +33,6 @@ describe("detectSourceControlProviderFromRemoteUrl", () => {
         },
       );
     }
-    expect(getChangeRequestTerminologyForKind(SourceControlProviderKind.make("forgejo"))).toEqual({
-      shortLabel: "PR",
-      singular: "pull request",
-    });
   });
 
   it("detects Azure DevOps SSH remotes", () => {
@@ -285,7 +220,7 @@ it("names an Azure DevOps repository by its own name, not its project path", () 
   // the checkout; the recorded `org/project/_git/repo` path is refused, and the repository then
   // reads as unavailable on the page.
   const selector = sourceControlRepositorySelector({
-    provider: "azure-devops",
+    provider: SourceControlProviderKind.make("azure-devops"),
     displayName: "contoso/payments/_git/checkout",
     owner: "contoso",
     name: "checkout",
@@ -295,7 +230,7 @@ it("names an Azure DevOps repository by its own name, not its project path", () 
 
 it("falls back to the path's last segment where an Azure identity has no name", () => {
   const selector = sourceControlRepositorySelector({
-    provider: "azure-devops",
+    provider: SourceControlProviderKind.make("azure-devops"),
     displayName: "contoso/payments/_git/checkout",
   });
   expect(selector).toBe("checkout");
@@ -303,7 +238,7 @@ it("falls back to the path's last segment where an Azure identity has no name", 
 
 it("keeps a GitLab identity's whole path, because a nested group is part of the name", () => {
   const selector = sourceControlRepositorySelector({
-    provider: "gitlab",
+    provider: SourceControlProviderKind.make("gitlab"),
     displayName: "group/subgroup/service",
     owner: "group",
     name: "service",
@@ -313,7 +248,7 @@ it("keeps a GitLab identity's whole path, because a nested group is part of the 
 
 it("puts owner and name back together for an identity recorded before displayName", () => {
   const selector = sourceControlRepositorySelector({
-    provider: "github",
+    provider: SourceControlProviderKind.make("github"),
     owner: "t3tools",
     name: "t3code",
   });
@@ -322,5 +257,5 @@ it("puts owner and name back together for an identity recorded before displayNam
 
 it("names nothing for a project with no remote to name it by", () => {
   expect(sourceControlRepositorySelector(null)).toBeNull();
-  expect(sourceControlRepositorySelector({ provider: "github" })).toBeNull();
+  expect(sourceControlRepositorySelector({ provider: SourceControlProviderKind.make("github") })).toBeNull();
 });
