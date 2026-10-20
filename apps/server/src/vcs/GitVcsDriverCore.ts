@@ -458,26 +458,6 @@ function parseUpstreamRefByFirstSeparator(
   };
 }
 
-function parseTrackingBranchByUpstreamRef(stdout: string, upstreamRef: string): string | null {
-  for (const line of stdout.split("\n")) {
-    const trimmedLine = line.trim();
-    if (trimmedLine.length === 0) {
-      continue;
-    }
-    const [branchNameRaw, upstreamBranchRaw = ""] = trimmedLine.split("\t");
-    const branchName = branchNameRaw?.trim() ?? "";
-    const candidateUpstreamRef = upstreamBranchRaw.trim();
-    if (branchName.length === 0 || candidateUpstreamRef.length === 0) {
-      continue;
-    }
-    if (candidateUpstreamRef === upstreamRef) {
-      return branchName;
-    }
-  }
-
-  return null;
-}
-
 function deriveLocalBranchNameFromRemoteRef(branchName: string): string | null {
   const separatorIndex = branchName.indexOf("/");
   if (separatorIndex <= 0 || separatorIndex === branchName.length - 1) {
@@ -5970,25 +5950,9 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         { concurrency: "unbounded" },
       );
 
-      const localTrackingBranch =
-        remoteExists && !localInputExists
-          ? yield* executeGit(
-              "GitVcsDriver.switchRef.localTrackingBranch",
-              input.cwd,
-              // `:short` prefixes a name a tag shares with `heads/`, so names are unambiguous here.
-              ["for-each-ref", "--format=%(refname:lstrip=2)\t%(upstream)", "refs/heads"],
-              {
-                timeoutMs: 5_000,
-                allowNonZeroExit: true,
-              },
-            ).pipe(
-              Effect.map((result) =>
-                result.exitCode === 0
-                  ? parseTrackingBranchByUpstreamRef(result.stdout, `refs/remotes/${input.refName}`)
-                  : null,
-              ),
-            )
-          : null;
+      // A remote ref maps to the local branch of the same name and nothing else: a
+      // differently named branch that tracks it is a different branch.
+      const localTrackingBranch = null;
 
       const localTrackedBranchCandidate = deriveLocalBranchNameFromRemoteRef(input.refName);
       const localTrackedBranchTargetExists =
