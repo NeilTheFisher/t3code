@@ -60,7 +60,7 @@ const stubDeviceHost = (
       origin: "http://device.test",
       http,
       run,
-      androidAvailable: Effect.succeed(true),
+      platformAvailable: () => Effect.succeed(true),
     }),
     helpers: { serveSimAxSettings: null, serveSimCli: null },
     run,

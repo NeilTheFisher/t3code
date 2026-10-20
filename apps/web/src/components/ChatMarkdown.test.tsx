@@ -23,7 +23,10 @@ vi.mock("./chat/MermaidDiagram", () => ({
   // Real Mermaid needs layout APIs jsdom lacks; a rendered diagram is an SVG.
   MermaidDiagram: () => <svg aria-label="Diagram" />,
 }));
-vi.mock("../hooks/useTheme", () => ({ useTheme: () => ({ resolvedTheme: "dark" }) }));
+vi.mock("../hooks/useTheme", () => ({
+  useTheme: () => ({ resolvedTheme: "dark" }),
+  useRenderedAppearance: () => "dark",
+}));
 vi.mock("../hooks/useSettings", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../hooks/useSettings")>();
   const settings = actual.getClientSettings();
@@ -529,7 +532,7 @@ describe("ChatMarkdown streaming", () => {
           currentTarget: {
             checked: true,
             closest: () => ({
-              dataset: { taskMarkerOffset: String(listItem.props["data-task-marker-offset"]) },
+              dataset: { listItemOffset: String(listItem.props["data-list-item-offset"]) },
             }),
           },
         } as unknown as Parameters<typeof onChange>[0]);
