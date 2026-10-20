@@ -887,12 +887,15 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
     nativeUsage,
     ...(rateLimits ? { rateLimits } : {}),
     version,
-    models: applyPreferredCodexDefaultModel(
-      appendCustomCodexModels(
-        enrichCodexModelsFromCache(models, modelCache),
-        input.customModels ?? [],
-      ),
-    ),
+    models:
+      models === undefined
+        ? undefined
+        : applyPreferredCodexDefaultModel(
+            appendCustomCodexModels(
+              enrichCodexModelsFromCache(models, modelCache),
+              input.customModels ?? [],
+            ),
+          ),
     serviceTier: config?.service_tier ?? undefined,
     daybreakEnabled: config === undefined ? undefined : cyberAccess?.daybreak === true,
     // An unread config cannot rule out an API key with the programs turned off.

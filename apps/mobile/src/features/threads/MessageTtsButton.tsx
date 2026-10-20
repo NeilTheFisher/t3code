@@ -2,7 +2,7 @@ import { type EnvironmentId, type MessageId } from "@t3tools/contracts";
 import { memo } from "react";
 import { ActivityIndicator, Pressable, type ColorValue } from "react-native";
 
-import { SymbolView } from "../../components/AppSymbol";
+import { SymbolView } from "../../components/ui/AppSymbol";
 import {
   blocksHaveSpeech,
   playMessageTts,
