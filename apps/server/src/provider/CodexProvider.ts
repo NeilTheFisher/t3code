@@ -736,12 +736,10 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
     nativeUsage,
     ...(rateLimits ? { rateLimits } : {}),
     version,
-    models: applyPreferredCodexDefaultModel(
-      appendCustomCodexModels(
-        enrichCodexModelsFromCache(models, modelCache),
-        input.customModels ?? [],
-      ),
-    ),
+    models:
+      models === undefined
+        ? undefined
+        : applyPreferredCodexDefaultModel(enrichCodexModelsFromCache(models, modelCache)),
     serviceTier,
     skills: skillsResponse ? parseCodexSkillsListResponse(skillsResponse, input.cwd) : [],
   } satisfies CodexAppServerProviderSnapshot;
