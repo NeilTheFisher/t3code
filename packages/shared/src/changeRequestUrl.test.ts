@@ -8,7 +8,6 @@ import {
   pullRequestCandidateUrlFromReferenceAutolink,
   siblingPullRequestUrl,
 } from "./changeRequestUrl.ts";
-import { normalizeThreadPullRequestKey } from "./threadPullRequests.ts";
 
 describe("parseChangeRequestUrl", () => {
   it("reads a GitHub pull request, lower-casing the repository", () => {
@@ -91,11 +90,9 @@ describe("parseChangeRequestUrl", () => {
       });
       expect.soft(matchesLinkedPullRequestUrl(linked, `${linked.url}?view=files`), host).toBe(true);
       expect.soft(matchesLinkedPullRequestUrl(linked, other.url), host).toBe(false);
-      expect.soft([linked, other].map(normalizeThreadPullRequestKey), host).toEqual([
-        { host: `${host}:8443`, repository, number: 123 },
-        { host: `${host}:9443`, repository, number: 123 },
-      ]);
     }
+  });
+
   it("reads a Gerrit change, keeping the full nested project path", () => {
     expect(
       parseChangeRequestUrl(

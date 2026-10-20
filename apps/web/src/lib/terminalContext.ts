@@ -1,7 +1,8 @@
 import { type ThreadId } from "@t3tools/contracts";
-import { formatComposerContextReference } from "@t3tools/shared/composerContextReferences";
-
-import { toKindScopedComposerContextId } from "./composerContextReferences";
+import {
+  formatComposerContextReference,
+  toKindScopedComposerContextId,
+} from "@t3tools/shared/composerContextReferences";
 import { extractTrailingElementContexts, type ParsedElementContextEntry } from "./elementContext";
 
 export interface TerminalContextSelection {
