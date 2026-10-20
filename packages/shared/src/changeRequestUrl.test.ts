@@ -96,6 +96,8 @@ describe("parseChangeRequestUrl", () => {
         { host: `${host}:9443`, repository, number: 123 },
       ]);
     }
+  });
+
   it("reads a Gerrit change, keeping the full nested project path", () => {
     expect(
       parseChangeRequestUrl(

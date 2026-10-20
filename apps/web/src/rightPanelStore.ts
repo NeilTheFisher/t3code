@@ -88,7 +88,6 @@ const RIGHT_PANEL_STORAGE_KEY = "t3code:right-panel-state:v2";
 // v15 adds the webpage surface.
 const RIGHT_PANEL_STORAGE_VERSION = 15;
 
-
 export const PULL_REQUESTS_PANEL_REF = scopeThreadRef(
   EnvironmentId.make("pull-requests-panel"),
   ThreadId.make("pull-requests-panel"),

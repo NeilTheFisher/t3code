@@ -165,18 +165,6 @@ const pumpFrames =
       }
     }
   });
-    const { pull } = yield* source.reader;
-    while (true) {
-      const batch = yield* pull;
-      if (allow === undefined) {
-        yield* sink.writeAll(batch);
-        continue;
-      }
-      for (const frame of batch) {
-        if (allow(frame)) yield* sink.write(frame);
-      }
-    }
-  });
 
 const proxyHttp = Effect.fn("DeviceHubProxy.proxyHttp")(function* (
   request: HttpServerRequest.HttpServerRequest,

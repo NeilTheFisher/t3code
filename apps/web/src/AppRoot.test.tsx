@@ -1,6 +1,6 @@
 import { Children, isValidElement, type ReactElement, type ReactNode } from "react";
 import { RouterProvider } from "@tanstack/react-router";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { ElectronBrowserHost } from "./browser/ElectronBrowserHost";
 import { BrowserProfileReporter } from "./browser/BrowserProfileReporter";
@@ -10,6 +10,11 @@ import { VoiceSessionProvider } from "./components/voice/VoiceSession";
 import { AppAtomRegistryProvider } from "./rpc/atomRegistry";
 import type { AppRouter } from "./router";
 import { AppRoot } from "./AppRoot";
+
+vi.mock("react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react")>();
+  return { ...actual, useEffect: () => {} };
+});
 
 describe("AppRoot", () => {
   it("shares the application atom registry with routed UI and renderer-wide desktop hosts", () => {
