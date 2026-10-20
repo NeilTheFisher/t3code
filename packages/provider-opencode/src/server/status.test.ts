@@ -7,6 +7,7 @@ import { it } from "@effect/vitest";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
@@ -403,7 +404,6 @@ it.effect("keeps Go entitlement absence distinct from failed or malformed usage 
 it.effect("reads Go limits from the workspace console meters and derives percents", () =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
     const directory = yield* fileSystem.makeTempDirectoryScoped({
       prefix: "opencode-console-usage-",
     });
@@ -465,7 +465,103 @@ it.effect("reads Go limits from the workspace console meters and derives percent
         { label: "Go · Monthly", kind: "monthly", usedPercent: 27 },
       ],
     );
-  }).pipe(Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layerDigest))),
+);
+
+it.effect("reads Go limits from the credential-table OAuth grant", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const directory = yield* fileSystem.makeTempDirectoryScoped({
+      prefix: "opencode-console-oauth-",
+    });
+    yield* fileSystem.makeDirectory(path.join(directory, "opencode"), { recursive: true });
+    const databasePath = path.join(directory, "opencode", "opencode.db");
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        const context = yield* Layer.build(NodeSqliteClient.layer({ filename: databasePath }));
+        const db = Context.get(context, SqlClient.SqlClient);
+        yield* db.unsafe(
+          "CREATE TABLE credential (id TEXT PRIMARY KEY, integration_id TEXT, value TEXT, active INTEGER, time_created INTEGER, time_updated INTEGER)",
+        );
+        yield* db.unsafe("INSERT INTO credential VALUES (?, ?, ?, ?, ?, ?)", [
+          "cred_oauth",
+          "opencode",
+          JSON.stringify({
+            type: "oauth",
+            methodID: "device",
+            access: "oauth-access-token",
+            refresh: "oauth-refresh-token",
+            expires: 4102444800000,
+            metadata: {
+              server: "https://opencode.ai/console",
+              accountID: "acc_test",
+              email: "test@example.com",
+              orgID: "wrk_test",
+              orgName: "Default",
+            },
+          }),
+          1,
+          2,
+          2,
+        ]);
+      }),
+    );
+    const resetsAt = "2026-11-04T16:14:52.000Z";
+    const limits = yield* readOpenCodeGoUsageLimits({
+      enabled: true,
+      serverUrl: "",
+      environment: { XDG_DATA_HOME: directory },
+    }).pipe(
+      Effect.provideService(
+        HttpClient.HttpClient,
+        HttpClient.make((request) => {
+          NodeAssert.equal(request.url, "https://opencode.ai/console/api/go/status");
+          NodeAssert.equal(request.headers["x-org-id"], "wrk_test");
+          NodeAssert.equal(request.headers.authorization, "Bearer oauth-access-token");
+          return Effect.succeed(
+            HttpClientResponse.fromWeb(
+              request,
+              Response.json({
+                access: {
+                  meters: {
+                    fiveHour: {
+                      resetsAt,
+                      limitMicroCents: "1200000000",
+                      usedMicroCents: "108530814",
+                    },
+                    week: {
+                      resetsAt,
+                      limitMicroCents: "3000000000",
+                      usedMicroCents: "1627594832",
+                    },
+                    month: {
+                      resetsAt,
+                      limitMicroCents: "6000000000",
+                      usedMicroCents: "1627594832",
+                    },
+                  },
+                },
+              }),
+            ),
+          );
+        }),
+      ),
+    );
+    NodeAssert.equal(limits.unavailable, undefined);
+    NodeAssert.deepEqual(
+      limits.windows.map(({ label, kind, usedPercent }) => ({
+        label,
+        kind,
+        usedPercent: Math.round(usedPercent),
+      })),
+      [
+        { label: "Go · Session", kind: "session", usedPercent: 9 },
+        { label: "Go · Weekly", kind: "weekly", usedPercent: 54 },
+        { label: "Go · Monthly", kind: "monthly", usedPercent: 27 },
+      ],
+    );
+  }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layerDigest))),
 );
 
 it.effect(
@@ -473,7 +569,6 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
       const directory = yield* fileSystem.makeTempDirectoryScoped({
         prefix: "opencode-console-errors-",
       });
@@ -508,22 +603,33 @@ it.effect(
         NodeAssert.equal(limits.unavailable?.reason, testCase.reason);
         NodeAssert.deepEqual(limits.windows, []);
       }
-    }).pipe(Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layerDigest))),
 );
 
 /**
- * The legacy `OpenCodeProviderLive` Layer + `OpenCodeProvider` service tag
- * are deleted. The snapshot-producing logic they wrapped now lives in the
- * standalone `checkOpenCodeProviderStatus(settings, cwd)` Effect, which
- * drivers call directly when building their per-instance snapshot
- * `ManagedServerProvider`. Tests mirror that shape: build a settings payload,
- * invoke the check, assert on the returned snapshot.
+ * The legacy `OpenCodeProviderLive` layer is gone: drivers call
+ * `checkOpenCodeProviderStatus(settings, cwd)` directly when building their
+ * per-instance snapshot, and these tests mirror that shape.
  */
+
+const openCodeVersionProbeResult = () =>
+  runtimeMock.state.runVersionPending
+    ? Effect.never
+    : runtimeMock.state.runVersionError
+      ? Effect.fail(
+          new OpenCodeRuntime.OpenCodeRuntimeError({
+            operation: "runOpenCodeCommand",
+            detail: runtimeMock.state.runVersionError.message,
+            cause: runtimeMock.state.runVersionError,
+          }),
+        )
+      : Effect.succeed({ stdout: runtimeMock.state.versionStdout, stderr: "", code: 0 });
 
 const runtimeMock = {
   state: {
     runVersionError: null as Error | null,
     runVersionPending: false,
+    runVersionDelay: null as Duration.Duration | null,
     versionStdout: DEFAULT_VERSION_STDOUT,
     inventoryError: null as Error | null,
     connectionError: null as Error | null,
@@ -544,6 +650,7 @@ const runtimeMock = {
   reset() {
     this.state.runVersionError = null;
     this.state.runVersionPending = false;
+    this.state.runVersionDelay = null;
     this.state.versionStdout = DEFAULT_VERSION_STDOUT;
     this.state.inventoryError = null;
     this.state.connectionError = null;
@@ -608,17 +715,11 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntime.OpenCodeRuntime["Service"] = {
       };
     }),
   runOpenCodeCommand: () =>
-    runtimeMock.state.runVersionPending
-      ? Effect.never
-      : runtimeMock.state.runVersionError
-        ? Effect.fail(
-            new OpenCodeRuntime.OpenCodeRuntimeError({
-              operation: "runOpenCodeCommand",
-              detail: runtimeMock.state.runVersionError.message,
-              cause: runtimeMock.state.runVersionError,
-            }),
-          )
-        : Effect.succeed({ stdout: runtimeMock.state.versionStdout, stderr: "", code: 0 }),
+    runtimeMock.state.runVersionDelay === null
+      ? openCodeVersionProbeResult()
+      : Effect.sleep(runtimeMock.state.runVersionDelay).pipe(
+          Effect.andThen(openCodeVersionProbeResult()),
+        ),
   createOpenCodeSdkClient: (input) => {
     runtimeMock.state.sdkClientInputs.push(input);
     return {} as unknown as ReturnType<
@@ -650,7 +751,7 @@ beforeEach(() => {
 });
 
 const layerTest = Layer.succeed(OpenCodeRuntime.OpenCodeRuntime, OpenCodeRuntimeTestDouble).pipe(
-  Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+  Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NodeCrypto.layerDigest)),
   Layer.provideMerge(TestHttpClientLive),
 );
 
@@ -745,10 +846,6 @@ it.layer(layerTest)("checkOpenCodeProviderStatus", (it) => {
           ),
           Effect.provide(Logger.layer([Logger.tracerLogger], { mergeWithExisting: false })),
         );
-  it.effect("shows a codex-style missing binary message", () =>
-    Effect.gen(function* () {
-      runtimeMock.state.runVersionError = new Error("spawn opencode ENOENT");
-      const snapshot = yield* checkProvider(makeOpenCodeSettings());
 
         const diagnostics = spans.flatMap((span) =>
           span.events
@@ -776,6 +873,17 @@ it.layer(layerTest)("checkOpenCodeProviderStatus", (it) => {
         }
         NodeAssert.ok(!JSON.stringify(attributes).includes("private-password"));
       }),
+  );
+
+  it.effect("shows a codex-style missing binary message", () =>
+    Effect.gen(function* () {
+      runtimeMock.state.runVersionError = new Error("spawn opencode ENOENT");
+      const snapshot = yield* checkProvider(makeOpenCodeSettings());
+
+      NodeAssert.equal(snapshot.status, "error");
+      NodeAssert.equal(snapshot.installed, false);
+      NodeAssert.equal(snapshot.message, "OpenCode CLI (`opencode`) is not installed or not on PATH.");
+    }),
   );
 
   it.effect("keeps an empty legacy catalog retryable until connected providers list models", () =>
@@ -836,7 +944,7 @@ it.layer(layerTest)("checkOpenCodeProviderStatus", (it) => {
 
   it.effect("waits for a slow but healthy local CLI version probe", () =>
     Effect.gen(function* () {
-      runtimeMock.state.runVersionDelay = "6 seconds";
+      runtimeMock.state.runVersionDelay = Duration.seconds(6);
       const probeFiber = yield* checkProvider(makeOpenCodeSettings()).pipe(Effect.forkChild);
 
       yield* Effect.yieldNow;
