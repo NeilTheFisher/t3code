@@ -50,7 +50,10 @@ import { searchableSetting, sourceControlHostSettingsSearchId } from "./settings
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 import { isSourceControlProviderOffered } from "@t3tools/client-runtime/operations/projects";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
-import { getSourceControlPresentationForKind } from "~/sourceControlPresentation";
+import {
+  getSourceControlPresentationForKind,
+  sourceControlIcon,
+} from "~/sourceControlPresentation";
 
 const EMPTY_DISCOVERY_RESULT: SourceControlDiscoveryResult = {
   versionControlSystems: [],
@@ -145,13 +148,13 @@ function SourceControlItemMark({
     ? getSourceControlPresentationForKind(item.kind).Icon
     : VCS_ICONS[item.kind];
 
-  if (!icon) {
+  if (!Icon) {
     return <span className={cn("size-2 shrink-0 rounded-full", dotClassName)} aria-hidden />;
   }
 
   return (
     <span className="relative inline-flex size-5 shrink-0 items-center justify-center">
-      {icon}
+      <Icon className="size-4.5 text-foreground/80" aria-hidden />
       <span
         className={cn(
           "pointer-events-none absolute -left-0.5 -top-0.5 size-2 rounded-full ring-2 ring-background",
