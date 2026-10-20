@@ -26,6 +26,7 @@ import { Route as ChatNewRouteImport } from './routes/_chat.new'
 import { Route as ChatIssuesRouteImport } from './routes/_chat.issues'
 import { Route as ThreadsEnvironmentIdThreadIdRouteImport } from './routes/threads.$environmentId.$threadId'
 import { Route as ChatSettingsWorktreesRouteImport } from './routes/_chat.settings.worktrees'
+import { Route as ChatSettingsVoiceConversationsRouteImport } from './routes/_chat.settings.voice-conversations'
 import { Route as ChatSettingsVoiceRouteImport } from './routes/_chat.settings.voice'
 import { Route as ChatSettingsThreadsRouteImport } from './routes/_chat.settings.threads'
 import { Route as ChatSettingsStorageRouteImport } from './routes/_chat.settings.storage'
@@ -141,6 +142,12 @@ const ChatSettingsWorktreesRoute = ChatSettingsWorktreesRouteImport.update({
   path: '/worktrees',
   getParentRoute: () => ChatSettingsRoute,
 } as any)
+const ChatSettingsVoiceConversationsRoute =
+  ChatSettingsVoiceConversationsRouteImport.update({
+    id: '/voice-conversations',
+    path: '/voice-conversations',
+    getParentRoute: () => ChatSettingsRoute,
+  } as any)
 const ChatSettingsVoiceRoute = ChatSettingsVoiceRouteImport.update({
   id: '/voice',
   path: '/voice',
@@ -338,6 +345,7 @@ export interface FileRoutesByFullPath {
   '/settings/storage': typeof ChatSettingsStorageRoute
   '/settings/threads': typeof ChatSettingsThreadsRoute
   '/settings/voice': typeof ChatSettingsVoiceRoute
+  '/settings/voice-conversations': typeof ChatSettingsVoiceConversationsRoute
   '/settings/worktrees': typeof ChatSettingsWorktreesRoute
   '/threads/$environmentId/$threadId': typeof ThreadsEnvironmentIdThreadIdRoute
   '/linked/$viaEnvironmentId/$linkedEnvironmentId/$linkedThreadId': typeof ChatLinkedViaEnvironmentIdLinkedEnvironmentIdLinkedThreadIdRoute
@@ -385,6 +393,7 @@ export interface FileRoutesByTo {
   '/settings/storage': typeof ChatSettingsStorageRoute
   '/settings/threads': typeof ChatSettingsThreadsRoute
   '/settings/voice': typeof ChatSettingsVoiceRoute
+  '/settings/voice-conversations': typeof ChatSettingsVoiceConversationsRoute
   '/settings/worktrees': typeof ChatSettingsWorktreesRoute
   '/threads/$environmentId/$threadId': typeof ThreadsEnvironmentIdThreadIdRoute
   '/linked/$viaEnvironmentId/$linkedEnvironmentId/$linkedThreadId': typeof ChatLinkedViaEnvironmentIdLinkedEnvironmentIdLinkedThreadIdRoute
@@ -434,6 +443,7 @@ export interface FileRoutesById {
   '/_chat/settings/storage': typeof ChatSettingsStorageRoute
   '/_chat/settings/threads': typeof ChatSettingsThreadsRoute
   '/_chat/settings/voice': typeof ChatSettingsVoiceRoute
+  '/_chat/settings/voice-conversations': typeof ChatSettingsVoiceConversationsRoute
   '/_chat/settings/worktrees': typeof ChatSettingsWorktreesRoute
   '/threads/$environmentId/$threadId': typeof ThreadsEnvironmentIdThreadIdRoute
   '/_chat/linked/$viaEnvironmentId/$linkedEnvironmentId/$linkedThreadId': typeof ChatLinkedViaEnvironmentIdLinkedEnvironmentIdLinkedThreadIdRoute
@@ -483,6 +493,7 @@ export interface FileRouteTypes {
     | '/settings/storage'
     | '/settings/threads'
     | '/settings/voice'
+    | '/settings/voice-conversations'
     | '/settings/worktrees'
     | '/threads/$environmentId/$threadId'
     | '/linked/$viaEnvironmentId/$linkedEnvironmentId/$linkedThreadId'
@@ -530,6 +541,7 @@ export interface FileRouteTypes {
     | '/settings/storage'
     | '/settings/threads'
     | '/settings/voice'
+    | '/settings/voice-conversations'
     | '/settings/worktrees'
     | '/threads/$environmentId/$threadId'
     | '/linked/$viaEnvironmentId/$linkedEnvironmentId/$linkedThreadId'
@@ -578,6 +590,7 @@ export interface FileRouteTypes {
     | '/_chat/settings/storage'
     | '/_chat/settings/threads'
     | '/_chat/settings/voice'
+    | '/_chat/settings/voice-conversations'
     | '/_chat/settings/worktrees'
     | '/threads/$environmentId/$threadId'
     | '/_chat/linked/$viaEnvironmentId/$linkedEnvironmentId/$linkedThreadId'
@@ -714,6 +727,13 @@ declare module '@tanstack/react-router' {
       path: '/worktrees'
       fullPath: '/settings/worktrees'
       preLoaderRoute: typeof ChatSettingsWorktreesRouteImport
+      parentRoute: typeof ChatSettingsRoute
+    }
+    '/_chat/settings/voice-conversations': {
+      id: '/_chat/settings/voice-conversations'
+      path: '/voice-conversations'
+      fullPath: '/settings/voice-conversations'
+      preLoaderRoute: typeof ChatSettingsVoiceConversationsRouteImport
       parentRoute: typeof ChatSettingsRoute
     }
     '/_chat/settings/voice': {
@@ -949,6 +969,7 @@ interface ChatSettingsRouteChildren {
   ChatSettingsStorageRoute: typeof ChatSettingsStorageRoute
   ChatSettingsThreadsRoute: typeof ChatSettingsThreadsRoute
   ChatSettingsVoiceRoute: typeof ChatSettingsVoiceRoute
+  ChatSettingsVoiceConversationsRoute: typeof ChatSettingsVoiceConversationsRoute
   ChatSettingsWorktreesRoute: typeof ChatSettingsWorktreesRoute
 }
 
@@ -979,6 +1000,7 @@ const ChatSettingsRouteChildren: ChatSettingsRouteChildren = {
   ChatSettingsStorageRoute: ChatSettingsStorageRoute,
   ChatSettingsThreadsRoute: ChatSettingsThreadsRoute,
   ChatSettingsVoiceRoute: ChatSettingsVoiceRoute,
+  ChatSettingsVoiceConversationsRoute: ChatSettingsVoiceConversationsRoute,
   ChatSettingsWorktreesRoute: ChatSettingsWorktreesRoute,
 }
 

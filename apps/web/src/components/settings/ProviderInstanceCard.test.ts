@@ -1,6 +1,15 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
-import { SecretProviderId, type ServerProviderModel } from "@t3tools/contracts";
+import {
+  ProviderDriverKind,
+  ProviderInstanceId,
+  SecretProviderId,
+  type ServerProvider,
+  type ServerProviderModel,
+} from "@t3tools/contracts";
 
+import { ProviderInstanceCard } from "./ProviderInstanceCard";
 import {
   deriveProviderModelsForDisplay,
   nextProviderEnvironmentWithFieldSecret,

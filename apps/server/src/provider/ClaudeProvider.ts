@@ -731,8 +731,8 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   /** Shared with the adapter so turn events reuse the scoped-bucket names this probe saw. */
   scopedLimitNames?: Ref.Ref<ClaudeScopedLimitNames>,
   resolveResetCredits?: (version: string) => Effect.Effect<ServerProviderResetCredits | undefined>,
-  /** Fork: cached per-account usage probe supplied by the driver; skips the print fallback. */
-  resolveUsage?: (
+  /** Fork: the driver's cached per-account usage probe; recorded but not consulted here. */
+  _resolveUsage?: (
     accountIdentity: string | undefined,
   ) => Effect.Effect<ServerProviderUsageLimits | undefined>,
 ): Effect.fn.Return<
@@ -767,7 +767,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     claudeSettings,
     ["--version"],
     providerProbeEnvironment(resolvedEnvironment),
-    cwd,
+    cwd ? { cwd } : undefined,
   ).pipe(
     Effect.timeoutOption(
       resolveProviderProbeTimeoutMs("claude", CLAUDE_VERSION_CHECK_TIMEOUT_MS, resolvedEnvironment),
@@ -930,17 +930,20 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
       apiKeySource: capabilities.apiKeySource,
     });
   const usageCheckedAt = capabilities.usageCheckedAt ?? checkedAt;
-  const usageLimits = !capabilities.usage
-    ? makeUnavailableUsageLimits({ checkedAt, reason: "probeFailed" })
-    : scopedLimitNames
-      ? yield* recordClaudeUsageResponse(scopedLimitNames, {
-          response: capabilities.usage,
-          checkedAt: usageCheckedAt,
-        })
-      : claudeUsageResponseToLimits({
-          response: capabilities.usage,
-          checkedAt: usageCheckedAt,
-        }).limits;
+  const usageLimits =
+    authMetadata?.type === "apiKey" || authMetadata?.type === "bedrock"
+      ? undefined
+      : !capabilities.usage
+        ? makeUnavailableUsageLimits({ checkedAt, reason: "probeFailed" })
+        : scopedLimitNames
+          ? yield* recordClaudeUsageResponse(scopedLimitNames, {
+              response: capabilities.usage,
+              checkedAt: usageCheckedAt,
+            })
+          : claudeUsageResponseToLimits({
+              response: capabilities.usage,
+              checkedAt: usageCheckedAt,
+            }).limits;
   const resetCredits =
     resolveResetCredits &&
     capabilities.subscriptionType &&

@@ -1196,11 +1196,6 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
   if (connectedCount > 0 && catalogModels === undefined) {
     yield* logDiscoveryFailure({ phase: "inventory", isExternalServer, version });
   }
-  const usageLimits = yield* fetchOpenCodeGoUsageLimits({
-    workspaceId: openCodeSettings.goWorkspaceId,
-    authCookie: openCodeSettings.goAuthCookie,
-    checkedAt,
-  });
   return {
     ...buildServerProvider({
       presentation: OPENCODE_PRESENTATION,
@@ -1217,7 +1212,6 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
           status: catalogReady ? "authenticated" : "unknown",
           type: "opencode",
         },
-        ...(usageLimits ? { usageLimits } : {}),
         message:
           connectedCount > 0 && !catalogReady
             ? "OpenCode upstream providers are connected, but it did not list any models yet."
