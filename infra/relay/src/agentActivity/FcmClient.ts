@@ -53,7 +53,8 @@ export class FcmClient extends Context.Service<
   FcmClient,
   {
     readonly send: (input: {
-      readonly token: string;
+      readonly token?: string;
+      readonly topic?: string;
       readonly packageName: string | null;
       readonly data: Readonly<Record<string, string>>;
       readonly alert: boolean;
@@ -127,7 +128,7 @@ const make = Effect.gen(function* () {
         HttpClientRequest.bearerToken(token),
         HttpClientRequest.bodyJson({
           message: {
-            token: input.token,
+            ...(input.topic ? { topic: input.topic } : { token: input.token }),
             data: input.data,
             android: {
               priority: "HIGH",
