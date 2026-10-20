@@ -38,7 +38,7 @@ const HEALTH_POLL_MS = 500;
 const HEALTH_TIMEOUT_MS = 120_000;
 const MAX_BACKOFF_MS = 30_000;
 
-/** Pure resolution so the env/dir/dir layout is unit-testable without spawning. */
+/** Pure resolution so the env/dir layout is unit-testable without spawning. */
 export function resolveManagedTtsConfig(env: NodeJS.ProcessEnv, cwd: string): ManagedTtsConfig {
   const directory = env.T3CODE_MANAGED_TTS_DIR ?? `${cwd}/paradee-tts`;
   const port = Number.parseInt(env.TTS_PORT ?? "", 10);
@@ -136,15 +136,13 @@ const superviseOnce = (
         child.kill({ killSignal: "SIGTERM", forceKillAfter: "5 seconds" }).pipe(Effect.ignore),
     ).pipe(
       Effect.flatMap((child) =>
-        Effect.andThen(
-          waitHealthy(config),
-          Effect.andThen(
-            Effect.logInfo(
-              `Managed TTS ready on ${config.host}:${config.port} (attempt ${attempt}).`,
-            ),
-            child.exitCode,
-          ),
-        ),
+        Effect.gen(function* () {
+          yield* waitHealthy(config);
+          yield* Effect.logInfo(
+            `Managed TTS ready on ${config.host}:${config.port} (attempt ${attempt}).`,
+          );
+          yield* child.exitCode;
+        }),
       ),
       Effect.catch((cause) =>
         Effect.logWarning("Managed TTS supervised process ended; backing off.", cause),
