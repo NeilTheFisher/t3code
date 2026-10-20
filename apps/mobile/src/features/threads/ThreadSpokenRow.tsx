@@ -53,7 +53,7 @@ export const ThreadSpokenRow = memo(function ThreadSpokenRow(props: {
         className="min-w-0 flex-1"
       >
         <Text
-          className="min-w-0 flex-1 text-xs text-muted-foreground"
+          className="min-w-0 flex-1 text-xs text-foreground-muted"
           numberOfLines={expanded ? undefined : 1}
         >
           {speak.text}
