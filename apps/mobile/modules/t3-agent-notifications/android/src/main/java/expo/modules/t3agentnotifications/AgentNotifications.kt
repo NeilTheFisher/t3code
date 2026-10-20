@@ -123,10 +123,15 @@ object AgentNotifications {
     val updatedAt = data["updated_at"]?.toLongOrNull() ?: return
     val deviceId = prefs.getString("deviceId", null)
     val userId = prefs.getString("userId", null)
+    // Topic pushes are addressed to every installation in the Firebase project,
+    // so they cannot carry this device's id. They only reach devices that have
+    // notifications enabled (configured on sign-in).
+    val broadcast = data["broadcast"] == "1"
     val registered = prefs.getBoolean("enabled", false) &&
-      deviceId != null && userId != null &&
-      data["device_id"] == deviceId &&
-      data["user_hash"] == userHash(userId, deviceId)
+      (broadcast ||
+        (deviceId != null && userId != null &&
+          data["device_id"] == deviceId &&
+          data["user_hash"] == userHash(userId, deviceId)))
     val fresh = System.currentTimeMillis() - updatedAt in -MAX_MESSAGE_AGE_MS..MAX_MESSAGE_AGE_MS
     if (registered && fresh && NotificationManagerCompat.from(context).areNotificationsEnabled()) {
       channels(context)
