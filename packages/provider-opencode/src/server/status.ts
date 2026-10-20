@@ -762,11 +762,6 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
   );
   const skills = openCodeSkillsToServerProviderSkills(inventoryExit.value.skills);
   const connectedCount = inventoryExit.value.providerList.connected.length;
-  const usageLimits = yield* fetchOpenCodeGoUsageLimits({
-    workspaceId: openCodeSettings.goWorkspaceId,
-    authCookie: openCodeSettings.goAuthCookie,
-    checkedAt,
-  });
   return {
     ...buildServerProvider({
       presentation: OPENCODE_PRESENTATION,
@@ -783,7 +778,6 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
           status: connectedCount > 0 ? "authenticated" : "unknown",
           type: "opencode",
         },
-        ...(usageLimits ? { usageLimits } : {}),
         message:
           connectedCount > 0
             ? `${connectedCount} upstream provider${connectedCount === 1 ? "" : "s"} connected through ${isExternalServer ? "the configured OpenCode server" : "OpenCode"}.`

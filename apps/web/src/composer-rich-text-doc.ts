@@ -638,9 +638,13 @@ export function buildTiptapContent(
         .map((segment) => {
           if (segment.type === "text") return segment.text;
           const atom = atomJsonForSegment(segment, skillLabelFor);
-          if (!atom) return segment.source;
+          const sourceText =
+            segment.type === "terminal-context"
+              ? INLINE_TERMINAL_CONTEXT_PLACEHOLDER
+              : segment.source;
+          if (!atom) return sourceText;
           atoms.push(atom);
-          atomSources.push(segment.source);
+          atomSources.push(sourceText);
           return sentinel;
         })
         .join("");
@@ -1446,7 +1450,12 @@ export function skillChipReplacements(
   let end = 0;
   for (const segment of splitPromptIntoComposerSegments(map.value)) {
     const start = end;
-    end += segment.type === "text" ? segment.text.length : segment.source.length;
+    end +=
+      segment.type === "text"
+        ? segment.text.length
+        : segment.type === "terminal-context"
+          ? INLINE_TERMINAL_CONTEXT_PLACEHOLDER.length
+          : segment.source.length;
     if (segment.type !== "skill") continue;
     const meta = skillLabelFor(segment.name);
     if (!meta) continue;

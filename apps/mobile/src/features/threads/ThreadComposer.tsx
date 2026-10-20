@@ -27,7 +27,7 @@ import {
 } from "@t3tools/shared/usageLimits";
 import { StackActions, useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { ReactNode } from "react";
-import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { Keyboard, Platform, View, type ViewStyle } from "react-native";
 import { composerImageGallery } from "../../lib/composerImageGallery";
 import { filePreviewGallery } from "../../lib/filePreviewGallery";
@@ -60,6 +60,7 @@ import {
 } from "../../state/use-composer-drafts";
 import { appAtomRegistry } from "../../state/atom-registry";
 import type { ComposerDocumentAttachment } from "../../lib/composerContext";
+import type { DraftComposerAttachment } from "../../lib/composerImages";
 import { useProject, useThreadShells } from "../../state/entities";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 
@@ -368,6 +369,9 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
   const [previewVideo, setPreviewVideo] = useState<VideoPreviewSource | null>(null);
   const [sendEpoch, setSendEpoch] = useState(0);
   const composerDocumentKey = `${scopedThreadKey(props.environmentId, props.selectedThread.id)}:${sendEpoch}`;
+  const composerOwnerKey = scopedThreadKey(props.environmentId, props.selectedThread.id);
+  const composerDraftKey = props.draftKey ?? composerOwnerKey;
+  const { text: draftMessage, attachments: draftAttachments } = useComposerDraft(composerDraftKey);
   const queuedEdit = props.queuedEdit ?? null;
   const hasContent =
     draftMessage.trim().length > 0 ||
@@ -570,8 +574,8 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
       // user is sending a prompt, so those go through as usual.
       if (
         usageLimitsOffered &&
-        isUsageLimitsCommand(props.draftMessage) &&
-        props.draftAttachments.length === 0
+        isUsageLimitsCommand(draftMessage) &&
+        draftAttachments.length === 0
       ) {
         if (openUsageLimits()) onChangeDraftMessage("");
         return;
@@ -584,27 +588,25 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
       // applies the empty document instead of stamping it behind a stale
       // revision and rejecting it.
       setSendEpoch((epoch) => epoch + 1);
-      try {
-        const messageId = await onSendMessage(followUp);
-        if (messageId === null) {
-          return;
-        }
-        // Sending a prompt starts agent work: arm the lock-screen card while the
-        // app is foregrounded and the activity token can be registered. Armed
-        // after the send so its preference read and native Activity start don't
-        // contend with the queued-message feedback on the tap frame.
-        armAgentAwarenessLiveActivityForLocalWork({
-          environmentId: props.environmentId,
-          threadTitle: props.selectedThread.title,
-          projectTitle: props.environmentLabel ?? "T3 Code",
-        });
-      } finally {
+      const messageId = await onSendMessage(followUp).finally(() => {
         inFlightThreadIdsRef.current.delete(threadKey);
+      });
+      if (messageId === null) {
+        return;
       }
+      // Sending a prompt starts agent work: arm the lock-screen card while the
+      // app is foregrounded and the activity token can be registered. Armed
+      // after the send so its preference read and native Activity start don't
+      // contend with the queued-message feedback on the tap frame.
+      armAgentAwarenessLiveActivityForLocalWork({
+        environmentId: props.environmentId,
+        threadTitle: props.selectedThread.title,
+        projectTitle: props.environmentLabel ?? "T3 Code",
+      });
     },
     [
-      props.draftMessage,
-      props.draftAttachments.length,
+      draftMessage,
+      draftAttachments.length,
       onChangeDraftMessage,
       openUsageLimits,
       usageLimitsOffered,

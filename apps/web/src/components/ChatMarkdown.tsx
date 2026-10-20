@@ -288,7 +288,7 @@ export function canUseMarkdownFileShellActions(
   return environmentId !== null && isRemoteOpenResolved && remoteOpenMode === "local-exec";
 }
 
-function hasMarkdownFilePrimaryAction(input: {
+export function hasMarkdownFilePrimaryAction(input: {
   canOpenInEditor: boolean;
   canOpenInBrowser: boolean;
   canOpenInPanel: boolean;
@@ -2512,9 +2512,9 @@ function useChatMarkdownState({
       },
     );
   };
-  const { pullRequestsEnabled, availableEditors, revealInFileManagerLabel } = useAtomValue(
-    markdownServerConfigFieldsAtom(environmentId),
-  );
+  const markdownServerConfig = useAtomValue(markdownServerConfigFieldsAtom(environmentId));
+  const { pullRequestsEnabled, availableEditors, revealInFileManagerLabel } =
+    markdownServerConfig ?? markdownServerConfigFields(null);
   const projects = useProjects();
   const [preferredEditor] = usePreferredEditor(availableEditors);
   const preferredEditorMenuLabel = openInEditorMenuLabel(preferredEditor);

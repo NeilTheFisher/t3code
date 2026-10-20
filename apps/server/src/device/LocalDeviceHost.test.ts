@@ -592,8 +592,14 @@ http.createServer((req,res)=>res.end('ok')).listen(Number(args[args.indexOf('--p
         .readFileString(argumentsPath)
         .pipe(Effect.map((contents) => JSON.parse(contents)))) as ReadonlyArray<string>;
     });
-    expect((yield* hubArguments("linux")).slice(-2)).toEqual(["--platform", "android"]);
+    expect((yield* hubArguments("linux")).slice(-4)).toEqual([
+      "--platform",
+      "android",
+      "--stream-source",
+      "scrcpy",
+    ]);
     expect(yield* hubArguments("darwin")).not.toContain("--platform");
+    expect(yield* hubArguments("darwin")).not.toContain("--stream-source");
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
 

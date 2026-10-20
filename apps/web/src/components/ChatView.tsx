@@ -158,6 +158,7 @@ import {
   useEffect,
   useEffectEvent,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -2640,7 +2641,7 @@ export default function ChatView(props: ChatViewProps) {
     runlessWorkStartedAt !== null;
   // Some providers (OpenCode 1.x) report live usage without a window size, so
   // fill maxTokens from the active model's provider metadata to draw the ring.
-  const activeModelContextWindowTokens = useMemo(() => {
+  const activeModelContextWindowTokens = (() => {
     if (selectedProviderEntry == null) return null;
     const slug = resolveSelectableModel(
       selectedProviderEntry.driverKind,
@@ -2651,8 +2652,8 @@ export default function ChatView(props: ChatViewProps) {
     return (
       selectedProviderEntry.models.find((model) => model.slug === slug)?.contextWindowTokens ?? null
     );
-  }, [activeThread?.modelSelection.model, reportedModelSelection, selectedProviderEntry]);
-  const activeContextWindow = useMemo(() => {
+  })();
+  const activeContextWindow = (() => {
     const liveUsage =
       activeThreadLiveTokenUsage !== null &&
       activeThreadLiveTokenUsage.maxTokens == null &&
@@ -2664,12 +2665,7 @@ export default function ChatView(props: ChatViewProps) {
       liveUsage,
       activeProviderThread,
     );
-  }, [
-    activeThreadLiveTokenUsage,
-    activeModelContextWindowTokens,
-    serverVisibleTurnItems,
-    activeProviderThread,
-  ]);
+  })();
   const pendingBackgroundTasks = useMemo(() => {
     if (serverProjection === null || serverProjection === undefined) {
       return [];
@@ -2694,7 +2690,7 @@ export default function ChatView(props: ChatViewProps) {
         pullRequests: serverProjection.thread.pullRequests,
       }),
     ];
-  })();
+  }, [serverProjection]);
   const activeWorkStartedAt =
     deriveActiveWorkStartedAt(activeActivityRun, activeRuntime, localDispatchStartedAt) ??
     runlessWorkStartedAt;
@@ -2955,25 +2951,21 @@ export default function ChatView(props: ChatViewProps) {
         message,
       }) as const,
   );
-  const modelChangeNotices = useMemo(
-    () =>
-      serverProjection === null
-        ? []
-        : deriveModelChangeNotices(serverProjection.runs, (instanceId, model) => {
-            const provider = providerStatuses.find((status) => status.instanceId === instanceId);
-            const matched = provider?.models.find((candidate) => candidate.slug === model);
-            return matched ? getTriggerDisplayModelName(matched) : null;
-          }),
-    [serverProjection, providerStatuses],
-  );
-  const serverTimelineEntriesWithNotices = useMemo(
-    () => mergeModelChangeNotices(serverTimelineEntries, modelChangeNotices),
-    [serverTimelineEntries, modelChangeNotices],
+  const modelChangeNotices =
+    serverProjection === null
+      ? []
+      : deriveModelChangeNotices(serverProjection.runs, (instanceId, model) => {
+          const provider = providerStatuses.find((status) => status.instanceId === instanceId);
+          const matched = provider?.models.find((candidate) => candidate.slug === model);
+          return matched ? getTriggerDisplayModelName(matched) : null;
+        });
+  const serverTimelineEntriesWithNotices = mergeModelChangeNotices(
+    serverTimelineEntries,
+    modelChangeNotices,
   );
   const timelineEntries = isServerThread ? serverTimelineEntriesWithNotices : draftTimelineEntries;
-  const timelineMessages = useMemo(
-    () => timelineEntries.flatMap((entry) => (entry.kind === "message" ? [entry.message] : [])),
-    [timelineEntries],
+  const timelineMessages = timelineEntries.flatMap((entry) =>
+    entry.kind === "message" ? [entry.message] : [],
   );
   const displayedTimeline = resolveThreadSwitchTimeline({
     loading: timelineEntries.length === 0 && threadSyncPhase !== null,

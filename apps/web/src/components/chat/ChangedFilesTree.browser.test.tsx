@@ -61,6 +61,9 @@ describe("ChangedFilesCard", () => {
           file("README.md", 3),
         ]}
         allDirectoriesExpanded={false}
+        expanded={true}
+        showCompactPreview={false}
+        onExpandedChange={() => {}}
         resolvedTheme="light"
         onToggleAllDirectories={() => {}}
         onOpenTurnDiff={onOpenTurnDiff}

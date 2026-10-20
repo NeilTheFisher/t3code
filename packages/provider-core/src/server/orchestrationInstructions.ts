@@ -37,17 +37,14 @@ ACP fallback: some ACP agents accept the injected MCP server but fail to expose 
 
 When a chart, table, diagram, image collage, or mockup would say more than prose, build a self-contained HTML page, check it with \`html_preview\`, then publish it with \`html_render\` before your final reply. The reader sees the page above that reply, so don't announce or restate it; add only what it doesn't say.`,
   `- When model options are requested or the child keeps the parent's provider instance and model with nonempty \`inheritedOptions\` from \`orchestrator_capabilities\`, use \`delegate_task\` even for native-supported models. Native subagents cannot reliably apply T3 model options. Read the selected model's descriptors from \`orchestrator_capabilities\` and put settings in \`target.options\`, not only in the prompt. Claude commonly uses {"effort":"max","fastMode":true}; Codex uses {"reasoningEffort":"max","serviceTier":"priority"}. Do not translate max to high or ignore unsupported settings: report a capability mismatch. Options inherit only for the same provider instance and model; explicit entries override individual values, and [] or {} clears them. Check the returned providerInstanceId, model, and options against the requested selection.`,
+  `### Speaking aloud
+
+\`t3_speak\` says a short passage aloud through the reader's connected T3 Code clients' text-to-speech. Use it when the user asks to be spoken to (for example, "speak your answers out to me"), or when a short spoken summary or heads-up is more useful heard than read. Pass plain prose, not markdown, code, or lists. Only one utterance plays at a time: by default it queues behind whatever is speaking, so set \`interrupt\` only to correct something you already said. It plays only when the reader has text-to-speech enabled on a connected client.`,
 ];
 
 export const T3_CODE_ORCHESTRATION_INSTRUCTIONS = `
 
 ${T3_CODE_ORCHESTRATION_SECTIONS.join("\n\n")}
-
-When a chart, table, diagram, image collage, or mockup would say more than prose, build a self-contained HTML page, check it with \`html_preview\`, then publish it with \`html_render\` before your final reply. The reader sees the page above that reply, so don't announce or restate it; add only what it doesn't say.
-
-### Speaking aloud
-
-\`t3_speak\` says a short passage aloud through the reader's connected T3 Code clients' text-to-speech. Use it when the user asks to be spoken to (for example, "speak your answers out to me"), or when a short spoken summary or heads-up is more useful heard than read. Pass plain prose, not markdown, code, or lists. Only one utterance plays at a time: by default it queues behind whatever is speaking, so set \`interrupt\` only to correct something you already said. It plays only when the reader has text-to-speech enabled on a connected client.
 `;
 
 export const T3_CODE_BROWSER_TOOL_INSTRUCTIONS = `

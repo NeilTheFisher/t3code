@@ -37,12 +37,16 @@ describe("source control presentation", () => {
   });
 
   it("uses change request terminology for Gerrit", () => {
-    expect(getChangeRequestTerminologyForKind("gerrit")).toEqual({
+    expect(getChangeRequestTerminologyForKind(SourceControlProviderKind.make("gerrit"))).toEqual({
       shortLabel: "CR",
       singular: "change request",
     });
     expect(
-      resolveChangeRequestPresentation({ kind: "gerrit", name: "Gerrit", baseUrl: "" }),
+      resolveChangeRequestPresentation({
+        kind: SourceControlProviderKind.make("gerrit"),
+        name: "Gerrit",
+        baseUrl: "",
+      }),
     ).toEqual(
       expect.objectContaining({
         shortName: "CR",

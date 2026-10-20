@@ -45,18 +45,22 @@ export function GerritCredentialsSettings({
         setToken("");
         toastManager.add({ type: "success", title: "Gerrit token saved" });
         onSaved();
-        return;
+      } else if (!isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        toastManager.add({
+          type: "error",
+          title: "Gerrit token not saved",
+          description: error instanceof Error ? error.message : "An error occurred.",
+        });
       }
-      if (isAtomCommandInterrupted(result)) return;
-      const error = squashAtomCommandFailure(result);
+    } catch (error) {
       toastManager.add({
         type: "error",
         title: "Gerrit token not saved",
         description: error instanceof Error ? error.message : "An error occurred.",
       });
-    } finally {
-      setSaving(false);
     }
+    setSaving(false);
   };
 
   return (

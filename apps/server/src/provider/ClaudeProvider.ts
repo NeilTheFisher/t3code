@@ -575,7 +575,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     claudeSettings,
     ["--version"],
     resolvedEnvironment,
-    cwd,
+    cwd ? { cwd } : undefined,
   ).pipe(Effect.timeoutOption(CLAUDE_VERSION_CHECK_TIMEOUT_MS), Effect.result);
 
   if (Result.isFailure(versionProbe)) {
@@ -715,17 +715,20 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     apiProviderAuthMetadata(capabilities.apiProvider) ??
     (customApiEndpoint ? { type: "customEndpoint", label: "Custom API endpoint" } : undefined);
   const usageCheckedAt = capabilities.usageCheckedAt ?? checkedAt;
-  const usageLimits = !capabilities.usage
-    ? makeUnavailableUsageLimits({ checkedAt, reason: "probeFailed" })
-    : scopedLimitNames
-      ? yield* recordClaudeUsageResponse(scopedLimitNames, {
-          response: capabilities.usage,
-          checkedAt: usageCheckedAt,
-        })
-      : claudeUsageResponseToLimits({
-          response: capabilities.usage,
-          checkedAt: usageCheckedAt,
-        }).limits;
+  const usageLimits =
+    authMetadata?.type === "apiKey" || authMetadata?.type === "bedrock"
+      ? undefined
+      : !capabilities.usage
+        ? makeUnavailableUsageLimits({ checkedAt, reason: "probeFailed" })
+        : scopedLimitNames
+          ? yield* recordClaudeUsageResponse(scopedLimitNames, {
+              response: capabilities.usage,
+              checkedAt: usageCheckedAt,
+            })
+          : claudeUsageResponseToLimits({
+              response: capabilities.usage,
+              checkedAt: usageCheckedAt,
+            }).limits;
   const resetCredits =
     resolveResetCredits &&
     capabilities.subscriptionType &&

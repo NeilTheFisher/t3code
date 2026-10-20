@@ -997,7 +997,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                     showNewBadge={model.badge === "new"}
                     unavailable={model.isUnavailable === true}
                     contextWindowTokens={model.contextWindowTokens}
-                    capabilities={model.capabilities}
+                    {...(model.capabilities ? { capabilities: model.capabilities } : {})}
                     jumpLabel={modelJumpLabelByKey.get(modelKey) ?? null}
                     disabledReason={disabledReason}
                     onToggleFavorite={toggleFavorite}

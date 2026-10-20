@@ -183,9 +183,13 @@ describe("terminatePosixOwnedProcessTree", () => {
       expect(
         AcpSessionRuntime.resolveLinuxCgroupTargetCommand("grok", scratch, { PATH: undefined }),
       ).toBeUndefined();
-      expect(
-        AcpSessionRuntime.resolveLinuxCgroupTargetCommand("node", scratch, { PATH: undefined }),
-      ).toBeDefined();
+      // Node's default search path only finds node when it is installed there;
+      // this checkout may run a runtime outside /usr/bin:/bin.
+      if (NodeFS.existsSync("/usr/bin/node") || NodeFS.existsSync("/bin/node")) {
+        expect(
+          AcpSessionRuntime.resolveLinuxCgroupTargetCommand("node", scratch, { PATH: undefined }),
+        ).toBeDefined();
+      }
       expect(
         AcpSessionRuntime.resolveLinuxCgroupTargetCommand("grok", scratch, {
           PATH: "relative-bin",
