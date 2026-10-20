@@ -4,6 +4,7 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.os.Build
 import android.provider.Settings
+import com.google.firebase.messaging.FirebaseMessaging
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
@@ -32,6 +33,10 @@ class T3AgentNotificationsModule : Module() {
 
     Function("setThreadOnScreen") { path: String? ->
       AgentNotifications.setThreadOnScreen(path)
+    }
+
+    Function("subscribeToTopic") { topic: String ->
+      FirebaseMessaging.getInstance().subscribeToTopic(topic).addOnCompleteListener {}
     }
 
     Function("openLiveUpdateSettings") {

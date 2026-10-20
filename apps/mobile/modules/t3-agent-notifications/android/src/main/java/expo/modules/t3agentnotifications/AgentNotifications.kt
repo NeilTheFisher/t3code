@@ -120,9 +120,14 @@ object AgentNotifications {
   fun receive(context: Context, data: Map<String, String>) {
     val prefs = context.getSharedPreferences(STORE, Context.MODE_PRIVATE)
     val updatedAt = data["updated_at"]?.toLongOrNull() ?: return
+    // Topic pushes are addressed to every installation in the Firebase project,
+    // so they cannot carry this device's id. They only reach devices that have
+    // notifications enabled (configured on sign-in).
+    val broadcast = data["broadcast"] == "1"
     val registered = prefs.getBoolean("enabled", false) &&
-      data["device_id"] == prefs.getString("deviceId", null) &&
-      data["user_id"] == prefs.getString("userId", null)
+      (broadcast ||
+        (data["device_id"] == prefs.getString("deviceId", null) &&
+          data["user_id"] == prefs.getString("userId", null)))
     val fresh = System.currentTimeMillis() - updatedAt in -MAX_MESSAGE_AGE_MS..MAX_MESSAGE_AGE_MS
     if (registered && fresh && NotificationManagerCompat.from(context).areNotificationsEnabled()) {
       channels(context)
