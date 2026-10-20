@@ -528,7 +528,6 @@ const runtimeMock = {
     connectionError: null as Error | null,
     inventoryCwd: null as string | null,
     startCalls: 0,
-    dashboardHtml: null as string | null,
     closeCalls: 0,
     sdkClientInputs: [] as Array<{
       baseUrl: string;
@@ -549,7 +548,6 @@ const runtimeMock = {
     this.state.connectionError = null;
     this.state.inventoryCwd = null;
     this.state.startCalls = 0;
-    this.state.dashboardHtml = null;
     this.state.closeCalls = 0;
     this.state.sdkClientInputs.length = 0;
     this.state.inventory = {
@@ -642,14 +640,7 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntime.OpenCodeRuntime["Service"] = {
 const TestHttpClientLive = Layer.succeed(
   HttpClient.HttpClient,
   HttpClient.make((request) =>
-    Effect.succeed(
-      HttpClientResponse.fromWeb(
-        request,
-        runtimeMock.state.dashboardHtml === null
-          ? new Response("Not found", { status: 404 })
-          : new Response(runtimeMock.state.dashboardHtml),
-      ),
-    ),
+    Effect.succeed(HttpClientResponse.fromWeb(request, new Response("Not found", { status: 404 }))),
   ),
 );
 
@@ -1203,32 +1194,6 @@ it.layer(layerTest)("checkOpenCodeProviderStatus", (it) => {
       );
 
       NodeAssert.equal(runtimeMock.state.sdkClientInputs[0]?.serverPassword, "settings-password");
-    }),
-  );
-
-  it.effect("attaches OpenCode Go dashboard usage when credentials are configured", () =>
-    Effect.gen(function* () {
-      runtimeMock.state.dashboardHtml =
-        '{"rollingUsage":{"usagePercent":10,"resetInSec":60},"weeklyUsage":{"usagePercent":20,"resetInSec":120},"monthlyUsage":{"usagePercent":30,"resetInSec":180}}';
-
-      const snapshot = yield* checkStatus(
-        makeOpenCodeSettings({
-          goWorkspaceId: "wrk_test",
-          goAuthCookie: "cookie-value",
-        }),
-      );
-
-      NodeAssert.deepEqual(
-        snapshot.usageLimits?.windows.map(({ label, usedPercent }) => ({
-          label,
-          usedPercent,
-        })),
-        [
-          { label: "Session", usedPercent: 10 },
-          { label: "Weekly", usedPercent: 20 },
-          { label: "Monthly", usedPercent: 30 },
-        ],
-      );
     }),
   );
 

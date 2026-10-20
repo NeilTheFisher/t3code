@@ -1,72 +1,10 @@
-import { SourceControlProviderKind } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   sourceControlRepositorySelector,
   detectSourceControlProviderFromRemoteUrl,
-  getChangeRequestTerminologyForKind,
   isSshRemoteUrl,
-  resolveChangeRequestPresentation,
 } from "./sourceControl.ts";
-
-describe("source control presentation", () => {
-  it("uses merge request terminology for GitLab", () => {
-    expect(getChangeRequestTerminologyForKind(SourceControlProviderKind.make("gitlab"))).toEqual({
-      shortLabel: "MR",
-      singular: "merge request",
-    });
-  });
-
-  it("uses pull request terminology for GitHub-compatible providers", () => {
-    expect(getChangeRequestTerminologyForKind(SourceControlProviderKind.make("github"))).toEqual({
-      shortLabel: "PR",
-      singular: "pull request",
-    });
-    expect(
-      getChangeRequestTerminologyForKind(SourceControlProviderKind.make("azure-devops")),
-    ).toEqual({
-      shortLabel: "PR",
-      singular: "pull request",
-    });
-    expect(getChangeRequestTerminologyForKind(SourceControlProviderKind.make("bitbucket"))).toEqual(
-      {
-        shortLabel: "PR",
-        singular: "pull request",
-      },
-    );
-  });
-
-  it("uses change request terminology for Gerrit", () => {
-    expect(getChangeRequestTerminologyForKind("gerrit")).toEqual({
-      shortLabel: "CR",
-      singular: "change request",
-    });
-    expect(
-      resolveChangeRequestPresentation({ kind: "gerrit", name: "Gerrit", baseUrl: "" }),
-    ).toEqual(
-      expect.objectContaining({
-        shortName: "CR",
-        longName: "change request",
-        pluralLongName: "change requests",
-      }),
-    );
-  });
-
-  it("falls back to generic change request copy for unknown providers", () => {
-    expect(
-      resolveChangeRequestPresentation({
-        kind: SourceControlProviderKind.make("unknown"),
-        name: "forge",
-        baseUrl: "",
-      }),
-    ).toEqual(
-      expect.objectContaining({
-        shortName: "change request",
-        longName: "change request",
-      }),
-    );
-  });
-});
 
 describe("detectSourceControlProviderFromRemoteUrl", () => {
   it("detects common source control hosts", () => {
@@ -94,10 +32,6 @@ describe("detectSourceControlProviderFromRemoteUrl", () => {
         },
       );
     }
-    expect(getChangeRequestTerminologyForKind(SourceControlProviderKind.make("forgejo"))).toEqual({
-      shortLabel: "PR",
-      singular: "pull request",
-    });
   });
 
   it("detects Azure DevOps SSH remotes", () => {

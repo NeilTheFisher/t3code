@@ -68,13 +68,17 @@ const layer = Layer.mergeAll(
     ProviderEventLoggers.NoOpProviderEventLoggers,
   ),
   Layer.succeed(OpenCodeRuntime.OpenCodeRuntime, openCode2Runtime),
-).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
+).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NodeCrypto.layerDigest)));
 
-const create = (config: Partial<OpenCodeSettings>, http: HttpClient.HttpClient) =>
+const create = (
+  config: Partial<OpenCodeSettings>,
+  http: HttpClient.HttpClient,
+  environment: ReadonlyArray<{ name: string; sensitive: boolean; value: string }> = [],
+) =>
   OpenCodeDriver.create({
     instanceId: ProviderInstanceId.make("opencode-test"),
     displayName: undefined,
-    environment: [],
+    environment,
     enabled: true,
     config: { ...OpenCodeDriver.defaultConfig(), ...config },
   }).pipe(Effect.provideService(HttpClient.HttpClient, http));
@@ -150,7 +154,7 @@ it.live("discovers models through a home-relative OpenCode wrapper", () =>
         OpenCodeRuntime.layer.pipe(Layer.provide(OpenCodeServerLedger.layerTest)),
       ).pipe(
         Layer.provideMerge(
-          Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, FetchHttpClient.layer),
+          Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NodeCrypto.layerDigest, FetchHttpClient.layer),
         ),
       ),
     ),
@@ -368,6 +372,11 @@ it.layer(layer)("OpenCodeDriver runtime selection", (it) => {
   )("Go usage recovery $name without restarting a ready catalog", (scenario) =>
     Effect.gen(function* () {
       const usageStarted = yield* Deferred.make<void>();
+      // The console-login credential lives in the CLI's data home; isolate it so
+      // this machine's real login cannot answer for the fixture.
+      const dataHome = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped({
+        prefix: "opencode-usage-recovery-",
+      });
       let usageReads = 0;
       let serverStarts = 0;
       let modelReads = 0;
@@ -445,6 +454,7 @@ it.layer(layer)("OpenCodeDriver runtime selection", (it) => {
               "opencode-go": { type: "api", key: "test-go-key" },
             }),
           },
+          { name: "XDG_DATA_HOME", sensitive: false, value: dataHome },
         ],
         enabled: scenario.enabled,
         config: OpenCodeDriver.defaultConfig(),
@@ -543,7 +553,7 @@ const resolveUpdate = (generation: "v1" | "v2", binaryPath: string) =>
       ChildProcessSpawner.ChildProcessSpawner,
       ChildProcessSpawner.make(() => Effect.die("resolving an update must not spawn")),
     ),
-    Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+    Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NodeCrypto.layerDigest)),
   );
 
 it.effect.skipIf(HostProcess.Platform.defaultValue() === "win32")(
@@ -625,7 +635,7 @@ const layerUpdate = Layer.mergeAll(
     ProviderEventLoggers.NoOpProviderEventLoggers,
   ),
   Layer.succeed(OpenCodeRuntime.OpenCodeRuntime, changingRuntime),
-).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
+).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NodeCrypto.layerDigest)));
 
 it.layer(layerUpdate)("OpenCodeDriver updates", (it) => {
   it.effect.skipIf(HostProcess.Platform.defaultValue() === "win32")(
@@ -665,7 +675,13 @@ it.layer(layerUpdate)("OpenCodeDriver updates", (it) => {
     () =>
       Effect.gen(function* () {
         versionOutput.current = "1.18.18\n";
-        const instance = yield* create({}, noHttp);
+        // A console login in this machine's data home would probe over HTTP; isolate it.
+        const dataHome = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped({
+          prefix: "opencode-upgrade-",
+        });
+        const instance = yield* create({}, noHttp, [
+          { name: "XDG_DATA_HOME", sensitive: false, value: dataHome },
+        ]);
         // Let the startup status check claim the refresh permit, then wait behind it so it
         // cannot probe after the upgrade below.
         yield* Effect.yieldNow;

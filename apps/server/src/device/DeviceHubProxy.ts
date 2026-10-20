@@ -121,12 +121,9 @@ const proxyWebSocket = Effect.fn("DeviceHubProxy.proxyWebSocket")(function* (
 });
 
 /**
- * serve-emu rebroadcasts a `video-session` on every encoder restart, including
- * the restart a client asks for with `reset-video`. Current clients ignore a
- * same-size re-announcement, but already-installed mobile WebViews still treat
- * any `video-session` as a rotation: they rebuild the decoder, request another
- * keyframe, and loop without ever painting. Drop the same-size echo here so
- * those clients converge; newer clients are unaffected.
+ * serve-emu rebroadcasts `video-session` on every encoder restart. Installed mobile
+ * WebViews read any announcement as a rotation, rebuild the decoder and never paint,
+ * so the same-size echo is dropped here; newer clients are unaffected.
  */
 export const makeVideoSessionEchoFilter = () => {
   let announced: string | null = null;
@@ -158,18 +155,6 @@ const pumpFrames =
     sink: Socket.Writer,
     allow?: (frame: Uint8Array | string) => boolean,
   ) {
-    const { pull } = yield* source.reader;
-    while (true) {
-      const batch = yield* pull;
-      if (allow === undefined) {
-        yield* sink.writeAll(batch);
-        continue;
-      }
-      for (const frame of batch) {
-        if (allow(frame)) yield* sink.write(frame);
-      }
-    }
-  });
     const { pull } = yield* source.reader;
     while (true) {
       const batch = yield* pull;

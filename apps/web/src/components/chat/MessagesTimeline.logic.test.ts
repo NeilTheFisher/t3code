@@ -1,4 +1,13 @@
-import { ThreadId, type WorktreeSetupSnapshot } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  ProviderTurnId,
+  ThreadId,
+  type OrchestrationV2TurnItem,
+  type WorktreeSetupSnapshot,
+} from "@t3tools/contracts";
+import { serializeAssistantCitation } from "@t3tools/shared/assistantCitations";
 import {
   CheckpointRef,
   NodeId,
@@ -27,7 +36,6 @@ import {
   shouldCollapseUserMessage,
   resolveAssistantMessageCopyState,
   liveWorkEntryLabel,
-  normalizeCompactToolLabel,
   resolveTimelineIsAtEnd,
   isTimelineMinimapRowVisible,
   resolveTimelineMinimapCurrentIndex,
@@ -40,6 +48,7 @@ import {
   resolveTimelineMinimapNavigationInteractive,
   resolveTimelineMinimapTopPercent,
   resolveWorkGroupScrollIndex,
+  shouldCollapseUserMessage,
   shouldFollowWorkGroupAppend,
   type MessagesTimelineRow,
   workEntryDisplayLabel,
