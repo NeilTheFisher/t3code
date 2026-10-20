@@ -35,6 +35,61 @@ const StoredKey = Schema.Struct({
   ),
 });
 const decodeStoredKey = Schema.decodeOption(Schema.fromJsonString(StoredKey));
+// Newer CLIs store the `opencode console login` OAuth grant in the
+// `credential` table instead of `account`/`account_state`.
+const StoredOAuth = Schema.Struct({
+  type: Schema.Literal("oauth"),
+  access: Schema.optionalKey(Schema.String),
+  expires: Schema.optionalKey(Schema.Number),
+  metadata: Schema.optionalKey(
+    Schema.NullOr(
+      Schema.Struct({
+        server: Schema.optionalKey(Schema.String),
+        orgID: Schema.optionalKey(Schema.String),
+      }),
+    ),
+  ),
+});
+const decodeStoredOAuth = Schema.decodeOption(Schema.fromJsonString(StoredOAuth));
+
+// A stored Console API key from the CLI's `credential` table. `NULL`-active
+// rows predate the selection flag, so only an explicit `0` deselects.
+function readStoredConsoleKey(databasePath: string): string | undefined {
+  try {
+    const database = new NodeSqlite.DatabaseSync(databasePath, { readOnly: true });
+    try {
+      database.exec("PRAGMA busy_timeout = 100");
+      const row = database
+        .prepare(
+          `SELECT value FROM credential
+           WHERE integration_id = 'opencode' AND (active IS NULL OR active != 0)
+           ORDER BY active DESC, time_created DESC, id DESC LIMIT 1`,
+        )
+        .get() as { readonly value?: unknown } | undefined;
+      if (typeof row?.value !== "string") return undefined;
+      const stored = Schema.decodeSync(Schema.fromJsonString(StoredKey))(row.value);
+      const server = stored.metadata?.server;
+      if (typeof server === "string" && !isConsoleServer(server)) return undefined;
+      const key = stored.key.trim();
+      return key ? key : undefined;
+    } finally {
+      database.close();
+    }
+  } catch {
+    return undefined;
+  }
+}
+
+// The OAuth grant belongs to the server that issued it; only the public
+// console's grants authenticate the console meters API.
+function isConsoleServer(server: string): boolean {
+  try {
+    const url = new URL(server);
+    return `${url.origin}${url.pathname.replace(/\/+$/, "")}` === "https://opencode.ai/console";
+  } catch {
+    return false;
+  }
+}
 const UsageWindow = Schema.Struct({
   percent: Schema.Finite,
   resetsAt: Schema.DateTimeUtcFromString,
@@ -172,8 +227,9 @@ const readConsoleGoUsageLimits = Effect.fn("readConsoleGoUsageLimits")(function*
 });
 
 /**
- * Legacy host-account read: the CLI's Zen API key against the Zen usage API.
- * Used only when no workspace dashboard credentials are configured.
+ * Legacy host-account read: the CLI's stored Console API key or Zen API key
+ * against the Zen usage API. Used only when no `console login` OAuth grant is
+ * available.
  */
 const readZenGoUsageLimits = Effect.fn("readZenGoUsageLimits")(function* (input: {
   readonly checkedAt: string;
@@ -197,17 +253,30 @@ const readZenGoUsageLimits = Effect.fn("readZenGoUsageLimits")(function* (input:
   const auth = yield* decodeAuthFile(contents);
   const apiAuth = decodeApiAuth(auth["opencode-go"]);
   // OpenCode overlays stored API credentials after environment credentials.
-  const apiKey = (Option.isSome(apiAuth) ? apiAuth.value.key : env.OPENCODE_API_KEY)?.trim();
+  const goKey = (Option.isSome(apiAuth) ? apiAuth.value.key : env.OPENCODE_API_KEY)?.trim();
+  // Inline auth explicitly overrides local credentials, including the stored key.
+  const databaseFile = env.OPENCODE_DB ?? "opencode.db";
+  const storedKey =
+    env.OPENCODE_AUTH_CONTENT === undefined && databaseFile !== ":memory:"
+      ? readStoredConsoleKey(path.resolve(dataHome, "opencode", databaseFile))
+      : undefined;
+  let apiKey = storedKey || goKey;
   if (!apiKey) {
     return makeUnavailableUsageLimits({ checkedAt: input.checkedAt, reason: "unsupported" });
   }
 
   const client = yield* HttpClient.HttpClient;
-  const response = yield* client.execute(
-    HttpClientRequest.get("https://opencode.ai/zen/go/v1/usage").pipe(
-      HttpClientRequest.bearerToken(apiKey),
-    ),
-  );
+  const readUsage = (key: string) =>
+    client.execute(
+      HttpClientRequest.get("https://opencode.ai/zen/go/v1/usage").pipe(
+        HttpClientRequest.bearerToken(key),
+      ),
+    );
+  let response = yield* readUsage(apiKey);
+  if ((response.status === 401 || response.status === 403) && goKey && goKey !== apiKey) {
+    apiKey = goKey;
+    response = yield* readUsage(apiKey);
+  }
   // A valid Zen key can exist without a Go subscription.
   if (response.status === 403) {
     return makeUnavailableUsageLimits({ checkedAt: input.checkedAt, reason: "unsupported" });
@@ -261,8 +330,9 @@ interface ConsoleCredential {
 /**
  * The console dashboard credential the OpenCode CLI stores when the user runs
  * `opencode console login`. The CLI keeps the OAuth access token fresh, so
- * this is sturdier than a manually pasted browser cookie. Both the account and
- * its active workspace live in the CLI's SQLite database next to `auth.json`.
+ * this is sturdier than a manually pasted browser cookie. Older CLIs keep the
+ * account and its active workspace in `account`/`account_state`; newer ones
+ * store the OAuth grant in the `credential` table next to `auth.json`.
  */
 const readConsoleCredential = Effect.fn("readConsoleCredential")(function* (
   environment: NodeJS.ProcessEnv,
@@ -276,23 +346,53 @@ const readConsoleCredential = Effect.fn("readConsoleCredential")(function* (
     const databasePath = path.join(dataHome, "opencode", "opencode.db");
     if (!(yield* fs.exists(databasePath))) return Option.none<ConsoleCredential>();
 
-    const rows = yield* Effect.gen(function* () {
+    const credential = yield* Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       // The CLI may hold the writer; fail promptly instead of waiting on it.
       yield* sql.unsafe("PRAGMA busy_timeout = 100");
-      return yield* sql.unsafe<{ access_token: unknown; active_org_id: unknown }>(
-        `SELECT a.access_token AS access_token, s.active_org_id AS active_org_id
-         FROM account_state s
-         JOIN account a ON a.id = s.active_account_id
-         LIMIT 1`,
-      );
+      const legacy = yield* sql
+        .unsafe<{ access_token: unknown; active_org_id: unknown }>(
+          `SELECT a.access_token AS access_token, s.active_org_id AS active_org_id
+           FROM account_state s
+           JOIN account a ON a.id = s.active_account_id
+           LIMIT 1`,
+        )
+        // Older databases predate either table; absence just means no legacy grant.
+        .pipe(Effect.catch(() => Effect.succeed([] as Array<unknown>)));
+
+      const row = legacy[0] as { access_token?: unknown; active_org_id?: unknown } | undefined;
+      const workspaceId = typeof row?.active_org_id === "string" ? row.active_org_id.trim() : "";
+      const accessToken = typeof row?.access_token === "string" ? row.access_token.trim() : "";
+      if (workspaceId && accessToken) return Option.some({ workspaceId, accessToken });
+
+      const oauthRows = yield* sql
+        .unsafe<{ value: unknown }>(
+          `SELECT value AS value FROM credential
+           WHERE integration_id = 'opencode' AND (active IS NULL OR active != 0)
+           ORDER BY active DESC, time_created DESC, id DESC LIMIT 1`,
+        )
+        .pipe(Effect.catch(() => Effect.succeed([] as Array<{ value: unknown }>)));
+      const stored =
+        typeof oauthRows[0]?.value === "string"
+          ? Option.getOrUndefined(decodeStoredOAuth(oauthRows[0].value))
+          : undefined;
+      if (stored === undefined) return Option.none<ConsoleCredential>();
+      const access = stored.access?.trim();
+      const orgID = stored.metadata?.orgID?.trim();
+      if (!access || !orgID) return Option.none<ConsoleCredential>();
+      // A stale grant stays out of the way so the Zen API-key path can try.
+      const nowMillis = DateTime.toEpochMillis(yield* DateTime.now);
+      if (typeof stored.expires === "number" && stored.expires <= nowMillis) {
+        return Option.none<ConsoleCredential>();
+      }
+      const server = stored.metadata?.server;
+      if (typeof server === "string" && !isConsoleServer(server)) {
+        return Option.none<ConsoleCredential>();
+      }
+      return Option.some({ workspaceId: orgID, accessToken: access });
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: databasePath, readonly: true })));
 
-    const row = rows[0];
-    const workspaceId = typeof row?.active_org_id === "string" ? row.active_org_id.trim() : "";
-    const accessToken = typeof row?.access_token === "string" ? row.access_token.trim() : "";
-    if (!workspaceId || !accessToken) return Option.none<ConsoleCredential>();
-    return Option.some({ workspaceId, accessToken });
+    return credential;
   }).pipe(
     // A missing, locked, or schema-shifted CLI database must not fail the
     // provider probe; it just means no console credential is available.
