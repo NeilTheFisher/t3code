@@ -400,6 +400,102 @@ it.effect("reads Go limits from the workspace console meters and derives percent
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
+it.effect("reads Go limits from the credential-table OAuth grant", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const directory = yield* fileSystem.makeTempDirectoryScoped({
+      prefix: "opencode-console-oauth-",
+    });
+    yield* fileSystem.makeDirectory(path.join(directory, "opencode"), { recursive: true });
+    const databasePath = path.join(directory, "opencode", "opencode.db");
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        const context = yield* Layer.build(NodeSqliteClient.layer({ filename: databasePath }));
+        const db = Context.get(context, SqlClient.SqlClient);
+        yield* db.unsafe(
+          "CREATE TABLE credential (id TEXT PRIMARY KEY, integration_id TEXT, value TEXT, active INTEGER, time_created INTEGER, time_updated INTEGER)",
+        );
+        yield* db.unsafe("INSERT INTO credential VALUES (?, ?, ?, ?, ?, ?)", [
+          "cred_oauth",
+          "opencode",
+          JSON.stringify({
+            type: "oauth",
+            methodID: "device",
+            access: "oauth-access-token",
+            refresh: "oauth-refresh-token",
+            expires: 4102444800000,
+            metadata: {
+              server: "https://opencode.ai/console",
+              accountID: "acc_test",
+              email: "test@example.com",
+              orgID: "wrk_test",
+              orgName: "Default",
+            },
+          }),
+          1,
+          2,
+          2,
+        ]);
+      }),
+    );
+    const resetsAt = "2026-11-04T16:14:52.000Z";
+    const limits = yield* readOpenCodeGoUsageLimits({
+      enabled: true,
+      serverUrl: "",
+      environment: { XDG_DATA_HOME: directory },
+    }).pipe(
+      Effect.provideService(
+        HttpClient.HttpClient,
+        HttpClient.make((request) => {
+          NodeAssert.equal(request.url, "https://opencode.ai/console/api/go/status");
+          NodeAssert.equal(request.headers["x-org-id"], "wrk_test");
+          NodeAssert.equal(request.headers.authorization, "Bearer oauth-access-token");
+          return Effect.succeed(
+            HttpClientResponse.fromWeb(
+              request,
+              Response.json({
+                access: {
+                  meters: {
+                    fiveHour: {
+                      resetsAt,
+                      limitMicroCents: "1200000000",
+                      usedMicroCents: "108530814",
+                    },
+                    week: {
+                      resetsAt,
+                      limitMicroCents: "3000000000",
+                      usedMicroCents: "1627594832",
+                    },
+                    month: {
+                      resetsAt,
+                      limitMicroCents: "6000000000",
+                      usedMicroCents: "1627594832",
+                    },
+                  },
+                },
+              }),
+            ),
+          );
+        }),
+      ),
+    );
+    NodeAssert.equal(limits.unavailable, undefined);
+    NodeAssert.deepEqual(
+      limits.windows.map(({ label, kind, usedPercent }) => ({
+        label,
+        kind,
+        usedPercent: Math.round(usedPercent),
+      })),
+      [
+        { label: "Go · Session", kind: "session", usedPercent: 9 },
+        { label: "Go · Weekly", kind: "weekly", usedPercent: 54 },
+        { label: "Go · Monthly", kind: "monthly", usedPercent: 27 },
+      ],
+    );
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
 it.effect(
   "maps console entitlement absence and expired credentials onto unsupported/probeFailed",
   () =>
