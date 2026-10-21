@@ -46,15 +46,16 @@ const VERDICT_SCORE: Readonly<Record<PullRequestReviewVerdict, number>> = {
 
 /**
  * What this build can do with a Gerrit change. Reads are complete — listing, detail, files,
- * comments, diff — and so are the writes Gerrit exposes over SSH: a cover comment, a Code-Review
- * verdict, submit, abandon, restore and rebase. The change description is editable through
- * Gerrit's REST edit flow; Gerrit has no reactions and cannot rewrite a remark, so those stay off
- * rather than offering what would fail.
+ * comments, diff — and so are the writes Gerrit exposes: a cover comment, a Code-Review verdict,
+ * submit, abandon, restore, rebase, and the work-in-progress flag (ready/draft), which no SSH verb
+ * carries. The change description is editable through Gerrit's REST edit flow; Gerrit
+ * has no reactions and cannot rewrite a remark, so those stay off rather than offering what would
+ * fail.
  */
 const CAPABILITIES: PullRequestCapabilities = {
   diff: true,
   comment: true,
-  actions: ["merge", "close", "reopen", "update-branch"],
+  actions: ["merge", "ready", "draft", "close", "reopen", "update-branch"],
   // Gerrit submits rather than merging by a strategy; "merge" is the one honest stand-in.
   mergeMethods: ["merge"],
   updateMethods: ["rebase"],
@@ -75,7 +76,7 @@ const CAPABILITIES: PullRequestCapabilities = {
 };
 
 const VIEWER_PERMISSIONS: PullRequestViewerPermissions = {
-  actions: ["merge", "close", "reopen", "update-branch"],
+  actions: ["merge", "ready", "draft", "close", "reopen", "update-branch"],
   comment: true,
   resolve: true,
   verdicts: ["comment", "approve", "request-changes"],
@@ -768,6 +769,19 @@ export const make = Effect.gen(function* () {
 
     runAction: (input) =>
       Effect.gen(function* () {
+        // Gerrit's WIP flag moves over REST; the SSH verbs below cannot carry it. Gerrit itself
+        // refuses the call for anyone but the owner, a project owner or a site admin.
+        if (input.action === "ready" || input.action === "draft") {
+          const target = yield* restTarget(input.cwd, input.host, "runAction");
+          yield* rest
+            .setReady({
+              ...target,
+              change: input.number,
+              ready: input.action === "ready",
+            })
+            .pipe(Effect.mapError(failRest("runAction")));
+          return;
+        }
         const verb = actionVerb[input.action];
         if (verb === undefined) {
           return yield* failure("runAction", `Gerrit cannot ${input.action} a change.`);
