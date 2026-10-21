@@ -34,6 +34,7 @@ const RIGHT_PANEL_KINDS = [
   "linked-thread",
   "side-chat",
   "webpage",
+  "git-graph",
 ] as const;
 export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
 
@@ -114,7 +115,9 @@ export type RightPanelSurface =
   /** A linked environment's thread, read through `viaEnvironmentId`; it has no thread here. */
   | LinkedThreadSurface
   | { id: `side-chat:${string}`; kind: "side-chat"; threadId: ThreadId }
-  | { id: "webpage"; kind: "webpage"; url: string | null };
+  | { id: "webpage"; kind: "webpage"; url: string | null }
+  /** Repository-wide commit graph; the thread only owns the tab, not the range. */
+  | { id: "git-graph"; kind: "git-graph" };
 
 export type ThreadSurface = { id: `thread:${string}`; kind: "thread"; threadId: ThreadId };
 
@@ -314,6 +317,8 @@ const singletonSurface = (
       return { id: "pull-requests", kind };
     case "device":
       return { id: "device", kind };
+    case "git-graph":
+      return { id: "git-graph", kind };
   }
 };
 

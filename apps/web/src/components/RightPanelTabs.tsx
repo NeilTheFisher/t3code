@@ -49,6 +49,7 @@ import {
   ChevronRight,
   FileDiff,
   Files,
+  GitBranch,
   Globe2,
   MessagesSquare,
   Plus,
@@ -160,6 +161,7 @@ export interface RightPanelTabsProps {
   onAddDevice: () => void;
   /** Absent where side chats are not offered. */
   onAddSideChat?: (() => void) | undefined;
+  onAddGitGraph: () => void;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
@@ -170,6 +172,7 @@ export interface RightPanelTabsProps {
   sideChatAvailable?: boolean;
   /** Overrides the default reason while side chats are available but cannot start. */
   sideChatDisabledReason?: string | null;
+  gitGraphAvailable: boolean;
   pullRequestStatusSeeds?: Readonly<Record<string, PullRequestTabStatusSeed>>;
   children: ReactNode;
 }
@@ -197,6 +200,7 @@ const SURFACE_DISABLED_REASONS = {
   pullRequests: msg("This thread has no linked items."),
   device: msg("Devices are only available from a thread."),
   sideChat: msg("Side chats start after the first message."),
+  gitGraph: msg("The graph is only available for server threads in Git repositories."),
 } as const;
 
 // Closed keepMounted popups must stop blocking shortcuts once their exit transition ends.
@@ -222,6 +226,7 @@ const SURFACE_UNAVAILABLE_HINTS = {
   pullRequests: msg("No linked items available."),
   device: msg("Available from a thread."),
   sideChat: msg("Available after the first message."),
+  gitGraph: msg("Available for Git repositories."),
 } as const;
 
 type TabContextMenuAction =
@@ -341,6 +346,7 @@ function RightPanelEmptyState(props: {
   onAddDevice: () => void;
   /** Absent where side chats are not offered. */
   onAddSideChat?: (() => void) | undefined;
+  onAddGitGraph: () => void;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
@@ -350,6 +356,7 @@ function RightPanelEmptyState(props: {
   deviceAvailable: boolean;
   sideChatAvailable: boolean;
   sideChatDisabledReason: string | null;
+  gitGraphAvailable: boolean;
 }) {
   const gt = useGT();
   const messages = useMessages();
@@ -427,6 +434,15 @@ function RightPanelEmptyState(props: {
           },
         ]
       : []),
+    {
+      label: "Graph",
+      description: "Commit graph with thread provenance.",
+      icon: GitBranch,
+      shortcut: "G",
+      available: props.gitGraphAvailable,
+      disabledReason: SURFACE_UNAVAILABLE_HINTS.gitGraph,
+      onClick: props.onAddGitGraph,
+    },
   ] as const;
 
   type SurfaceAction = (typeof actions)[number];
@@ -616,6 +632,8 @@ function surfaceTitle(
     case "issue":
       // A git host numbers its issues; a tracker with keys of its own, such as Linear, names them.
       return /^\d+$/.test(surface.key) ? `#${surface.key}` : surface.key;
+    case "git-graph":
+      return resolve(msg("Graph"));
     case "device":
       return surface.title ?? surface.target?.name ?? resolve(msg("Device"));
     case "thread":
@@ -730,6 +748,8 @@ function SurfaceIcon({
       return <SideChatTabIcon environmentId={environmentId} threadId={surface.threadId} />;
     case "linked-thread":
       return <MessagesSquare className="size-3 shrink-0" />;
+    case "git-graph":
+      return <GitBranch className="size-3 shrink-0" />;
     case "device":
       return surface.target?.platform === "ios" ? (
         <AppleIcon className="size-3 shrink-0" />
@@ -1238,6 +1258,15 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           },
         ]
       : []),
+    {
+      label: "Graph",
+      description: "Commit graph with thread provenance.",
+      icon: GitBranch,
+      shortcut: "G",
+      available: props.gitGraphAvailable,
+      disabledReason: SURFACE_DISABLED_REASONS.gitGraph,
+      onClick: props.onAddGitGraph,
+    },
   ] as const;
   const canAddSurface = addSurfaceActions.some((action) => action.available);
 
@@ -1700,6 +1729,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddPullRequests={props.onAddPullRequests}
             onAddDevice={props.onAddDevice}
             onAddSideChat={props.onAddSideChat}
+            onAddGitGraph={props.onAddGitGraph}
             browserAvailable={props.browserAvailable}
             terminalAvailable={props.terminalAvailable}
             diffAvailable={props.diffAvailable}
@@ -1709,6 +1739,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             deviceAvailable={props.deviceAvailable}
             sideChatAvailable={props.sideChatAvailable === true}
             sideChatDisabledReason={props.sideChatDisabledReason ?? null}
+            gitGraphAvailable={props.gitGraphAvailable}
           />
         ) : (
           props.children

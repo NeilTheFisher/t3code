@@ -111,6 +111,8 @@ describe("RightPanelTabs", () => {
           onAddFiles={noop}
           onAddPullRequest={noop}
           onAddPullRequests={noop}
+          onAddGitGraph={noop}
+          gitGraphAvailable={false}
           onAddDevice={noop}
           browserAvailable={false}
           terminalAvailable
