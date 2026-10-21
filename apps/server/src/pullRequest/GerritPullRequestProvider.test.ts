@@ -45,6 +45,7 @@ type ReviewJson = GerritCli.GerritCli["Service"]["reviewJson"];
 type UpdateMessage = GerritRestApi.GerritRestApi["Service"]["updateMessage"];
 type ListReviewedFiles = GerritRestApi.GerritRestApi["Service"]["listReviewedFiles"];
 type SetFileReviewed = GerritRestApi.GerritRestApi["Service"]["setFileReviewed"];
+type SetReady = GerritRestApi.GerritRestApi["Service"]["setReady"];
 type ListReviewers = GerritRestApi.GerritRestApi["Service"]["listReviewers"];
 type SearchAccounts = GerritRestApi.GerritRestApi["Service"]["searchAccounts"];
 
@@ -69,6 +70,7 @@ function makeProvider(input: {
   readonly updateMessage?: UpdateMessage;
   readonly listReviewedFiles?: ListReviewedFiles;
   readonly setFileReviewed?: SetFileReviewed;
+  readonly setReady?: SetReady;
   readonly listReviewers?: ListReviewers;
   readonly searchAccounts?: SearchAccounts;
   readonly run?: VcsProcess.VcsProcess["Service"]["run"];
@@ -92,6 +94,7 @@ function makeProvider(input: {
           postReview: () => Effect.void,
           searchAccounts: input.searchAccounts ?? (() => Effect.succeed([])),
           setFileReviewed: input.setFileReviewed ?? (() => Effect.void),
+          setReady: input.setReady ?? (() => Effect.void),
           setReviewer: () => Effect.void,
           updateMessage: input.updateMessage ?? (() => Effect.void),
         }),
@@ -446,6 +449,38 @@ describe("writing", () => {
     });
   });
 
+  it.effect("marks a change ready for review through REST, not the review verbs", () => {
+    const review = vi.fn<Review>(() => Effect.void);
+    const setReady = vi.fn<SetReady>(() => Effect.void);
+    return Effect.gen(function* () {
+      const provider = yield* makeProvider({
+        queryChanges: () => Effect.succeed(page(changeRecord({ wip: true }))),
+        review,
+        setReady,
+      });
+      yield* provider.runAction({ ...changeRef, action: "ready" });
+      expect(setReady).toHaveBeenCalledWith({
+        host: "review.example.com",
+        username: "nfisher",
+        change: 1234,
+        ready: true,
+      });
+      expect(review).not.toHaveBeenCalled();
+    });
+  });
+
+  it.effect("returns a change to work in progress", () => {
+    const setReady = vi.fn<SetReady>(() => Effect.void);
+    return Effect.gen(function* () {
+      const provider = yield* makeProvider({
+        queryChanges: () => Effect.succeed(page(changeRecord())),
+        setReady,
+      });
+      yield* provider.runAction({ ...changeRef, action: "draft" });
+      expect(setReady).toHaveBeenCalledWith(expect.objectContaining({ ready: false }));
+    });
+  });
+
   it.effect("rewrites the description, keeping the Change-Id trailer", () => {
     const updateMessage = vi.fn<UpdateMessage>(() => Effect.void);
     return Effect.gen(function* () {
@@ -482,7 +517,7 @@ describe("capabilities", () => {
       expect(provider.capabilities).toMatchObject({
         diff: true,
         comment: true,
-        actions: ["merge", "close", "reopen", "update-branch"],
+        actions: ["merge", "ready", "draft", "close", "reopen", "update-branch"],
         search: true,
         viewedFiles: "host",
         review: {
