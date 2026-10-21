@@ -1,0 +1,1037 @@
+import {
+  ChevronDownIcon,
+  CloudIcon,
+  FolderGit2Icon,
+  GitBranchIcon,
+  GitCommitHorizontalIcon,
+  InfoIcon,
+  RefreshCwIcon,
+  TagIcon,
+  Trash2Icon,
+  TriangleAlertIcon,
+} from "lucide-react";
+import {
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+
+import type { ContextMenuItem, EnvironmentId, VcsLogGraphResult } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
+import { readLocalApi } from "~/localApi";
+import { cn } from "~/lib/utils";
+import { useAtomCommand } from "~/state/use-atom-command";
+import { vcsEnvironment } from "~/state/vcs";
+
+import { PullRequestGlyph } from "../components/pullRequest/pullRequestIcons";
+import { Button } from "../components/ui/button";
+import { layoutGraph, type GraphRow } from "./graphLayout";
+import type { MockCommit, MockGraphData, MockThread, MockWorktree } from "./mockGraph";
+
+// Two lines plus 20px ref badges come to 44px; leave a couple of pixels of
+// slack so a badge can never bleed into the row above.
+const ROW_HEIGHT = 46;
+const LANE_WIDTH = 14;
+const LANE_INSET = 9;
+
+const LANE_COLORS = [
+  "oklch(0.63 0.09 250)",
+  "oklch(0.66 0.09 165)",
+  "oklch(0.71 0.09 80)",
+  "oklch(0.64 0.10 20)",
+  "oklch(0.63 0.09 300)",
+] as const;
+
+const THREAD_COLORS = [
+  "oklch(0.68 0.13 250)",
+  "oklch(0.70 0.13 155)",
+  "oklch(0.74 0.13 80)",
+  "oklch(0.68 0.14 25)",
+] as const;
+
+type PanelView = "graph" | "worktrees";
+
+function toGraphData(result: VcsLogGraphResult, repository: string): MockGraphData {
+  return {
+    repository,
+    currentBranch: result.currentBranch ?? "HEAD",
+    ahead: 0,
+    behind: 0,
+    commits: result.commits.map((commit) => ({
+      sha: commit.sha,
+      subject: commit.subject,
+      parents: [...commit.parents],
+      author: commit.authorName,
+      authoredAt: DateTime.toDateUtc(commit.authoredAt),
+      refs: commit.refs.map((ref) => ({ kind: ref.kind, name: ref.name })),
+      threadIds: [],
+      turn: null,
+      pullRequest: null,
+    })),
+    threads: [],
+    worktrees: [],
+    observedAt: new Date(),
+  };
+}
+
+function PanelMessage(props: { title: string; body: string; action?: ReactNode }) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
+      <p className="text-xs font-medium text-foreground">{props.title}</p>
+      <p className="max-w-[28ch] text-2xs text-muted-foreground">{props.body}</p>
+      {props.action}
+    </div>
+  );
+}
+
+function GitGraphSkeleton() {
+  return (
+    <div
+      aria-busy="true"
+      aria-label="Loading commit graph"
+      className="min-h-0 flex-1 overflow-hidden"
+    >
+      {Array.from({ length: 9 }, (_, index) => (
+        <div key={index} className="flex items-stretch gap-1 pr-2" style={{ height: ROW_HEIGHT }}>
+          <div className="w-[80px] shrink-0 border-r border-border/40">
+            <div className="mt-3 ml-3 h-8 w-px bg-border/50" />
+          </div>
+          <div className="flex min-w-0 flex-1 flex-col justify-center gap-1.5">
+            <div className="h-3 w-[62%] rounded-sm bg-muted/70" />
+            <div className="h-2.5 w-[40%] rounded-sm bg-muted/50" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function relativeTime(date: Date, now: Date): string {
+  const minutes = Math.max(0, Math.round((now.getTime() - date.getTime()) / 60_000));
+  if (minutes < 1) return "now";
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.round(hours / 24);
+  if (days < 7) return `${days}d`;
+  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(date);
+}
+
+function fullTimestamp(date: Date): string {
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function LaneGraph(props: { row: GraphRow; laneCount: number; isTip: boolean }) {
+  const { row, laneCount, isTip } = props;
+  const width = LANE_INSET * 2 + Math.max(1, laneCount) * LANE_WIDTH;
+  const mid = ROW_HEIGHT / 2;
+  const x = (lane: number) => LANE_INSET + lane * LANE_WIDTH;
+  const color = (lane: number) => LANE_COLORS[lane % LANE_COLORS.length]!;
+
+  return (
+    <svg
+      aria-hidden
+      className="pointer-events-none block shrink-0"
+      width={width}
+      height={ROW_HEIGHT}
+      viewBox={`0 0 ${width} ${ROW_HEIGHT}`}
+    >
+      {row.hasIncoming ? (
+        <line
+          x1={x(row.lane)}
+          y1={0}
+          x2={x(row.lane)}
+          y2={mid}
+          stroke={color(row.lane)}
+          strokeWidth={1.75}
+          strokeLinecap="round"
+          opacity={0.85}
+        />
+      ) : null}
+      {row.through.map((lane) => (
+        <line
+          key={`through-${lane}`}
+          x1={x(lane)}
+          y1={0}
+          x2={x(lane)}
+          y2={ROW_HEIGHT}
+          stroke={color(lane)}
+          strokeWidth={1.75}
+          strokeLinecap="round"
+          opacity={0.6}
+        />
+      ))}
+      {row.parentLanes.map((parent) => {
+        const fromX = x(row.lane);
+        const toX = x(parent.lane);
+        return (
+          <path
+            key={`parent-${parent.sha}`}
+            d={
+              fromX === toX
+                ? `M ${fromX} ${mid} V ${ROW_HEIGHT}`
+                : `M ${fromX} ${mid} C ${fromX} ${mid + 9}, ${toX} ${ROW_HEIGHT - 9}, ${toX} ${ROW_HEIGHT}`
+            }
+            fill="none"
+            stroke={color(parent.lane)}
+            strokeWidth={1.75}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            opacity={0.85}
+          />
+        );
+      })}
+      <circle
+        cx={x(row.lane)}
+        cy={mid}
+        r={isTip ? 4.5 : 3.5}
+        fill={isTip ? color(row.lane) : "var(--background)"}
+        stroke={color(row.lane)}
+        strokeWidth={2}
+      />
+    </svg>
+  );
+}
+
+function RefBadge(props: {
+  kind: "branch" | "remote" | "tag" | "head";
+  name: string;
+  current: boolean;
+}) {
+  const { kind, name, current } = props;
+  const Icon = kind === "tag" ? TagIcon : kind === "remote" ? CloudIcon : GitBranchIcon;
+  return (
+    <span
+      className={cn(
+        "inline-flex max-w-32 items-center gap-1 rounded-sm border px-1 py-px align-middle text-3xs leading-4 font-medium",
+        kind === "tag"
+          ? "border-warning/25 bg-warning/10 text-warning-foreground"
+          : current
+            ? "border-primary/25 bg-primary/10 text-primary"
+            : kind === "remote"
+              ? "border-dashed border-border text-muted-foreground"
+              : "border-border/70 bg-muted/60 text-muted-foreground",
+      )}
+    >
+      {kind === "head" ? (
+        <GitCommitHorizontalIcon className="size-2.5 shrink-0" />
+      ) : (
+        <Icon className="size-2.5 shrink-0" />
+      )}
+      <span className="truncate">{name}</span>
+    </span>
+  );
+}
+
+function ThreadChip(props: {
+  thread: MockThread;
+  color: string;
+  turn: number | null;
+  active: boolean;
+  onClick?: () => void;
+}) {
+  const { thread, color, turn, active, onClick } = props;
+  const label = turn === null ? thread.title : `${thread.title}, turn ${turn}`;
+  const running = thread.state === "running";
+  const content = (
+    <>
+      {/* One dot carries both identity and activity: filled with a slow halo
+          while the thread runs, hollow once it is idle. */}
+      <span aria-hidden className="relative flex size-2 shrink-0 items-center justify-center">
+        {running ? (
+          <span
+            className="absolute -inset-0.5 rounded-full opacity-35"
+            style={{ backgroundColor: color }}
+          />
+        ) : null}
+        <span
+          className={cn("relative size-2 rounded-full", !running && "border bg-transparent")}
+          style={running ? { backgroundColor: color } : { borderColor: color }}
+        />
+      </span>
+      <span className="max-w-28 truncate @max-[20rem]/graph:hidden">{thread.title}</span>
+      {turn === null ? null : <span className="shrink-0 tabular-nums opacity-65">·{turn}</span>}
+      {running ? <span className="sr-only">(running)</span> : null}
+    </>
+  );
+  const className = cn(
+    "inline-flex items-center gap-1 rounded-full border px-1.5 py-px text-3xs leading-4",
+    active
+      ? "border-primary/35 bg-primary/10 text-foreground"
+      : "border-transparent bg-muted/70 text-muted-foreground",
+    onClick !== undefined && "cursor-pointer hover:bg-accent hover:text-foreground",
+  );
+  return onClick ? (
+    <button type="button" aria-label={label} className={className} onClick={onClick}>
+      {content}
+    </button>
+  ) : (
+    <span aria-label={label} className={className}>
+      {content}
+    </span>
+  );
+}
+
+function PullRequestChip(props: { pullRequest: NonNullable<MockCommit["pullRequest"]> }) {
+  const { pullRequest } = props;
+  const merged = pullRequest.state === "merged";
+  const draft = pullRequest.state === "draft";
+  const Icon = merged
+    ? PullRequestGlyph.merged
+    : draft
+      ? PullRequestGlyph.draft
+      : PullRequestGlyph.pullRequest;
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full border px-1.5 py-px text-3xs leading-4",
+        merged
+          ? "border-primary/25 bg-primary/10 text-primary"
+          : draft
+            ? "border-border bg-muted/60 text-muted-foreground"
+            : "border-success/25 bg-success/10 text-success-foreground",
+      )}
+    >
+      <Icon className="size-2.5 shrink-0" />#{pullRequest.number}
+      <span className="sr-only">{merged ? "merged" : draft ? "draft" : "open"} pull request</span>
+    </span>
+  );
+}
+
+function CommitRow(props: {
+  commit: MockCommit;
+  row: GraphRow;
+  laneCount: number;
+  isTip: boolean;
+  isSelected: boolean;
+  isDimmed: boolean;
+  now: Date;
+  threadsById: ReadonlyMap<string, MockThread>;
+  threadColor: (id: string) => string;
+  onSelect: () => void;
+  onFilterThread: (id: string) => void;
+  onOpenMenu: (commit: MockCommit, position: { x: number; y: number }) => void;
+}) {
+  const {
+    commit,
+    row,
+    laneCount,
+    isTip,
+    isSelected,
+    isDimmed,
+    now,
+    threadsById,
+    threadColor,
+    onSelect,
+    onFilterThread,
+    onOpenMenu,
+  } = props;
+  const threads = commit.threadIds
+    .map((id) => threadsById.get(id))
+    .filter((thread): thread is MockThread => thread !== undefined);
+  const visibleThreads = threads.slice(0, 2);
+  const overflow = threads.length - visibleThreads.length;
+
+  return (
+    <div
+      role="option"
+      aria-selected={isSelected}
+      tabIndex={-1}
+      data-sha={commit.sha}
+      onClick={onSelect}
+      onContextMenu={(event: ReactMouseEvent) => {
+        event.preventDefault();
+        onOpenMenu(commit, { x: event.clientX, y: event.clientY });
+      }}
+      className={cn(
+        "group relative flex cursor-default select-none items-stretch gap-1 pr-2",
+        isSelected ? "bg-accent ring-1 ring-primary/20 ring-inset" : "hover:bg-accent/35",
+        isDimmed && "opacity-35",
+      )}
+      style={{ height: ROW_HEIGHT }}
+    >
+      <div className="shrink-0 border-r border-border/40">
+        <LaneGraph row={row} laneCount={laneCount} isTip={isTip} />
+      </div>
+      <div className="flex min-w-0 flex-1 flex-col justify-center py-1">
+        <div className="flex min-w-0 items-center gap-1.5">
+          {isTip ? (
+            <span className="@max-[26rem]/graph:hidden">
+              <RefBadge kind="head" name="HEAD" current />
+            </span>
+          ) : null}
+          {commit.refs
+            .filter((ref) => ref.kind !== "head")
+            .slice(0, 2)
+            .map((ref) => (
+              <RefBadge
+                key={`${ref.kind}-${ref.name}`}
+                kind={ref.kind}
+                name={ref.name}
+                current={ref.kind === "branch" && ref.name === "main"}
+              />
+            ))}
+          {commit.refs.filter((ref) => ref.kind !== "head").length > 2 ? (
+            <span className="shrink-0 rounded-sm border border-border/70 bg-muted/60 px-1 text-3xs leading-4 text-muted-foreground">
+              +{commit.refs.filter((ref) => ref.kind !== "head").length - 2}
+            </span>
+          ) : null}
+          <span
+            className={cn(
+              "min-w-0 flex-1 truncate text-xs leading-4",
+              isSelected ? "text-foreground" : "text-foreground/90",
+            )}
+          >
+            {commit.subject}
+          </span>
+          {commit.pullRequest ? (
+            <span className="@max-[26rem]/graph:hidden">
+              <PullRequestChip pullRequest={commit.pullRequest} />
+            </span>
+          ) : null}
+        </div>
+        <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-3xs leading-3.5 text-muted-foreground">
+          <span className="shrink-0 font-mono text-3xs text-muted-foreground/80">
+            {commit.sha.slice(0, 8)}
+          </span>
+          <span className="hidden shrink-0 @[26rem]/graph:inline">
+            {commit.author.split(" ")[0]}
+          </span>
+          <span className="shrink-0 tabular-nums">{relativeTime(commit.authoredAt, now)}</span>
+          {threads.length > 0 ? (
+            <>
+              <span aria-hidden>·</span>
+              {commit.turn === null ? (
+                <span
+                  className="flex shrink-0 items-center -space-x-0.5"
+                  aria-label={`Touched by ${threads.map((thread) => thread.title).join(", ")}`}
+                >
+                  {threads.slice(0, 3).map((thread) => (
+                    <span
+                      key={thread.id}
+                      className="size-2 rounded-full ring-2 ring-background"
+                      style={{ backgroundColor: threadColor(thread.id) }}
+                    />
+                  ))}
+                  {threads.length > 3 ? (
+                    <span className="pl-1 text-3xs tabular-nums">+{threads.length - 3}</span>
+                  ) : null}
+                </span>
+              ) : (
+                <>
+                  {visibleThreads.map((thread) => (
+                    <ThreadChip
+                      key={thread.id}
+                      thread={thread}
+                      color={threadColor(thread.id)}
+                      turn={thread.id === commit.threadIds[0] ? commit.turn : null}
+                      active={false}
+                      onClick={() => onFilterThread(thread.id)}
+                    />
+                  ))}
+                  {overflow > 0 ? (
+                    <span className="shrink-0 rounded-full bg-muted/70 px-1.5 py-px text-3xs">
+                      +{overflow}
+                    </span>
+                  ) : null}
+                </>
+              )}
+            </>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CommitDetail(props: {
+  commit: MockCommit;
+  threadsById: ReadonlyMap<string, MockThread>;
+  threadColor: (id: string) => string;
+  onClose: () => void;
+  onFilterThread: (id: string) => void;
+}) {
+  const { commit, threadsById, threadColor, onClose, onFilterThread } = props;
+
+  return (
+    <div className="shrink-0 border-t border-border/60 bg-muted/20 px-2 pt-2 pb-2">
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-xs font-medium text-foreground">{commit.subject}</div>
+          <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-3xs text-muted-foreground">
+            <span className="font-mono text-2xs text-foreground/80">{commit.sha}</span>
+            <span aria-hidden>·</span>
+            <span>{commit.author}</span>
+            <span aria-hidden>·</span>
+            <span>{fullTimestamp(commit.authoredAt)}</span>
+            {commit.pullRequest ? <PullRequestChip pullRequest={commit.pullRequest} /> : null}
+            {commit.threadIds.map((id) => {
+              const thread = threadsById.get(id);
+              if (!thread) return null;
+              return (
+                <ThreadChip
+                  key={id}
+                  thread={thread}
+                  color={threadColor(id)}
+                  turn={thread.id === commit.threadIds[0] ? commit.turn : null}
+                  active
+                  onClick={() => onFilterThread(id)}
+                />
+              );
+            })}
+          </div>
+        </div>
+        <Button
+          variant="ghost-muted"
+          size="icon-tiny"
+          aria-label="Close commit details"
+          onClick={onClose}
+        >
+          <ChevronDownIcon />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function WorktreeRow(props: {
+  worktree: MockWorktree;
+  thread: MockThread | null;
+  threadColor: string;
+  confirming: boolean;
+  onAskRemove: () => void;
+  onCancelRemove: () => void;
+}) {
+  const { worktree, thread, threadColor, confirming, onAskRemove, onCancelRemove } = props;
+  // The primary checkout has no branch of its own to recreate, so it is never
+  // removable from this list; a managed checkout with a live run is unsafe.
+  const blockedByRunningThread = !worktree.managed || thread?.state === "running";
+  return (
+    <div className="group border-b border-border/40 px-3 py-2.5 last:border-b-0 hover:bg-accent/25">
+      <div className="flex items-start gap-2">
+        <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-sm border border-border/60 bg-muted/40 text-muted-foreground">
+          <FolderGit2Icon className="size-3.5" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span className="truncate text-xs font-medium text-foreground">{worktree.branch}</span>
+            <span className="shrink-0 rounded-sm border border-border/60 px-1 text-4xs leading-4 text-muted-foreground">
+              {worktree.managed ? "managed" : "main checkout"}
+            </span>
+            {worktree.dirty ? (
+              <span className="inline-flex shrink-0 items-center gap-1 text-3xs text-warning-foreground">
+                <span className="size-1.5 rounded-full bg-warning" /> dirty
+              </span>
+            ) : null}
+            {worktree.stale ? (
+              <span className="shrink-0 text-3xs text-muted-foreground">no thread</span>
+            ) : null}
+          </div>
+          <div className="mt-0.5 truncate font-mono text-3xs text-muted-foreground/80">
+            {worktree.path}
+          </div>
+          {thread ? (
+            <div className="mt-1 flex items-center gap-1.5">
+              <ThreadChip thread={thread} color={threadColor} turn={null} active={false} />
+            </div>
+          ) : null}
+        </div>
+        {confirming ? (
+          <div className="flex shrink-0 items-center gap-1">
+            <Button variant="destructive" size="xs" onClick={onAskRemove}>
+              <Trash2Icon /> Remove
+            </Button>
+            <Button variant="ghost-muted" size="xs" onClick={onCancelRemove}>
+              Cancel
+            </Button>
+          </div>
+        ) : (
+          <span
+            className={cn(
+              "shrink-0",
+              !blockedByRunningThread &&
+                "opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100",
+            )}
+          >
+            <Button
+              variant="ghost-destructive"
+              size="icon-xs"
+              aria-label={`Remove ${worktree.branch}`}
+              disabled={blockedByRunningThread}
+              onClick={onAskRemove}
+            >
+              <Trash2Icon />
+            </Button>
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function GitGraphPanel(props: {
+  readonly repositoryLabel?: string | null;
+  readonly environmentId: EnvironmentId;
+  readonly cwd: string | null;
+}) {
+  const [now] = useState(() => new Date());
+  const [graph, setGraph] = useState<VcsLogGraphResult | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
+  const [limit, setLimit] = useState(120);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [view, setView] = useState<PanelView>("graph");
+  const [showRemotes, setShowRemotes] = useState(false);
+  const [selectedSha, setSelectedSha] = useState<string | null>(null);
+  const [filterThreadId, setFilterThreadId] = useState<string | null>(null);
+  const [confirmPath, setConfirmPath] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const noticeTimer = useRef<number | null>(null);
+  const loadGraph = useAtomCommand(vcsEnvironment.logGraph, { reportFailure: false });
+  const loadGraphRef = useRef(loadGraph);
+  loadGraphRef.current = loadGraph;
+
+  useEffect(() => {
+    const cwd = props.cwd;
+    if (cwd === null) {
+      setLoading(false);
+      setGraph(null);
+      return;
+    }
+    let cancelled = false;
+    setLoadingMore(true);
+    setLoadError(null);
+    void loadGraphRef
+      .current({ environmentId: props.environmentId, input: { cwd, limit } })
+      .then((result) => {
+        if (cancelled) return;
+        if (result._tag === "Success") {
+          setGraph(result.value);
+        } else {
+          setGraph(null);
+          setLoadError("Could not read this repository's history.");
+        }
+        setLoading(false);
+        setLoadingMore(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [props.cwd, props.environmentId, limit, reloadToken]);
+
+  const data = graph === null ? null : toGraphData(graph, props.repositoryLabel ?? "");
+  const commits = data?.commits ?? [];
+  const threads = data?.threads ?? [];
+  const worktrees = data?.worktrees ?? [];
+  const currentBranch = data?.currentBranch ?? "HEAD";
+  const showWorktrees = worktrees.length > 0;
+
+  useEffect(
+    () => () => {
+      if (noticeTimer.current !== null) window.clearTimeout(noticeTimer.current);
+    },
+    [],
+  );
+
+  const showNotice = (message: string) => {
+    setNotice(message);
+    if (noticeTimer.current !== null) window.clearTimeout(noticeTimer.current);
+    noticeTimer.current = window.setTimeout(() => setNotice(null), 3000);
+  };
+
+  const threadsById = new Map(threads.map((thread) => [thread.id, thread]));
+  const threadColor = (id: string) => {
+    const index = threads.findIndex((thread) => thread.id === id);
+    return THREAD_COLORS[(index < 0 ? 0 : index) % THREAD_COLORS.length]!;
+  };
+
+  const visibleCommits = commits.filter(
+    (commit) => showRemotes || !commit.refs.some((ref) => ref.kind === "remote"),
+  );
+  const layout = layoutGraph(visibleCommits.map(({ sha, parents }) => ({ sha, parents })));
+  const rowBySha = new Map(layout.rows.map((row) => [row.sha, row]));
+  const tipShas = new Set(
+    visibleCommits.filter((commit) => commit.refs.length > 0).map((commit) => commit.sha),
+  );
+
+  const applyFilter = (next: string | null) => {
+    setFilterThreadId(next);
+    setSelectedSha(null);
+  };
+
+  const selected = selectedSha ? commits.find((c) => c.sha === selectedSha) : undefined;
+  const runningThreads = threads.filter((thread) => thread.state === "running").length;
+
+  type CommitMenuAction =
+    | "open-diff"
+    | "copy-sha"
+    | "copy-subject"
+    | "create-branch"
+    | "rename-branch"
+    | "cherry-pick"
+    | "filter-thread";
+
+  const copyText = async (text: string, label: string) => {
+    try {
+      await Promise.race([
+        navigator.clipboard.writeText(text),
+        new Promise((_, reject) => window.setTimeout(() => reject(new Error("timeout")), 1500)),
+      ]);
+      showNotice(`${label} copied`);
+      return;
+    } catch {
+      // Permission prompts can leave writeText pending forever; fall back so the
+      // action still completes when the browser blocks the async clipboard.
+    }
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.append(textarea);
+    textarea.select();
+    const copied = document.execCommand("copy");
+    textarea.remove();
+    showNotice(copied ? `${label} copied` : "Could not copy to the clipboard");
+  };
+
+  const openCommitMenu = async (commit: MockCommit, position: { x: number; y: number }) => {
+    setSelectedSha(commit.sha);
+    const api = readLocalApi();
+    if (!api) return;
+    const thread = commit.threadIds[0] ? threadsById.get(commit.threadIds[0]) : undefined;
+    const branchRef = commit.refs.find((ref) => ref.kind === "branch");
+    const items: ContextMenuItem<CommitMenuAction>[] = [
+      { id: "open-diff", label: "Open diff" },
+      { id: "copy-sha", label: "Copy SHA" },
+      { id: "copy-subject", label: "Copy subject" },
+      {
+        id: "filter-thread",
+        disabled: thread === undefined,
+        label: "Filter by thread",
+        separatorBefore: true,
+      },
+      { id: "create-branch", label: "Create branch here", separatorBefore: true },
+      { id: "cherry-pick", label: "Cherry-pick onto current branch", separatorBefore: true },
+    ];
+    if (branchRef) {
+      items.splice(items.length - 1, 0, {
+        id: "rename-branch",
+        label: `Rename ${branchRef.name}…`,
+      });
+    }
+    const action = await api.contextMenu.show(items, position);
+    switch (action) {
+      case "open-diff":
+        showNotice("Commit diff lands with the logGraph slice");
+        break;
+      case "copy-sha":
+        await copyText(commit.sha, "SHA");
+        break;
+      case "copy-subject":
+        await copyText(commit.subject, "Subject");
+        break;
+      case "filter-thread":
+        if (thread) applyFilter(filterThreadId === thread.id ? null : thread.id);
+        break;
+      case "create-branch":
+        showNotice("Create branch is not wired yet");
+        break;
+      case "rename-branch":
+        showNotice("Rename branch is not wired yet");
+        break;
+      case "cherry-pick":
+        showNotice("Cherry-pick is not wired yet");
+        break;
+      default:
+        break;
+    }
+  };
+
+  const moveSelection = (direction: 1 | -1) => {
+    const currentIndex = visibleCommits.findIndex((commit) => commit.sha === selectedSha);
+    const nextIndex =
+      currentIndex === -1
+        ? direction === 1
+          ? 0
+          : visibleCommits.length - 1
+        : Math.min(visibleCommits.length - 1, Math.max(0, currentIndex + direction));
+    const next = visibleCommits[nextIndex];
+    if (!next) return;
+    setSelectedSha(next.sha);
+    document
+      .querySelector<HTMLElement>(`[data-sha="${next.sha}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+  };
+
+  return (
+    <div className="@container/graph flex h-full min-w-0 flex-col overflow-x-hidden bg-background">
+      <div className="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-border/60 px-2">
+        {showWorktrees ? (
+          <div
+            role="tablist"
+            aria-label="Repository view"
+            className="inline-flex items-center gap-0.5 rounded-(--control-radius) bg-muted/60 p-0.5"
+          >
+            {(
+              [
+                { id: "graph", label: "Graph", count: visibleCommits.length },
+                { id: "worktrees", label: "Worktrees", count: worktrees.length },
+              ] as const
+            ).map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={view === tab.id}
+                onClick={() => setView(tab.id)}
+                className={cn(
+                  "inline-flex h-6 items-center gap-1.5 rounded-sm px-2 text-2xs font-medium focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset focus-visible:outline-none",
+                  view === tab.id
+                    ? "bg-background text-foreground shadow-xs"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {tab.label}
+                <span className="text-3xs tabular-nums opacity-60 @max-[26rem]/graph:hidden">
+                  {tab.count}
+                </span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <span className="px-1 text-2xs font-medium text-foreground">Graph</span>
+        )}
+        <div className="flex items-center gap-0.5">
+          <Button
+            variant={showRemotes ? "secondary" : "ghost-muted"}
+            size="icon-sm"
+            aria-pressed={showRemotes}
+            aria-label={showRemotes ? "Hide remote branches" : "Show remote branches"}
+            onClick={() => setShowRemotes((value) => !value)}
+          >
+            <CloudIcon />
+          </Button>
+          <Button variant="ghost-muted" size="icon-sm" aria-label="Refresh graph">
+            <RefreshCwIcon />
+          </Button>
+        </div>
+      </div>
+
+      <div className="flex h-8 shrink-0 items-center gap-1.5 border-b border-border/40 px-2 text-2xs text-muted-foreground">
+        <GitBranchIcon className="size-3 shrink-0" />
+        <span className="font-medium text-foreground">{currentBranch}</span>
+        <span className="min-w-0 shrink truncate opacity-70 @max-[26rem]/graph:hidden">
+          {props.repositoryLabel ?? ""}
+        </span>
+      </div>
+
+      {props.cwd === null ? (
+        <PanelMessage title="No repository" body="Open a project to browse its commit history." />
+      ) : loading ? (
+        <GitGraphSkeleton />
+      ) : loadError !== null ? (
+        <PanelMessage
+          title="Could not load the graph"
+          body={loadError}
+          action={
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setReloadToken((value) => value + 1)}
+            >
+              Retry
+            </Button>
+          }
+        />
+      ) : graph !== null && !graph.isRepo ? (
+        <PanelMessage
+          title="Not a Git repository"
+          body="This project has no Git history to show."
+        />
+      ) : view === "graph" || !showWorktrees ? (
+        <>
+          {threads.length > 0 ? (
+            <div className="flex h-9 shrink-0 items-center gap-1 overflow-x-auto border-b border-border/40 px-2 [mask-image:linear-gradient(to_right,black_92%,transparent)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <button
+                type="button"
+                aria-pressed={filterThreadId === null}
+                onClick={() => applyFilter(null)}
+                className={cn(
+                  "inline-flex h-5 shrink-0 items-center rounded-full border px-2 text-3xs",
+                  filterThreadId === null
+                    ? "border-primary/35 bg-primary/10 text-foreground"
+                    : "border-transparent bg-muted/60 text-muted-foreground hover:text-foreground",
+                )}
+              >
+                All threads
+              </button>
+              {threads.map((thread) => (
+                <ThreadChip
+                  key={thread.id}
+                  thread={thread}
+                  color={threadColor(thread.id)}
+                  turn={null}
+                  active={filterThreadId === thread.id}
+                  onClick={() => applyFilter(filterThreadId === thread.id ? null : thread.id)}
+                />
+              ))}
+            </div>
+          ) : null}
+
+          <div
+            role="listbox"
+            aria-label="Commits"
+            tabIndex={0}
+            onScroll={(event) => {
+              if (loadingMore || !graph?.truncated) return;
+              const list = event.currentTarget;
+              if (list.scrollTop + list.clientHeight < list.scrollHeight - 240) return;
+              setLimit((value) => Math.min(value + 120, 1000));
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "ArrowDown") {
+                event.preventDefault();
+                moveSelection(1);
+              } else if (event.key === "ArrowUp") {
+                event.preventDefault();
+                moveSelection(-1);
+              } else if (event.key === "Escape") {
+                setSelectedSha(null);
+              } else if (
+                selectedSha !== null &&
+                (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10"))
+              ) {
+                const commit = visibleCommits.find((entry) => entry.sha === selectedSha);
+                const row = document.querySelector<HTMLElement>(`[data-sha="${selectedSha}"]`);
+                if (commit && row) {
+                  event.preventDefault();
+                  const rect = row.getBoundingClientRect();
+                  void openCommitMenu(commit, {
+                    x: rect.left + 32,
+                    y: rect.top + rect.height / 2,
+                  });
+                }
+              }
+            }}
+            className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable] focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:ring-inset focus-visible:outline-none"
+          >
+            {visibleCommits.map((commit) => {
+              const row = rowBySha.get(commit.sha);
+              if (!row) return null;
+              const matchesFilter =
+                filterThreadId === null || commit.threadIds.includes(filterThreadId);
+              return (
+                <CommitRow
+                  key={commit.sha}
+                  commit={commit}
+                  row={row}
+                  laneCount={layout.laneCount}
+                  isTip={tipShas.has(commit.sha)}
+                  isSelected={commit.sha === selectedSha}
+                  isDimmed={!matchesFilter}
+                  now={now}
+                  threadsById={threadsById}
+                  threadColor={threadColor}
+                  onSelect={() => setSelectedSha(commit.sha)}
+                  onFilterThread={(id) => applyFilter(filterThreadId === id ? null : id)}
+                  onOpenMenu={(commit, position) => {
+                    void openCommitMenu(commit, position);
+                  }}
+                />
+              );
+            })}
+            <div className="flex items-center gap-2 px-3 py-3 text-3xs text-muted-foreground/70">
+              <GitCommitHorizontalIcon className="size-3" />
+              {loadingMore
+                ? "Loading more commits…"
+                : graph?.truncated
+                  ? "Scroll for more commits"
+                  : "End of history"}
+            </div>
+          </div>
+
+          {selected ? (
+            <CommitDetail
+              commit={selected}
+              threadsById={threadsById}
+              threadColor={threadColor}
+              onClose={() => setSelectedSha(null)}
+              onFilterThread={(id) => applyFilter(filterThreadId === id ? null : id)}
+            />
+          ) : null}
+        </>
+      ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="flex h-8 items-center justify-between border-b border-border/40 px-3 text-3xs text-muted-foreground">
+            <span>
+              {worktrees.length} checkouts ·{" "}
+              {worktrees.filter((worktree) => worktree.managed).length} managed
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <TriangleAlertIcon className="size-3 text-warning-foreground" />
+              {runningThreads} running
+            </span>
+          </div>
+          {worktrees.map((worktree) => {
+            const thread = worktree.threadId ? (threadsById.get(worktree.threadId) ?? null) : null;
+            return (
+              <WorktreeRow
+                key={worktree.path}
+                worktree={worktree}
+                thread={thread}
+                threadColor={thread ? threadColor(thread.id) : THREAD_COLORS[0]}
+                confirming={confirmPath === worktree.path}
+                onAskRemove={() => setConfirmPath(worktree.path)}
+                onCancelRemove={() => setConfirmPath(null)}
+              />
+            );
+          })}
+          <div className="m-3 flex items-start gap-2 rounded-(--control-radius) border border-border/60 bg-muted/30 p-2.5 text-2xs leading-4 text-muted-foreground">
+            <InfoIcon className="mt-px size-3.5 shrink-0" />
+            <span>
+              Removing a checkout keeps its branch, commits, and thread history. A thread that still
+              uses it recreates it on the next turn. Checkouts with a running thread cannot be
+              removed.
+            </span>
+          </div>
+        </div>
+      )}
+
+      <div className="flex h-7 shrink-0 items-center gap-2 overflow-hidden whitespace-nowrap border-t border-border/50 px-2 text-3xs text-muted-foreground">
+        <span className="inline-flex items-center gap-1">
+          <span className="size-1.5 rounded-full bg-success" />
+          live
+        </span>
+        <span aria-hidden className="@max-[26rem]/graph:hidden">
+          ·
+        </span>
+        <span className="@max-[26rem]/graph:hidden">{visibleCommits.length} commits</span>
+        {threads.length > 0 ? (
+          <>
+            <span aria-hidden className="@max-[26rem]/graph:hidden">
+              ·
+            </span>
+            <span className="@max-[26rem]/graph:hidden">{threads.length} threads</span>
+          </>
+        ) : null}
+        <span
+          className={cn(
+            "ml-auto min-w-0 truncate",
+            notice === null ? "opacity-70" : "font-medium text-foreground",
+          )}
+        >
+          {notice ?? "git log --topo-order"}
+        </span>
+      </div>
+    </div>
+  );
+}
