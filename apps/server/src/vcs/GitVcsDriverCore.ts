@@ -3783,6 +3783,130 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     },
   );
 
+  const logGraph: GitVcsDriver.GitVcsDriver["Service"]["logGraph"] = Effect.fn("logGraph")(
+    function* (input) {
+      const repositoryPaths = yield* resolveRepositoryPaths(input.cwd, false).pipe(
+        Effect.catchTags({
+          GitCommandError: (error) =>
+            isMissingGitCwdError(error) ? Effect.succeed(null) : Effect.fail(error),
+        }),
+      );
+      if (repositoryPaths === null) {
+        return { commits: [], currentBranch: null, truncated: false, isRepo: false };
+      }
+
+      const limit = Math.min(Math.max(input.limit ?? 300, 1), 1000);
+      const fieldSeparator = "";
+      const recordSeparator = "";
+      const revisionArgs = input.includeRemotes
+        ? ["--branches", "--tags", "--remotes"]
+        : ["--branches", "--tags"];
+      const format = ["%H", "%P", "%an", "%aI", "%s"].join(fieldSeparator) + recordSeparator;
+
+      const log = yield* executeGit(
+        "GitVcsDriver.logGraph",
+        input.cwd,
+        [
+          "log",
+          "--topo-order",
+          `--max-count=${limit + 1}`,
+          ...revisionArgs,
+          `--pretty=format:${format}`,
+        ],
+        { allowNonZeroExit: true, maxOutputBytes: 8_000_000 },
+      );
+
+      const refs = yield* executeGit(
+        "GitVcsDriver.logGraph.refs",
+        input.cwd,
+        ["for-each-ref", "--format=%(objectname)%09%(refname)"],
+        { maxOutputBytes: 8_000_000 },
+      );
+
+      const refsBySha = new Map<
+        string,
+        Array<{ kind: "head" | "branch" | "remote" | "tag"; name: string }>
+      >();
+      for (const line of refs.stdout.split("\n")) {
+        const [sha = "", refName = ""] = line.split("\t");
+        if (sha.length === 0 || refName.length === 0) continue;
+        let kind: "branch" | "remote" | "tag" | null = null;
+        let name = "";
+        if (refName.startsWith("refs/heads/")) {
+          kind = "branch";
+          name = refName.slice("refs/heads/".length);
+        } else if (refName.startsWith("refs/remotes/")) {
+          // origin/HEAD duplicates its branch tip and reads as noise in the graph.
+          if (refName.endsWith("/HEAD")) continue;
+          kind = "remote";
+          name = refName.slice("refs/remotes/".length);
+        } else if (refName.startsWith("refs/tags/")) {
+          kind = "tag";
+          name = refName.slice("refs/tags/".length);
+        }
+        if (kind === null || name.length === 0) continue;
+        const list = refsBySha.get(sha) ?? [];
+        list.push({ kind, name });
+        refsBySha.set(sha, list);
+      }
+
+      const head = yield* executeGit(
+        "GitVcsDriver.logGraph.head",
+        input.cwd,
+        ["rev-parse", "--verify", "--quiet", "HEAD"],
+        { allowNonZeroExit: true },
+      );
+      const headSha = head.exitCode === 0 ? head.stdout.trim() : "";
+      if (headSha.length > 0) {
+        const list = refsBySha.get(headSha) ?? [];
+        list.unshift({ kind: "head", name: "HEAD" });
+        refsBySha.set(headSha, list);
+      }
+
+      const branch = yield* executeGit(
+        "GitVcsDriver.logGraph.branch",
+        input.cwd,
+        ["symbolic-ref", "--short", "HEAD"],
+        { allowNonZeroExit: true },
+      );
+      const currentBranch = branch.exitCode === 0 ? branch.stdout.trim() : null;
+
+      if (log.exitCode !== 0) {
+        return { commits: [], currentBranch, truncated: false, isRepo: true };
+      }
+
+      const parsed: Array<{
+        sha: string;
+        parents: string[];
+        subject: string;
+        authorName: string;
+        authoredAt: DateTime.Utc;
+        refs: Array<{ kind: "head" | "branch" | "remote" | "tag"; name: string }>;
+      }> = [];
+      for (const record of log.stdout.split(recordSeparator)) {
+        const trimmed = record.replace(/\n+$/, "");
+        if (trimmed.length === 0) continue;
+        const [sha = "", parentsRaw = "", authorName = "", authoredAtRaw = "", subject = ""] =
+          trimmed.split(fieldSeparator);
+        if (sha.length === 0) continue;
+        const parents = parentsRaw.split(" ").filter((parent) => parent.length > 0);
+        const authoredAt = DateTime.makeUnsafe(authoredAtRaw);
+        const allRefs = refsBySha.get(sha) ?? [];
+        const visibleRefs = allRefs.filter(
+          (ref) => input.includeRemotes === true || ref.kind !== "remote",
+        );
+        parsed.push({ sha, parents, subject, authorName, authoredAt, refs: visibleRefs });
+      }
+
+      return {
+        commits: parsed.slice(0, limit),
+        currentBranch: currentBranch !== null && currentBranch.length > 0 ? currentBranch : null,
+        truncated: parsed.length > limit,
+        isRepo: true,
+      };
+    },
+  );
+
   const createWorktree: GitVcsDriver.GitVcsDriver["Service"]["createWorktree"] = Effect.fn(
     "createWorktree",
   )(function* (input, options) {
@@ -4595,6 +4719,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     readBranchBase,
     resolveBranchName,
     listRefs,
+    logGraph,
     createWorktree: Effect.fnUntraced(function* (input, options) {
       return yield* withListRefsInvalidation(input.cwd, createWorktree(input, options));
     }),

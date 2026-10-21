@@ -184,6 +184,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.gitResolvePullRequest]: "git",
   [WS_METHODS.gitPreparePullRequestThread]: "git",
   [WS_METHODS.vcsListRefs]: "vcs",
+  [WS_METHODS.vcsLogGraph]: "vcs",
   [WS_METHODS.vcsCreateWorktree]: "vcs",
   [WS_METHODS.vcsRemoveWorktree]: "vcs",
   [WS_METHODS.vcsCreateRef]: "vcs",
@@ -224,7 +225,6 @@ const RPC_AGGREGATES = {
   [WS_METHODS.subscribeServerConfig]: "server",
   [WS_METHODS.subscribeServerLifecycle]: "server",
   [WS_METHODS.subscribeAuthAccess]: "auth",
-  [WS_METHODS.subscribeBackgroundPolicy]: "server",
 } as const satisfies Readonly<Record<WsRpcMethod, string>>;
 
 const RPC_SPAN_PREFIX = "ws.rpc";
