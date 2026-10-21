@@ -330,6 +330,7 @@ function CommitRow(props: {
     .filter((thread): thread is MockThread => thread !== undefined);
   const visibleThreads = threads.slice(0, 2);
   const overflow = threads.length - visibleThreads.length;
+  const isHead = commit.refs.some((ref) => ref.kind === "head");
 
   return (
     <div
@@ -389,7 +390,7 @@ function CommitRow(props: {
       </div>
       <div className="flex min-w-0 flex-1 flex-col justify-center py-1">
         <div className="flex min-w-0 items-center gap-1.5">
-          {isTip ? (
+          {isHead ? (
             <RefBadge kind="head" name="HEAD" current className="@max-[26rem]/graph:hidden" />
           ) : null}
           {commit.refs
