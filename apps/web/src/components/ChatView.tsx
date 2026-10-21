@@ -3831,7 +3831,7 @@ export default function ChatView(props: ChatViewProps) {
   };
   const addFilesSurfaceStable = useStableCallback(addFilesSurface);
   const addGitGraphSurface = () => {
-    if (!activeThreadRef || !isServerThread || !isGitRepo) return;
+    if (!activeThreadRef || !activeProject || !isGitRepo) return;
     useRightPanelStore.getState().open(activeThreadRef, "git-graph");
   };
   const addGitGraphSurfaceStable = useStableCallback(addGitGraphSurface);
@@ -8882,7 +8882,7 @@ export default function ChatView(props: ChatViewProps) {
           pullRequestAvailable={pullRequestSurfaceAvailable}
           pullRequestsAvailable={pullRequestsSurfaceAvailable}
           deviceAvailable={activeThreadRef !== null}
-          gitGraphAvailable={isServerThread && isGitRepo}
+          gitGraphAvailable={activeProject !== null && isGitRepo}
         >
           {rightPanelContent}
         </RightPanelTabs>
@@ -8939,7 +8939,7 @@ export default function ChatView(props: ChatViewProps) {
             pullRequestAvailable={pullRequestSurfaceAvailable}
             pullRequestsAvailable={pullRequestsSurfaceAvailable}
             deviceAvailable={activeThreadRef !== null}
-            gitGraphAvailable={isServerThread && isGitRepo}
+            gitGraphAvailable={activeProject !== null && isGitRepo}
           >
             {rightPanelContent}
           </RightPanelTabs>
