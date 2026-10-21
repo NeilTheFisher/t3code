@@ -131,11 +131,10 @@ export interface GerritRestTarget {
 }
 
 /**
- * Gerrit's REST API, used only for what the SSH command line cannot carry: a comment's own id
- * (so a reply can name its parent), thread resolution, the account search behind the reviewer
- * picker and its current reviewer list, and the per-file viewed marks. The web origin is
- * `https://<host>` and the basic-auth username is the git remote's SSH user, so only the token is
- * stored (Settings → Source Control, with `T3CODE_GERRIT_HTTP_TOKEN` as an environment fallback).
+ * Gerrit's REST API, for what the SSH command line cannot carry: comment ids, thread
+ * resolution, reviewer search, viewed marks and the WIP flag. The web origin is
+ * `https://<host>` and the username is the git remote's SSH user, so only the token is
+ * stored (Settings → Source Control, with `T3CODE_GERRIT_HTTP_TOKEN` as a fallback).
  */
 export class GerritRestApi extends Context.Service<
   GerritRestApi,
@@ -162,6 +161,9 @@ export class GerritRestApi extends Context.Service<
         readonly reviewed: boolean;
       },
     ) => Effect.Effect<void, GerritRestApiError>;
+    readonly setReady: (
+      input: GerritRestTarget & { readonly change: number; readonly ready: boolean },
+    ) => Effect.Effect<void, GerritRestApiError>;
     readonly setReviewer: (
       input: GerritRestTarget & {
         readonly change: number;
@@ -175,7 +177,7 @@ export class GerritRestApi extends Context.Service<
   }
 >()("t3/sourceControl/GerritRestApi") {}
 
-/** @public Service construction is part of the canonical Effect module API. */
+/** @public */
 export const make = Effect.gen(function* () {
   const config = yield* GerritRestEnvConfig.pipe(Effect.orDie);
   const httpClient = yield* HttpClient.HttpClient;
@@ -191,7 +193,7 @@ export const make = Effect.gen(function* () {
     ),
   );
 
-  const requestText = (
+  const requestText = Effect.fn("GerritRestApi.requestText")(function* (
     target: GerritRestTarget,
     input: {
       readonly operation: string;
@@ -199,14 +201,13 @@ export const make = Effect.gen(function* () {
       readonly path: string;
       readonly body?: unknown;
     },
-  ): Effect.Effect<string, GerritRestApiError> =>
-    Effect.gen(function* () {
+  ): Effect.fn.Return<string, GerritRestApiError> {
       const token = yield* currentToken;
       if (token === null) {
         return yield* new GerritRestApiError({
           operation: input.operation,
           detail:
-            "No Gerrit HTTP token is set. Add one in Settings → Source Control to reply, resolve or pick reviewers.",
+            "No Gerrit HTTP token is set. Add one in Settings → Source Control to reply, resolve, pick reviewers or mark a change ready.",
         });
       }
       const baseUrl = Option.getOrElse(config.baseUrl, () => `https://${target.host}`).replace(
@@ -379,6 +380,14 @@ export const make = Effect.gen(function* () {
       )}/reviewed`,
     }).pipe(Effect.asVoid);
 
+  // Gerrit's WIP flag is REST-only: `gerrit review` has no wip/ready verb on the SSH CLI.
+  const setReady: GerritRestApi["Service"]["setReady"] = (input) =>
+    requestText(input, {
+      operation: "setReady",
+      method: "POST",
+      path: `/a/changes/${input.change}/${input.ready ? "ready" : "wip"}`,
+    }).pipe(Effect.asVoid);
+
   const setReviewer: GerritRestApi["Service"]["setReviewer"] = (input) =>
     requestText(input, {
       operation: "setReviewer",
@@ -391,8 +400,9 @@ export const make = Effect.gen(function* () {
 
   // Gerrit has no plain "set description"; it rewrites the commit message through its edit flow,
   // which opens an edit, sets the message, and publishes it as a new patch set.
-  const updateMessage: GerritRestApi["Service"]["updateMessage"] = (input) =>
-    Effect.gen(function* () {
+  const updateMessage: GerritRestApi["Service"]["updateMessage"] = Effect.fn(
+    "GerritRestApi.updateMessage",
+  )(function* (input) {
       const change = `/a/changes/${input.change}`;
       yield* requestText(input, {
         operation: "updateMessage",
@@ -419,6 +429,7 @@ export const make = Effect.gen(function* () {
     postReview,
     searchAccounts,
     setFileReviewed,
+    setReady,
     setReviewer,
     updateMessage,
   });
