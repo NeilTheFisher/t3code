@@ -37,6 +37,9 @@ const DevicePanel = lazy(() =>
   import("../device/DevicePanel").then((module) => ({ default: module.DevicePanel })),
 );
 const FilePreviewPanel = lazy(() => import("../files/FilePreviewPanel"));
+const GitGraphPanel = lazy(() =>
+  import("../../gitGraph/GitGraphPanel").then((module) => ({ default: module.GitGraphPanel })),
+);
 
 type RightPanelTerminalProps = Omit<
   PersistentThreadTerminalPanelProps,
@@ -242,6 +245,15 @@ export function RightPanelSurfaceContent(props: {
           parentPanel={props.sideChatParentPanel}
           onClose={() => onCloseSurface(surface)}
         />
+    case "git-graph":
+      return (
+        <Suspense fallback={null}>
+          <GitGraphPanel
+            repositoryLabel={props.files.projectName}
+            environmentId={props.environmentId}
+            cwd={props.files.workspaceRoot ?? null}
+          />
+        </Suspense>
       );
     case "linked-thread":
       return (
