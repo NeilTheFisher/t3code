@@ -232,6 +232,27 @@ describe("GerritRestApi", () => {
     ),
   );
 
+  it.effect("flips the work-in-progress flag through the ready and wip endpoints", () =>
+    withServer(
+      (_request, response) => {
+        response.writeHead(200);
+        response.end();
+      },
+      (api) =>
+        Effect.gen(function* () {
+          yield* api.setReady({ ...target, change: 1, ready: true });
+          yield* api.setReady({ ...target, change: 1, ready: false });
+          assert.deepStrictEqual(
+            recorded.map((entry) => [entry.method, entry.url]),
+            [
+              ["POST", "/a/changes/1/ready"],
+              ["POST", "/a/changes/1/wip"],
+            ],
+          );
+        }),
+    ),
+  );
+
   it.effect("lists the change's current reviewers", () =>
     withServer(
       (_request, response) => {
