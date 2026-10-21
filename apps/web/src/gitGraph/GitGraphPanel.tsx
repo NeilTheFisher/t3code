@@ -25,8 +25,10 @@ import { cn } from "~/lib/utils";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { vcsEnvironment } from "~/state/vcs";
 
+import { COMPOSER_MENTION_DRAG_TYPE } from "../components/chat/composerMentionDrag";
 import { PullRequestGlyph } from "../components/pullRequest/pullRequestIcons";
 import { Button } from "../components/ui/button";
+import { commitDragText } from "./commitDrag";
 import { layoutGraph, type GraphRow } from "./graphLayout";
 import type { MockCommit, MockGraphData, MockThread, MockWorktree } from "./mockGraph";
 
@@ -345,6 +347,18 @@ function CommitRow(props: {
       aria-selected={isSelected}
       tabIndex={-1}
       data-sha={commit.sha}
+      draggable
+      onDragStart={(event) => {
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", commit.sha);
+        event.dataTransfer.setData(
+          COMPOSER_MENTION_DRAG_TYPE,
+          commitDragText({
+            sha: commit.sha,
+            threads: threads.map((thread) => ({ id: thread.id, title: thread.title })),
+          }),
+        );
+      }}
       onClick={onSelect}
       onContextMenu={(event: ReactMouseEvent) => {
         event.preventDefault();
