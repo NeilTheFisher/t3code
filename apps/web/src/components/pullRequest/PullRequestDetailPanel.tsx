@@ -299,6 +299,8 @@ function ActOnEnvironmentPicker({
     has to answer here too — otherwise the platform's own cut/paste menu opens over it. */
 const GERRIT_PANEL_LABELS = {
   merge: "Submit",
+  ready: "Ready for review",
+  draft: "Mark work in progress",
   close: "Abandon change",
   reopen: "Restore change",
   copyNumber: "Copy CR number",
@@ -309,6 +311,8 @@ const GERRIT_PANEL_LABELS = {
 
 const DEFAULT_PANEL_LABELS = {
   merge: "Merge",
+  ready: "Ready for review",
+  draft: "Convert to draft",
   close: "Close pull request",
   reopen: "Reopen pull request",
   copyNumber: "Copy PR number",
@@ -1922,15 +1926,17 @@ export function PullRequestDetailPanel({
                           variant="default"
                           disabled={actionPending}
                           onClick={() => void perform("ready")}
-                          aria-label="Ready for review"
+                          aria-label={panelLabels(detail.provider).ready}
                         >
                           <PullRequestGlyph.pullRequest aria-hidden className="size-3.5" />
-                          <span className="@max-[30rem]/pr-header:hidden">Ready for review</span>
+                          <span className="@max-[30rem]/pr-header:hidden">
+                            {panelLabels(detail.provider).ready}
+                          </span>
                         </Button>
                       </span>
                     }
                   />
-                  <TooltipPopup side="top">Ready for review</TooltipPopup>
+                  <TooltipPopup side="top">{panelLabels(detail.provider).ready}</TooltipPopup>
                 </Tooltip>
               ) : primaryAction === "enable-auto-merge" ? (
                 <Tooltip>
@@ -2171,7 +2177,9 @@ export function PullRequestDetailPanel({
                           ) : (
                             <PullRequestGlyph.draft className="size-3.5" />
                           )}
-                          {detail.isDraft ? "Ready for review" : "Convert to draft"}
+                          {detail.isDraft
+                            ? panelLabels(detail.provider).ready
+                            : panelLabels(detail.provider).draft}
                         </MenuItem>
                       ) : null}
                       {showsMergeNow ? (

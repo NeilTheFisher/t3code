@@ -133,7 +133,8 @@ export interface GerritRestTarget {
 /**
  * Gerrit's REST API, used only for what the SSH command line cannot carry: a comment's own id
  * (so a reply can name its parent), thread resolution, the account search behind the reviewer
- * picker and its current reviewer list, and the per-file viewed marks. The web origin is
+ * picker and its current reviewer list, the per-file viewed marks, and a change's
+ * work-in-progress flag. The web origin is
  * `https://<host>` and the basic-auth username is the git remote's SSH user, so only the token is
  * stored (Settings → Source Control, with `T3CODE_GERRIT_HTTP_TOKEN` as an environment fallback).
  */
@@ -161,6 +162,9 @@ export class GerritRestApi extends Context.Service<
         readonly path: string;
         readonly reviewed: boolean;
       },
+    ) => Effect.Effect<void, GerritRestApiError>;
+    readonly setReady: (
+      input: GerritRestTarget & { readonly change: number; readonly ready: boolean },
     ) => Effect.Effect<void, GerritRestApiError>;
     readonly setReviewer: (
       input: GerritRestTarget & {
@@ -206,7 +210,7 @@ export const make = Effect.gen(function* () {
         return yield* new GerritRestApiError({
           operation: input.operation,
           detail:
-            "No Gerrit HTTP token is set. Add one in Settings → Source Control to reply, resolve or pick reviewers.",
+            "No Gerrit HTTP token is set. Add one in Settings → Source Control to reply, resolve, pick reviewers or mark a change ready.",
         });
       }
       const baseUrl = Option.getOrElse(config.baseUrl, () => `https://${target.host}`).replace(
@@ -379,6 +383,14 @@ export const make = Effect.gen(function* () {
       )}/reviewed`,
     }).pipe(Effect.asVoid);
 
+  // Gerrit's WIP flag is REST-only: `gerrit review` has no wip/ready verb on the SSH CLI.
+  const setReady: GerritRestApi["Service"]["setReady"] = (input) =>
+    requestText(input, {
+      operation: "setReady",
+      method: "POST",
+      path: `/a/changes/${input.change}/${input.ready ? "ready" : "wip"}`,
+    }).pipe(Effect.asVoid);
+
   const setReviewer: GerritRestApi["Service"]["setReviewer"] = (input) =>
     requestText(input, {
       operation: "setReviewer",
@@ -419,6 +431,7 @@ export const make = Effect.gen(function* () {
     postReview,
     searchAccounts,
     setFileReviewed,
+    setReady,
     setReviewer,
     updateMessage,
   });
