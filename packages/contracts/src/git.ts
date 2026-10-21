@@ -287,6 +287,40 @@ export const VcsListRefsResult = Schema.Struct({
 });
 export type VcsListRefsResult = typeof VcsListRefsResult.Type;
 
+export const VcsGraphRefKind = Schema.Literals(["head", "branch", "remote", "tag"]);
+export type VcsGraphRefKind = typeof VcsGraphRefKind.Type;
+
+export const VcsGraphRef = Schema.Struct({
+  kind: VcsGraphRefKind,
+  name: Schema.String,
+});
+export type VcsGraphRef = typeof VcsGraphRef.Type;
+
+export const VcsGraphCommit = Schema.Struct({
+  sha: TrimmedNonEmptyStringSchema,
+  parents: Schema.Array(TrimmedNonEmptyStringSchema),
+  subject: Schema.String,
+  authorName: Schema.String,
+  authoredAt: Schema.DateTimeUtc,
+  refs: Schema.Array(VcsGraphRef),
+});
+export type VcsGraphCommit = typeof VcsGraphCommit.Type;
+
+export const VcsLogGraphInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  includeRemotes: Schema.optional(Schema.Boolean),
+  limit: Schema.optional(PositiveInt.check(Schema.isLessThanOrEqualTo(1000))),
+});
+export type VcsLogGraphInput = typeof VcsLogGraphInput.Type;
+
+export const VcsLogGraphResult = Schema.Struct({
+  commits: Schema.Array(VcsGraphCommit),
+  currentBranch: Schema.NullOr(TrimmedNonEmptyStringSchema),
+  truncated: Schema.Boolean,
+  isRepo: Schema.Boolean,
+});
+export type VcsLogGraphResult = typeof VcsLogGraphResult.Type;
+
 export const VcsCreateWorktreeResult = Schema.Struct({
   worktree: VcsWorktree,
 });
