@@ -1,7 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off - the test runs a Node HTTP server.
 import * as NodeHttp from "node:http";
 
-import { assert, describe, expect, it } from "@effect/vitest";
+import { assert, describe, it } from "@effect/vitest";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -226,6 +226,27 @@ describe("GerritRestApi", () => {
             [
               ["PUT", "/a/changes/1/revisions/current/files/dir%2Fa%20b.js/reviewed"],
               ["DELETE", "/a/changes/1/revisions/current/files/dir%2Fa%20b.js/reviewed"],
+            ],
+          );
+        }),
+    ),
+  );
+
+  it.effect("flips the work-in-progress flag through the ready and wip endpoints", () =>
+    withServer(
+      (_request, response) => {
+        response.writeHead(200);
+        response.end();
+      },
+      (api) =>
+        Effect.gen(function* () {
+          yield* api.setReady({ ...target, change: 1, ready: true });
+          yield* api.setReady({ ...target, change: 1, ready: false });
+          assert.deepStrictEqual(
+            recorded.map((entry) => [entry.method, entry.url]),
+            [
+              ["POST", "/a/changes/1/ready"],
+              ["POST", "/a/changes/1/wip"],
             ],
           );
         }),
