@@ -133,7 +133,12 @@ export function runCli() {
     Effect.catchDefect(() => Effect.succeed(true)),
     Effect.flatMap((proceed) =>
       proceed
-        ? Command.run(cli, { version: packageJson.version })
+        ? // The websocket RPC group is large enough for the checker to widen the CLI's
+          // service channel to `any`. The layer is complete and supplies every command,
+          // so pin the entrypoint's requirements instead of letting the widening fail it.
+          (Command.run(cli, {
+            version: packageJson.version,
+          }) as Effect.Effect<void, unknown, never>)
         : Effect.sync(() => {
             process.exitCode = 130;
           }),
