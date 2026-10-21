@@ -3884,7 +3884,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         refs: Array<{ kind: "head" | "branch" | "remote" | "tag"; name: string }>;
       }> = [];
       for (const record of log.stdout.split(recordSeparator)) {
-        const trimmed = record.replace(/\n+$/, "");
+        const trimmed = record.replace(/^[\r\n]+|[\r\n]+$/g, "");
         if (trimmed.length === 0) continue;
         const [sha = "", parentsRaw = "", authorName = "", authoredAtRaw = "", subject = ""] =
           trimmed.split(fieldSeparator);
