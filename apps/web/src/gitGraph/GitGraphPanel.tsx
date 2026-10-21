@@ -1,5 +1,4 @@
 import {
-  ChevronDownIcon,
   CloudIcon,
   FolderGit2Icon,
   GitBranchIcon,
@@ -119,15 +118,6 @@ function relativeTime(date: Date, now: Date): string {
   const days = Math.round(hours / 24);
   if (days < 7) return `${days}d`;
   return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(date);
-}
-
-function fullTimestamp(date: Date): string {
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
 }
 
 function LaneGraph(props: { row: GraphRow; laneCount: number; isTip: boolean }) {
@@ -465,56 +455,6 @@ function CommitRow(props: {
   );
 }
 
-function CommitDetail(props: {
-  commit: MockCommit;
-  threadsById: ReadonlyMap<string, MockThread>;
-  threadColor: (id: string) => string;
-  onClose: () => void;
-  onFilterThread: (id: string) => void;
-}) {
-  const { commit, threadsById, threadColor, onClose, onFilterThread } = props;
-
-  return (
-    <div className="shrink-0 border-t border-border/60 bg-muted/20 px-2 pt-2 pb-2">
-      <div className="flex items-start gap-2">
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-xs font-medium text-foreground">{commit.subject}</div>
-          <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-3xs text-muted-foreground">
-            <span className="font-mono text-2xs text-foreground/80">{commit.sha}</span>
-            <span aria-hidden>·</span>
-            <span>{commit.author}</span>
-            <span aria-hidden>·</span>
-            <span>{fullTimestamp(commit.authoredAt)}</span>
-            {commit.pullRequest ? <PullRequestChip pullRequest={commit.pullRequest} /> : null}
-            {commit.threadIds.map((id) => {
-              const thread = threadsById.get(id);
-              if (!thread) return null;
-              return (
-                <ThreadChip
-                  key={id}
-                  thread={thread}
-                  color={threadColor(id)}
-                  turn={thread.id === commit.threadIds[0] ? commit.turn : null}
-                  active
-                  onClick={() => onFilterThread(id)}
-                />
-              );
-            })}
-          </div>
-        </div>
-        <Button
-          variant="ghost-muted"
-          size="icon-tiny"
-          aria-label="Close commit details"
-          onClick={onClose}
-        >
-          <ChevronDownIcon />
-        </Button>
-      </div>
-    </div>
-  );
-}
-
 function WorktreeRow(props: {
   worktree: MockWorktree;
   thread: MockThread | null;
@@ -681,7 +621,6 @@ export function GitGraphPanel(props: {
     setSelectedSha(null);
   };
 
-  const selected = selectedSha ? commits.find((c) => c.sha === selectedSha) : undefined;
   const runningThreads = threads.filter((thread) => thread.state === "running").length;
 
   type CommitMenuAction =
@@ -972,16 +911,6 @@ export function GitGraphPanel(props: {
                   : "End of history"}
             </div>
           </div>
-
-          {selected ? (
-            <CommitDetail
-              commit={selected}
-              threadsById={threadsById}
-              threadColor={threadColor}
-              onClose={() => setSelectedSha(null)}
-              onFilterThread={(id) => applyFilter(filterThreadId === id ? null : id)}
-            />
-          ) : null}
         </>
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto">
