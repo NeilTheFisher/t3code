@@ -42,6 +42,7 @@ import {
   ChevronRight,
   FileDiff,
   Files,
+  GitBranch,
   Globe2,
   MessagesSquare,
   Plus,
@@ -143,6 +144,7 @@ export interface RightPanelTabsProps {
   onAddDevice: () => void;
   /** Absent where side chats are not offered. */
   onAddSideChat?: (() => void) | undefined;
+  onAddGitGraph: () => void;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
@@ -153,6 +155,7 @@ export interface RightPanelTabsProps {
   sideChatAvailable?: boolean;
   /** Overrides the default reason while side chats are available but cannot start. */
   sideChatDisabledReason?: string | null;
+  gitGraphAvailable: boolean;
   pullRequestStatusSeeds?: Readonly<Record<string, PullRequestTabStatusSeed>>;
   children: ReactNode;
 }
@@ -180,6 +183,7 @@ const SURFACE_DISABLED_REASONS = {
   pullRequests: "No linked pull requests are available for this thread.",
   device: "Devices are only available from a thread.",
   sideChat: "Side chats start after the first message.",
+  gitGraph: "The graph is only available for server threads in Git repositories.",
 } as const;
 
 // Closed keepMounted popups must stop blocking shortcuts once their exit transition ends.
@@ -205,6 +209,7 @@ const SURFACE_UNAVAILABLE_HINTS = {
   pullRequests: "No linked pull requests available.",
   device: "Available from a thread.",
   sideChat: "Available after the first message.",
+  gitGraph: "Available for Git repositories.",
 } as const;
 
 type TabContextMenuAction =
@@ -324,6 +329,7 @@ function RightPanelEmptyState(props: {
   onAddDevice: () => void;
   /** Absent where side chats are not offered. */
   onAddSideChat?: (() => void) | undefined;
+  onAddGitGraph: () => void;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
@@ -333,6 +339,7 @@ function RightPanelEmptyState(props: {
   deviceAvailable: boolean;
   sideChatAvailable: boolean;
   sideChatDisabledReason: string | null;
+  gitGraphAvailable: boolean;
 }) {
   const [highlight, setHighlight] = useState(-1);
 
@@ -407,6 +414,15 @@ function RightPanelEmptyState(props: {
           },
         ]
       : []),
+    {
+      label: "Graph",
+      description: "Commit graph with thread provenance.",
+      icon: GitBranch,
+      shortcut: "G",
+      available: props.gitGraphAvailable,
+      disabledReason: SURFACE_UNAVAILABLE_HINTS.gitGraph,
+      onClick: props.onAddGitGraph,
+    },
   ] as const;
 
   type SurfaceAction = (typeof actions)[number];
@@ -590,6 +606,8 @@ function surfaceTitle(
       return `#${surface.number}`;
     case "pull-requests":
       return "Pull requests";
+    case "git-graph":
+      return "Graph";
     case "device":
       return surface.title ?? surface.target?.name ?? "Device";
     case "side-chat":
@@ -692,6 +710,8 @@ function SurfaceIcon({
       return <PullRequestGlyph.link className="size-3 shrink-0" />;
     case "side-chat":
       return <SideChatTabIcon environmentId={environmentId} threadId={surface.threadId} />;
+    case "git-graph":
+      return <GitBranch className="size-3 shrink-0" />;
     case "device":
       return surface.target?.platform === "ios" ? (
         <AppleIcon className="size-3 shrink-0" />
@@ -1173,6 +1193,15 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           },
         ]
       : []),
+    {
+      label: "Graph",
+      description: "Commit graph with thread provenance.",
+      icon: GitBranch,
+      shortcut: "G",
+      available: props.gitGraphAvailable,
+      disabledReason: SURFACE_DISABLED_REASONS.gitGraph,
+      onClick: props.onAddGitGraph,
+    },
   ] as const;
 
   const handleAddSurfaceMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -1549,6 +1578,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddPullRequests={props.onAddPullRequests}
             onAddDevice={props.onAddDevice}
             onAddSideChat={props.onAddSideChat}
+            onAddGitGraph={props.onAddGitGraph}
             browserAvailable={props.browserAvailable}
             terminalAvailable={props.terminalAvailable}
             diffAvailable={props.diffAvailable}
@@ -1558,6 +1588,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             deviceAvailable={props.deviceAvailable}
             sideChatAvailable={props.sideChatAvailable === true}
             sideChatDisabledReason={props.sideChatDisabledReason ?? null}
+            gitGraphAvailable={props.gitGraphAvailable}
           />
         ) : (
           props.children

@@ -313,6 +313,10 @@ export function createVcsEnvironmentAtoms<R, E>(
       scheduler: vcsCommandScheduler,
       concurrency: vcsCommandConcurrency,
     }),
+    logGraph: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:vcs:log-graph",
+      tag: WS_METHODS.vcsLogGraph,
+    }),
     status: createEnvironmentSubscriptionAtomFamily(runtime, {
       label: "environment-data:vcs:status",
       idleTtlMs: VCS_STATUS_IDLE_TTL_MS,
