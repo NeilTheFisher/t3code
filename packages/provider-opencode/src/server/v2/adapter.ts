@@ -29,9 +29,11 @@ import {
   type OrchestrationV2RuntimeRequest,
   type OrchestrationV2Subagent,
   type OrchestrationV2TurnItem,
+  type OrchestrationV2PlanStep,
   type OrchestrationV2UserInputQuestion,
   type MessageId,
   type ModelSelection,
+  type PlanId,
   type ProviderApprovalDecision,
   type ProviderInstanceId,
   type RunId,
@@ -141,8 +143,8 @@ const OpenCode2ProviderCapabilities = {
     approvalsCanOriginateFromSubagents: true,
   },
   planning: {
-    emitsPlanUpdated: false,
-    emitsTodoList: false,
+    emitsPlanUpdated: true,
+    emitsTodoList: true,
     emitsProposedPlan: false,
     supportsStructuredQuestions: true,
     planDeltasHaveItemIds: false,
@@ -217,6 +219,7 @@ interface TurnOwner {
 interface ActiveTurn {
   readonly input: TurnOwner;
   providerTurn: OrchestrationV2ProviderTurn;
+  planId: PlanId | null;
   readonly texts: Map<string, OpenBlock>;
   readonly tools: Map<string, { readonly name: string; input: Record<string, unknown> }>;
   readonly startedAt: Map<string, DateTime.Utc>;
@@ -1057,6 +1060,95 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
       });
     });
 
+    const emitTodoList = Effect.fnUntraced(function* (
+      state: ThreadState,
+      turn: ActiveTurn,
+      todos: ReadonlyArray<{ readonly content: string; readonly status: string }>,
+    ) {
+      const now = yield* DateTime.now;
+      if (turn.planId === null) {
+        turn.planId = yield* idAllocator.allocate.plan({
+          threadId: turn.input.threadId,
+          ...(turn.input.runId === null ? {} : { runId: turn.input.runId }),
+          driver,
+        });
+      }
+      const planId = turn.planId;
+      const nativeItemId = `${state.sessionId}:todo:${turn.providerTurn.id}`;
+      const nodeId = idAllocator.derive.nodeFromProviderItem({ driver, nativeItemId });
+      const turnItemId = idAllocator.derive.turnItemFromProviderItem({ driver, nativeItemId });
+      const steps: Array<OrchestrationV2PlanStep> = todos
+        .filter((t) => t.status !== "cancelled")
+        .map((todo, index) => ({
+          id: `${nativeItemId}:${index + 1}` as PlanId,
+          text: (todo.content ?? "").trim() || `Todo ${index + 1}`,
+          status:
+            todo.status === "completed"
+              ? "completed"
+              : todo.status === "in_progress"
+                ? "running"
+                : "pending",
+        }));
+      const completed = steps.length > 0 && steps.every((s) => s.status === "completed");
+      yield* emit({
+        type: "node.updated",
+        driver,
+        node: {
+          id: nodeId,
+          threadId: turn.input.threadId,
+          runId: turn.input.runId,
+          parentNodeId: turn.input.rootNodeId,
+          rootNodeId: turn.input.rootNodeId,
+          kind: "todo_list",
+          status: completed ? "completed" : "running",
+          countsForRun: false,
+          providerThreadId: state.providerThread.id,
+          providerTurnId: turn.providerTurn.id,
+          nativeItemRef: ref(nativeItemId, "weak"),
+          runtimeRequestId: null,
+          checkpointScopeId: null,
+          startedAt: turn.providerTurn.startedAt ?? now,
+          completedAt: completed ? now : null,
+        },
+      });
+      yield* emit({
+        type: "plan.updated",
+        driver,
+        plan: {
+          id: planId,
+          threadId: turn.input.threadId,
+          runId: turn.input.runId,
+          nodeId,
+          status: completed ? "completed" : "active",
+          kind: "todo_list",
+          steps,
+        },
+      });
+      yield* emit({
+        type: "turn_item.updated",
+        driver,
+        turnItem: {
+          id: turnItemId,
+          threadId: turn.input.threadId,
+          runId: turn.input.runId,
+          nodeId,
+          providerThreadId: state.providerThread.id,
+          providerTurnId: turn.providerTurn.id,
+          nativeItemRef: ref(nativeItemId, "weak"),
+          parentItemId: null,
+          ordinal: turn.nextOrdinal++,
+          status: completed ? "completed" : "running",
+          title: "Todo list",
+          startedAt: turn.providerTurn.startedAt ?? now,
+          completedAt: completed ? now : null,
+          updatedAt: now,
+          type: "todo_list",
+          planId,
+          steps,
+        },
+      });
+    });
+
     const emitCompaction = Effect.fnUntraced(function* (
       state: ThreadState,
       turn: ActiveTurn,
@@ -1193,6 +1285,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
     ): ActiveTurn => ({
       input: owner,
       providerTurn,
+      planId: null,
       texts: new Map(),
       tools: new Map(),
       startedAt: new Map(),
@@ -2173,6 +2266,15 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
             output,
             metadata: event.data.metadata,
           });
+          const tool = turn.tools.get(event.data.id);
+          if (tool !== undefined && tool.name.toLowerCase() === "todowrite") {
+            const todos = Array.isArray(tool.input.todos) ? tool.input.todos : [];
+            yield* emitTodoList(
+              state,
+              turn,
+              todos as ReadonlyArray<{ readonly content: string; readonly status: string }>,
+            );
+          }
           turn.tools.delete(event.data.id);
           return;
         }
