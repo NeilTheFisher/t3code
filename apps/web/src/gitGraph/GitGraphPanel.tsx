@@ -193,8 +193,9 @@ function RefBadge(props: {
   kind: "branch" | "remote" | "tag" | "head";
   name: string;
   current: boolean;
+  className?: string;
 }) {
-  const { kind, name, current } = props;
+  const { kind, name, current, className } = props;
   const Icon = kind === "tag" ? TagIcon : kind === "remote" ? CloudIcon : GitBranchIcon;
   return (
     <span
@@ -268,8 +269,11 @@ function ThreadChip(props: {
   );
 }
 
-function PullRequestChip(props: { pullRequest: NonNullable<MockCommit["pullRequest"]> }) {
-  const { pullRequest } = props;
+function PullRequestChip(props: {
+  pullRequest: NonNullable<MockCommit["pullRequest"]>;
+  className?: string;
+}) {
+  const { pullRequest, className } = props;
   const merged = pullRequest.state === "merged";
   const draft = pullRequest.state === "draft";
   const Icon = merged
@@ -286,6 +290,7 @@ function PullRequestChip(props: { pullRequest: NonNullable<MockCommit["pullReque
           : draft
             ? "border-border bg-muted/60 text-muted-foreground"
             : "border-success/25 bg-success/10 text-success-foreground",
+        className,
       )}
     >
       <Icon className="size-2.5 shrink-0" />#{pullRequest.number}
@@ -343,6 +348,29 @@ function CommitRow(props: {
             threads: threads.map((thread) => ({ id: thread.id, title: thread.title })),
           }),
         );
+        // A native drag image reads as a real object being moved instead of the
+        // browser's default row snapshot, matching the sidebar's thread ghost.
+        const ghost = document.createElement("div");
+        ghost.textContent = `${commit.sha.slice(0, 8)}  ${commit.subject}`;
+        Object.assign(ghost.style, {
+          position: "fixed",
+          top: "-1000px",
+          left: "-1000px",
+          maxWidth: "300px",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+          padding: "6px 10px",
+          borderRadius: "8px",
+          border: "1px solid var(--border)",
+          background: "var(--popover)",
+          color: "var(--foreground)",
+          font: "500 12px/1.4 system-ui, sans-serif",
+          boxShadow: "0 8px 24px rgb(0 0 0 / 18%)",
+        });
+        document.body.append(ghost);
+        event.dataTransfer.setDragImage(ghost, 14, 14);
+        window.setTimeout(() => ghost.remove(), 0);
       }}
       onClick={onSelect}
       onContextMenu={(event: ReactMouseEvent) => {
@@ -362,9 +390,7 @@ function CommitRow(props: {
       <div className="flex min-w-0 flex-1 flex-col justify-center py-1">
         <div className="flex min-w-0 items-center gap-1.5">
           {isTip ? (
-            <span className="@max-[26rem]/graph:hidden">
-              <RefBadge kind="head" name="HEAD" current />
-            </span>
+            <RefBadge kind="head" name="HEAD" current className="@max-[26rem]/graph:hidden" />
           ) : null}
           {commit.refs
             .filter((ref) => ref.kind !== "head")
@@ -391,9 +417,10 @@ function CommitRow(props: {
             {commit.subject}
           </span>
           {commit.pullRequest ? (
-            <span className="@max-[26rem]/graph:hidden">
-              <PullRequestChip pullRequest={commit.pullRequest} />
-            </span>
+            <PullRequestChip
+              pullRequest={commit.pullRequest}
+              className="@max-[26rem]/graph:hidden"
+            />
           ) : null}
         </div>
         <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-3xs leading-3.5 text-muted-foreground">
