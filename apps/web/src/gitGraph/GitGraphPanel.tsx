@@ -109,15 +109,12 @@ function GitGraphSkeleton() {
   );
 }
 
-function relativeTime(date: Date, now: Date): string {
-  const minutes = Math.max(0, Math.round((now.getTime() - date.getTime()) / 60_000));
-  if (minutes < 1) return "now";
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}h`;
-  const days = Math.round(hours / 24);
-  if (days < 7) return `${days}d`;
-  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(date);
+function formatCommitDate(date: Date): string {
+  return new Intl.DateTimeFormat(undefined, {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(date);
 }
 
 function LaneGraph(props: { row: GraphRow; laneCount: number; isTip: boolean }) {
@@ -304,7 +301,6 @@ function CommitRow(props: {
   isTip: boolean;
   isSelected: boolean;
   isDimmed: boolean;
-  now: Date;
   threadsById: ReadonlyMap<string, MockThread>;
   threadColor: (id: string) => string;
   onSelect: () => void;
@@ -318,7 +314,6 @@ function CommitRow(props: {
     isTip,
     isSelected,
     isDimmed,
-    now,
     threadsById,
     threadColor,
     onSelect,
@@ -408,7 +403,7 @@ function CommitRow(props: {
           <span className="hidden shrink-0 @[26rem]/graph:inline">
             {commit.author.split(" ")[0]}
           </span>
-          <span className="shrink-0 tabular-nums">{relativeTime(commit.authoredAt, now)}</span>
+          <span className="shrink-0 tabular-nums">{formatCommitDate(commit.authoredAt)}</span>
           {threads.length > 0 ? (
             <>
               <span aria-hidden>·</span>
@@ -535,7 +530,6 @@ export function GitGraphPanel(props: {
   readonly environmentId: EnvironmentId;
   readonly cwd: string | null;
 }) {
-  const [now] = useState(() => new Date());
   const [graph, setGraph] = useState<VcsLogGraphResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -543,7 +537,7 @@ export function GitGraphPanel(props: {
   const [limit, setLimit] = useState(120);
   const [loadingMore, setLoadingMore] = useState(false);
   const [view, setView] = useState<PanelView>("graph");
-  const [showRemotes, setShowRemotes] = useState(false);
+  const [showRemotes, setShowRemotes] = useState(true);
   const [selectedSha, setSelectedSha] = useState<string | null>(null);
   const [filterThreadId, setFilterThreadId] = useState<string | null>(null);
   const [confirmPath, setConfirmPath] = useState<string | null>(null);
@@ -564,7 +558,10 @@ export function GitGraphPanel(props: {
     setLoadingMore(true);
     setLoadError(null);
     void loadGraphRef
-      .current({ environmentId: props.environmentId, input: { cwd, limit } })
+      .current({
+        environmentId: props.environmentId,
+        input: { cwd, limit, includeRemotes: showRemotes },
+      })
       .then((result) => {
         if (cancelled) return;
         if (result._tag === "Success") {
@@ -579,7 +576,7 @@ export function GitGraphPanel(props: {
     return () => {
       cancelled = true;
     };
-  }, [props.cwd, props.environmentId, limit, reloadToken]);
+  }, [props.cwd, props.environmentId, limit, reloadToken, showRemotes]);
 
   const data = graph === null ? null : toGraphData(graph, props.repositoryLabel ?? "");
   const commits = data?.commits ?? [];
@@ -607,9 +604,7 @@ export function GitGraphPanel(props: {
     return THREAD_COLORS[(index < 0 ? 0 : index) % THREAD_COLORS.length]!;
   };
 
-  const visibleCommits = commits.filter(
-    (commit) => showRemotes || !commit.refs.some((ref) => ref.kind === "remote"),
-  );
+  const visibleCommits = commits;
   const layout = layoutGraph(visibleCommits.map(({ sha, parents }) => ({ sha, parents })));
   const rowBySha = new Map(layout.rows.map((row) => [row.sha, row]));
   const tipShas = new Set(
@@ -891,7 +886,6 @@ export function GitGraphPanel(props: {
                   isTip={tipShas.has(commit.sha)}
                   isSelected={commit.sha === selectedSha}
                   isDimmed={!matchesFilter}
-                  now={now}
                   threadsById={threadsById}
                   threadColor={threadColor}
                   onSelect={() => setSelectedSha(commit.sha)}
