@@ -26,6 +26,7 @@ const RIGHT_PANEL_KINDS = [
   "issue",
   "side-chat",
   "webpage",
+  "git-graph",
 ] as const;
 export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
 
@@ -99,7 +100,9 @@ export type RightPanelSurface =
       url?: string;
     }
   | { id: `side-chat:${string}`; kind: "side-chat"; threadId: ThreadId }
-  | { id: "webpage"; kind: "webpage"; url: string | null };
+  | { id: "webpage"; kind: "webpage"; url: string | null }
+  /** Repository-wide commit graph; the thread only owns the tab, not the range. */
+  | { id: "git-graph"; kind: "git-graph" };
 
 const RIGHT_PANEL_STORAGE_KEY = "t3code:right-panel-state:v2";
 // v9 removed the "plan" surface kind (plans render inline in the transcript).
@@ -269,6 +272,8 @@ const singletonSurface = (
       return { id: "pull-requests", kind };
     case "device":
       return { id: "device", kind };
+    case "git-graph":
+      return { id: "git-graph", kind };
   }
 };
 
