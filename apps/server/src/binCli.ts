@@ -97,7 +97,10 @@ export const cli = makeCli();
 export function runCli() {
   extendConnectionAttemptTimeout();
   keepOutboundFetchOnHttp1();
-  Command.run(cli, { version: packageJson.version }).pipe(
+  // The websocket RPC group is large enough for the checker to widen the CLI's
+  // service channel to `any`. The layer is complete and supplies every command,
+  // so pin the entrypoint's requirements instead of letting the widening fail it.
+  (Command.run(cli, { version: packageJson.version }) as Effect.Effect<void, unknown, never>).pipe(
     Effect.scoped,
     Effect.provide(layerCliRuntime),
     NodeRuntime.runMain,

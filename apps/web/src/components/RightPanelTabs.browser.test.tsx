@@ -126,6 +126,7 @@ function tabs(
       onAddDiff={noop}
       onAddFiles={noop}
       onAddDevice={noop}
+      onAddGitGraph={noop}
       browserAvailable
       terminalAvailable={false}
       diffAvailable={false}
@@ -133,6 +134,7 @@ function tabs(
       pullRequestAvailable={false}
       pullRequestsAvailable={false}
       deviceAvailable={false}
+      gitGraphAvailable={false}
     >
       <div>content</div>
     </RightPanelTabs>

@@ -31,6 +31,9 @@ const DevicePanel = lazy(() =>
   import("../device/DevicePanel").then((module) => ({ default: module.DevicePanel })),
 );
 const FilePreviewPanel = lazy(() => import("../files/FilePreviewPanel"));
+const GitGraphPanel = lazy(() =>
+  import("../../gitGraph/GitGraphPanel").then((module) => ({ default: module.GitGraphPanel })),
+);
 
 export type RightPanelTerminalProps = Omit<
   PersistentThreadTerminalPanelProps,
@@ -167,6 +170,16 @@ export function RightPanelSurfaceContent(props: {
     }
     case "pull-requests":
       return <ThreadPullRequestsPanel threadRef={threadRef} />;
+    case "git-graph":
+      return (
+        <Suspense fallback={null}>
+          <GitGraphPanel
+            repositoryLabel={props.files.projectName}
+            environmentId={props.environmentId}
+            cwd={props.files.workspaceRoot ?? null}
+          />
+        </Suspense>
+      );
     case "device":
       return (
         <Suspense fallback={null}>
