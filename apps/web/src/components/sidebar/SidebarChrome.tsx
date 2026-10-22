@@ -232,9 +232,15 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   );
 });
 
-export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
+export const SidebarChromeFooter = memo(function SidebarChromeFooter({
+  workspacesSlot,
+}: {
+  /** The workspaces strip renders above the footer's own content when the beta is on. */
+  workspacesSlot?: ReactNode;
+}) {
   return (
     <SidebarFooter>
+      {workspacesSlot}
       <SidebarThreadUndoNotice />
       <SidebarProviderUpdatePill />
       <SidebarUpdateArchitectureWarning />

@@ -62,6 +62,7 @@ import {
   AuthOrchestrationOperateScope,
   type EnvironmentMachineKind,
   type ScopedThreadRef,
+  type SidebarThreadWorkspace,
   type ThreadId,
 } from "@t3tools/contracts";
 
@@ -92,6 +93,7 @@ import {
 } from "lucide-react";
 import {
   memo,
+  Fragment,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -144,6 +146,7 @@ import {
 import { useAcknowledgeThreadWoke, useThreadActions } from "../hooks/useThreadActions";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useSidebarProjectGroups } from "../hooks/useSidebarProjectGroups";
+import { useThreadWorkspaces } from "../hooks/useThreadWorkspaces";
 import { useTerminalFocus } from "../hooks/useTerminalFocus";
 import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
 import { registerSettleAndAdvance } from "../settleAndAdvance";
@@ -281,6 +284,14 @@ import {
 import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
+import { ThreadWorkspaceStrip } from "./sidebar/ThreadWorkspaceStrip";
+import {
+  countThreadWorkspaceAttention,
+  filterThreadsByWorkspace,
+  orderThreadWorkspaceSearch,
+  resolveAssignedWorkspaceId,
+  type ThreadWorkspaceAssignments,
+} from "./sidebar/threadWorkspaces";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuShortcut, MenuTrigger } from "./ui/menu";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 import { MiddleTruncate } from "./ui/middle-truncate";
@@ -390,6 +401,12 @@ interface SidebarThreadPartitionInput {
   readonly serverConfigs: ReadonlyMap<EnvironmentId, EnvironmentServerConfig>;
   readonly optimisticDrop: SidebarOptimisticDrop | null;
   readonly workingShelfEnabled: boolean;
+  /** Null when the workspaces beta is off: the list shows every thread. */
+  readonly workspaceFilter: {
+    readonly assignments: ThreadWorkspaceAssignments;
+    readonly workspaces: readonly SidebarThreadWorkspace[];
+    readonly activeWorkspaceId: string | null;
+  } | null;
   // Snooze wakes and the queued-turn grace depend on the clock, so the minute
   // tick and the precise snooze-wake tick are inputs: a new key repartitions.
   readonly clockKey: string;
@@ -456,6 +473,22 @@ function useSidebarThreads(input: {
   const { projectScopeKey, scopedProjectKeys, serverConfigs, optimisticDrop, routeThreadRef } =
     input;
   const threads = useThreadShells();
+  const threadWorkspaces = useThreadWorkspaces();
+  const workspaceFilter = threadWorkspaces.enabled
+    ? {
+        assignments: threadWorkspaces.assignments,
+        workspaces: threadWorkspaces.workspaces,
+        activeWorkspaceId: threadWorkspaces.activeWorkspaceId,
+      }
+    : null;
+  const workspaceAttention = countThreadWorkspaceAttention(threads, {
+    assignments: threadWorkspaces.assignments,
+    workspaces: threadWorkspaces.workspaces,
+    needsAttention: (thread) => {
+      const status = resolveSidebarThreadStatus(thread);
+      return status === "approval" || status === "input" || status === "failed";
+    },
+  });
   const routeRowThreadKey =
     routeThreadRef === null
       ? null
@@ -511,6 +544,7 @@ function useSidebarThreads(input: {
     serverConfigs,
     optimisticDrop,
     workingShelfEnabled,
+    workspaceFilter,
     clockKey: `${nowMinute}:${snoozeWakeTick}`,
   });
   const partitionNextWakeAt = partition.snoozedThreads[0]?.snoozedUntil ?? null;
@@ -560,13 +594,19 @@ function useSidebarThreads(input: {
     ...partition,
     threads,
     workingShelfEnabled,
-    searchableThreads: [
-      ...pinnedThreads,
-      ...activeThreads,
-      ...workingThreads,
-      ...snoozedThreads,
-      ...settledThreads,
-    ],
+    workspaceAttention,
+    // Search deliberately escapes the active workspace, so it searches the
+    // project-scoped list rather than the workspace-filtered sections.
+    searchableThreads:
+      workspaceFilter === null
+        ? [
+            ...pinnedThreads,
+            ...activeThreads,
+            ...workingThreads,
+            ...snoozedThreads,
+            ...settledThreads,
+          ]
+        : partition.workspaceUnfilteredThreads,
     settledVisibleCount,
     hiddenSettledCount: settledThreads.length - visibleSettledThreads.length,
     showMoreSettled: () =>
@@ -600,9 +640,18 @@ function useSidebarThreads(input: {
 }
 
 function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
-  const { threads, scopedProjectKeys, serverConfigs, optimisticDrop, workingShelfEnabled } = input;
+  const {
+    threads,
+    scopedProjectKeys,
+    serverConfigs,
+    optimisticDrop,
+    workingShelfEnabled,
+    workspaceFilter,
+  } = input;
   const preciseNow = new Date().toISOString();
-  const visible = filterSidebarV2VisibleThreads(threads, scopedProjectKeys);
+  const scoped = filterSidebarV2VisibleThreads(threads, scopedProjectKeys);
+  const visible =
+    workspaceFilter === null ? scoped : filterThreadsByWorkspace(scoped, workspaceFilter);
   inboxReturns.observe(workingShelfEnabled ? threads : null);
   const pinned: EnvironmentThreadShell[] = [];
   const active: EnvironmentThreadShell[] = [];
@@ -688,6 +737,7 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
         firstValidTimestampMs(right.snoozedUntil ?? null),
     ),
     settledThreads: sortSettledThreads(settled),
+    workspaceUnfilteredThreads: scoped,
     snoozeNow: preciseNow,
   };
 }
@@ -3029,6 +3079,7 @@ export default function Sidebar() {
   const {
     threads,
     workingShelfEnabled,
+    workspaceAttention,
     pinnedThreads,
     draggableThreadKeys,
     activeReorderableThreadKeys,
@@ -3068,15 +3119,34 @@ export default function Sidebar() {
     routeThreadRef,
   });
 
+  const threadWorkspaces = useThreadWorkspaces();
+  const threadWorkspacesRef = useRef(threadWorkspaces);
+  const [dragOverWorkspaceId, setDragOverWorkspaceId] = useState<string | null>(null);
+  const workspaceIconElementsRef = useRef(new Map<string, HTMLButtonElement>());
+  const registerWorkspaceIconElement = useStableCallback(
+    (workspaceId: string, element: HTMLButtonElement | null) => {
+      if (element === null) workspaceIconElementsRef.current.delete(workspaceId);
+      else workspaceIconElementsRef.current.set(workspaceId, element);
+    },
+  );
+
   const isSearchingThreads = threadSearchQuery.trim().length > 0;
   const threadSearchMatchByKey = new Map(
     threadSearch.matches.map((match) => [threadSearchMatchKey(match), match] as const),
   );
-  const threadSearchResults = searchSidebarThreads(
-    searchableThreads,
-    threadSearchQuery,
-    new Set(threadSearchMatchByKey.keys()),
+  const threadSearchOrdering = orderThreadWorkspaceSearch(
+    searchSidebarThreads(
+      searchableThreads,
+      threadSearchQuery,
+      new Set(threadSearchMatchByKey.keys()),
+    ),
+    {
+      assignments: threadWorkspaces.enabled ? threadWorkspaces.assignments : {},
+      workspaces: threadWorkspaces.workspaces,
+      activeWorkspaceId: threadWorkspaces.enabled ? threadWorkspaces.activeWorkspaceId : null,
+    },
   );
+  const threadSearchResults = threadSearchOrdering.results;
   const threadSearchResultOrderKey = threadSearchResults
     .map((thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)))
     .join("\0");
@@ -3385,6 +3455,7 @@ export default function Sidebar() {
   const finishThreadDrag = (started: boolean) => {
     dragSensorRef.current = null;
     contextDragKeyRef.current = null;
+    setDragOverWorkspaceId(null);
     endThreadContextDrag();
     if (started) {
       listMotionRef.current?.release();
@@ -3411,7 +3482,31 @@ export default function Sidebar() {
     const bounds = threadListRef.current?.getBoundingClientRect();
     return bounds !== undefined && (point.x < bounds.left || point.x > bounds.right);
   };
+  /** Workspace icons live outside the thread list, so drags are hit-tested on release. */
+  const workspaceIdAtPoint = (point: { x: number; y: number }): string | null => {
+    if (!threadWorkspacesRef.current.enabled) return null;
+    for (const [workspaceId, element] of workspaceIconElementsRef.current) {
+      const rect = element.getBoundingClientRect();
+      if (
+        point.x >= rect.left &&
+        point.x <= rect.right &&
+        point.y >= rect.top &&
+        point.y <= rect.bottom
+      ) {
+        return workspaceId;
+      }
+    }
+    return null;
+  };
   const moveThreadContextDrag = (point: { x: number; y: number }) => {
+    const overWorkspaceId = workspaceIdAtPoint(point);
+    setDragOverWorkspaceId(overWorkspaceId);
+    if (overWorkspaceId !== null) {
+      // Filing into a workspace is a different drop than providing chat
+      // context, so it never arms the context-drag ghost.
+      endThreadContextDrag();
+      return true;
+    }
     const contextDrag = pointerOutsideThreadList(point);
     setDragState((current) =>
       current === null || current.contextDrag === contextDrag
@@ -3429,6 +3524,15 @@ export default function Sidebar() {
     return true;
   };
   const dropThreadContextDrag = (point: { x: number; y: number }) => {
+    const overWorkspaceId = workspaceIdAtPoint(point);
+    setDragOverWorkspaceId(null);
+    if (overWorkspaceId !== null) {
+      threadWorkspacesRef.current.assignThreads(
+        contextDragThreads().map(scopedThreadKey),
+        overWorkspaceId,
+      );
+      return true;
+    }
     if (!pointerOutsideThreadList(point)) return false;
     dropThreadContext(point, contextDragThreads());
     return true;
@@ -3453,6 +3557,7 @@ export default function Sidebar() {
     settledThreadKeysRef.current = settledThreadKeys;
     snoozedThreadKeysRef.current = snoozedThreadKeys;
     sectionByThreadKeyRef.current = sectionByThreadKey;
+    threadWorkspacesRef.current = threadWorkspaces;
   });
   const startActionSweep = useStableCallback(
     (threadRef: ScopedThreadRef, action: SidebarSweepAction, event: PointerEvent) => {
@@ -4307,12 +4412,35 @@ export default function Sidebar() {
                 titleRegeneration: supportsTitleRegeneration,
               },
               snoozePresets,
+              workspaceMenu: (() => {
+                const workspaces = threadWorkspacesRef.current;
+                if (!workspaces.enabled) return null;
+                return {
+                  workspaces: workspaces.workspaces.map((workspace) => ({
+                    id: workspace.id,
+                    name: workspace.name,
+                  })),
+                  assignedWorkspaceId: resolveAssignedWorkspaceId(
+                    workspaces.assignments,
+                    threadKey,
+                    workspaces.workspaces,
+                  ),
+                };
+              })(),
             }),
             position,
           ),
         );
         if (clicked._tag === "Failure" || clicked.value === null) return;
         if (threadActionRequiresOperate(clicked.value) && !checkThreadOperations([thread])) return;
+        if (clicked.value?.startsWith("move-to-workspace:")) {
+          const targetId = clicked.value.slice("move-to-workspace:".length);
+          threadWorkspacesRef.current.assignThreads(
+            [threadKey],
+            targetId === "none" ? null : targetId,
+          );
+          return;
+        }
         if (clicked.value?.startsWith("snooze:")) {
           const preset =
             clicked.value === "snooze:custom"
@@ -4767,42 +4895,57 @@ export default function Sidebar() {
                       scopeThreadRef(thread.environmentId, thread.id),
                     );
                     return (
-                      <SidebarSearchResultRow
-                        isSettled={settledThreadKeys.has(threadKey)}
-                        key={threadKey}
-                        thread={thread}
-                        project={
-                          projectByKey.get(`${thread.environmentId}:${thread.projectId}`) ?? null
-                        }
-                        projectDisplayName={
-                          projectDisplayNameByKey.get(
-                            `${thread.environmentId}:${thread.projectId}`,
-                          ) ?? null
-                        }
-                        environmentLabel={environmentLabelById.get(thread.environmentId) ?? null}
-                        environmentMachine={
-                          environmentMachineById.get(thread.environmentId) ?? "server"
-                        }
-                        providerEntryByInstanceId={
-                          providerEntriesByEnvironment.get(thread.environmentId) ??
-                          EMPTY_PROVIDER_ENTRIES
-                        }
-                        isHighlighted={activeSearchResultIndex === index}
-                        isRouteActive={routeRowThreadKey === threadKey}
-                        resultId={`sidebar-thread-search-result-${index}`}
-                        searchMatch={
-                          threadSearchMatchByKey.get(
-                            threadSearchMatchKey({
-                              environmentId: thread.environmentId,
-                              threadId: thread.id,
-                            }),
-                          ) ?? null
-                        }
-                        searchQuery={threadSearchQuery}
-                        onHighlight={() => setActiveSearchResultIndex(index)}
-                        onSelect={() => selectThreadSearchResult(thread)}
-                        onFileDropThreads={handleThreadFileDrop}
-                      />
+                      // Search escapes the active workspace, so the list labels
+                      // where its matches end instead of hiding the rest.
+                      <Fragment key={threadKey}>
+                        {index === threadSearchOrdering.otherWorkspacesStartIndex ? (
+                          <li
+                            aria-hidden="true"
+                            className="flex items-center gap-2 px-2 pt-3 pb-1"
+                            role="presentation"
+                          >
+                            <span className="text-2xs font-medium text-sidebar-muted-foreground">
+                              Other workspaces
+                            </span>
+                            <span className="h-px flex-1 bg-sidebar-border" />
+                          </li>
+                        ) : null}
+                        <SidebarSearchResultRow
+                          isSettled={settledThreadKeys.has(threadKey)}
+                          thread={thread}
+                          project={
+                            projectByKey.get(`${thread.environmentId}:${thread.projectId}`) ?? null
+                          }
+                          projectDisplayName={
+                            projectDisplayNameByKey.get(
+                              `${thread.environmentId}:${thread.projectId}`,
+                            ) ?? null
+                          }
+                          environmentLabel={environmentLabelById.get(thread.environmentId) ?? null}
+                          environmentMachine={
+                            environmentMachineById.get(thread.environmentId) ?? "server"
+                          }
+                          providerEntryByInstanceId={
+                            providerEntriesByEnvironment.get(thread.environmentId) ??
+                            EMPTY_PROVIDER_ENTRIES
+                          }
+                          isHighlighted={activeSearchResultIndex === index}
+                          isRouteActive={routeRowThreadKey === threadKey}
+                          resultId={`sidebar-thread-search-result-${index}`}
+                          searchMatch={
+                            threadSearchMatchByKey.get(
+                              threadSearchMatchKey({
+                                environmentId: thread.environmentId,
+                                threadId: thread.id,
+                              }),
+                            ) ?? null
+                          }
+                          searchQuery={threadSearchQuery}
+                          onHighlight={() => setActiveSearchResultIndex(index)}
+                          onSelect={() => selectThreadSearchResult(thread)}
+                          onFileDropThreads={handleThreadFileDrop}
+                        />
+                      </Fragment>
                     );
                   })}
                 </ul>
@@ -5142,7 +5285,26 @@ export default function Sidebar() {
           ) : null}
         </SidebarGroup>
       </SidebarContent>
-      <SidebarChromeFooter />
+      <SidebarChromeFooter
+        workspacesSlot={
+          threadWorkspaces.enabled ? (
+            <ThreadWorkspaceStrip
+              activeWorkspaceId={threadWorkspaces.activeWorkspaceId}
+              attentionByWorkspace={workspaceAttention.byWorkspace}
+              attentionTotal={workspaceAttention.total}
+              dragOverWorkspaceId={dragOverWorkspaceId}
+              onCreate={() => threadWorkspaces.createWorkspace("Workspace")}
+              onDelete={(workspaceId) => threadWorkspaces.deleteWorkspace(workspaceId)}
+              onSelect={(workspaceId) => threadWorkspaces.setActiveWorkspaceId(workspaceId)}
+              onUpdate={(workspaceId, patch) =>
+                threadWorkspaces.updateWorkspace(workspaceId, patch)
+              }
+              registerIconElement={registerWorkspaceIconElement}
+              workspaces={threadWorkspaces.workspaces}
+            />
+          ) : null
+        }
+      />
     </>
   );
 }

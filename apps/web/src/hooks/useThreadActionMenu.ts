@@ -133,6 +133,7 @@ export function useThreadActionMenu(input: {
         canOperate: readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope),
         branch: thread.branch ?? null,
         projectFilter: null,
+        workspaceMenu: null,
         isPinned: thread.pinnedAt != null,
         isSettled: supports.settlement && thread.settledOverride === "settled",
         autoSettleEnabled: thread.autoSettleDisabledAt == null,

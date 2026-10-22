@@ -573,6 +573,10 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.sidebarWorkingShelfEnabled !== DEFAULT_UNIFIED_SETTINGS.sidebarWorkingShelfEnabled
       ? ["Working section"]
       : []),
+    ...(settings.sidebarThreadWorkspacesEnabled !==
+    DEFAULT_UNIFIED_SETTINGS.sidebarThreadWorkspacesEnabled
+      ? ["Thread workspaces"]
+      : []),
     ...(settings.sidebarAutoSettleAfterDays !== DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays
       ? ["Auto-settle inactive threads"]
       : []),
@@ -739,6 +743,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       sidebarProjectGroupingMode: DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode,
       sidebarProjectSortOrder: DEFAULT_UNIFIED_SETTINGS.sidebarProjectSortOrder,
       sidebarWorkingShelfEnabled: DEFAULT_UNIFIED_SETTINGS.sidebarWorkingShelfEnabled,
+      sidebarThreadWorkspacesEnabled: DEFAULT_UNIFIED_SETTINGS.sidebarThreadWorkspacesEnabled,
       sidebarAutoSettleAfterDays: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays,
       sidebarAutoSettleKeepPullRequests: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleKeepPullRequests,
       sidebarAutoSettleOnMerge: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge,
@@ -2238,6 +2243,34 @@ export function GeneralSettingsPanel() {
                 ))}
               </SelectPopup>
             </Select>
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("thread-workspaces")}
+          description="Group threads into named workspaces with a strip in the sidebar footer. Assign threads from their context menu or by dragging them onto a workspace."
+          resetAction={
+            settings.sidebarThreadWorkspacesEnabled !==
+            DEFAULT_UNIFIED_SETTINGS.sidebarThreadWorkspacesEnabled ? (
+              <SettingResetButton
+                label="thread workspaces"
+                onClick={() =>
+                  updateSettings({
+                    sidebarThreadWorkspacesEnabled:
+                      DEFAULT_UNIFIED_SETTINGS.sidebarThreadWorkspacesEnabled,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.sidebarThreadWorkspacesEnabled}
+              onCheckedChange={(checked) =>
+                updateSettings({ sidebarThreadWorkspacesEnabled: Boolean(checked) })
+              }
+              aria-label="Thread workspaces (beta)"
+            />
           }
         />
 

@@ -5,6 +5,8 @@ export type ThreadActionMenuId =
   | "new-thread-on-branch"
   | "filter-by-project"
   | "project-settings"
+  | "move-to-workspace"
+  | `move-to-workspace:${string}`
   | "pin"
   | "unpin"
   | "settle"
@@ -87,10 +89,17 @@ export interface ThreadActionMenuState {
     readonly titleRegeneration: boolean;
   };
   readonly snoozePresets: ReadonlyArray<SnoozePreset>;
+  /** Null when the workspaces beta is off, so the menu stays unchanged. */
+  readonly workspaceMenu: {
+    readonly workspaces: ReadonlyArray<{ readonly id: string; readonly name: string }>;
+    readonly assignedWorkspaceId: string | null;
+  } | null;
 }
 
 /** Local navigation, read markers, and copying remain available to read-only clients. */
 export function threadActionRequiresOperate(action: ThreadActionMenuId): boolean {
+  // Workspaces are a client-local grouping, so read-only clients can still file threads.
+  if (action === "move-to-workspace" || action.startsWith("move-to-workspace:")) return false;
   return ![
     "new-thread-on-branch",
     "project-settings",
@@ -168,6 +177,28 @@ export function buildThreadActionMenuItems(
               ? "Show all projects"
               : `Filter by ${state.projectFilter.label}`,
             icon: "folder-tree",
+          },
+        ]
+      : []),
+    ...(state.workspaceMenu
+      ? [
+          {
+            id: "move-to-workspace" as const,
+            label: "Move to workspace",
+            icon: "folder-tree",
+            children: [
+              ...state.workspaceMenu.workspaces.map((workspace) => ({
+                id: `move-to-workspace:${workspace.id}` as const,
+                label: workspace.name,
+                checked: state.workspaceMenu?.assignedWorkspaceId === workspace.id,
+              })),
+              {
+                id: "move-to-workspace:none" as const,
+                label: "No workspace",
+                checked: state.workspaceMenu.assignedWorkspaceId === null,
+                separatorBefore: true,
+              },
+            ],
           },
         ]
       : []),

@@ -331,6 +331,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["hide fold running monitoring threads inbox sidebar shelf"],
   },
   {
+    id: "thread-workspaces",
+    title: "Thread workspaces (beta)",
+    to: "/settings/general",
+    searchTerms: [
+      "workspace group threads personal work office sidebar footer strip drag organize context",
+    ],
+  },
+  {
     id: "auto-settle-inactive-threads",
     title: "Auto-settle inactive threads",
     to: "/settings/general",
