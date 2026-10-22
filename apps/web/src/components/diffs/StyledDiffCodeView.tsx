@@ -7,7 +7,7 @@ import {
   type UncontrolledCodeViewProps,
 } from "@pierre/diffs/react";
 /* oxlint-enable eslint/no-restricted-imports */
-import type { Ref } from "react";
+import { useCallback, type MouseEvent, type Ref } from "react";
 
 import { DIFF_SURFACE_THEME_UNSAFE_CSS } from "~/lib/diffRendering";
 import { DiffWorkerPoolProvider } from "../DiffWorkerPoolProvider";
@@ -201,6 +201,16 @@ export const DIFF_VIEW_UNSAFE_CSS = `${DIFF_SURFACE_THEME_UNSAFE_CSS}
     transition: none;
   }
 }
+
+/* Pierre only draws the "N unmodified lines" affordance on hover, and only its
+   text carries a pointer cursor. The viewer's own click handling follows the
+   same narrow targets, so a click on the rest of the row does nothing — which
+   reads as a dead control. The row is wired up to expand in the capture
+   handler below; this only makes the row say so. */
+[data-separator="line-info"],
+[data-separator="line-info-basic"] {
+  cursor: pointer;
+}
 `;
 
 export type StyledDiffCodeViewOptions<LAnnotation> = Omit<
@@ -217,6 +227,30 @@ type StyledDiffCodeViewProps<LAnnotation> = (
   readonly unsafeCSSExtra?: string;
 };
 
+/**
+ * Expands a "N unmodified lines" row when the user clicks anywhere on it. The
+ * viewer attaches its own expansion to the row's chevron and to the label text,
+ * and its `unsafeCSS` hook cannot forward a click, so the row's dead padding is
+ * bridged here. Clicks on the viewer's own targets are left alone.
+ */
+function expandSeparatorFromRowClick(event: MouseEvent<HTMLDivElement>): void {
+  const path = event.nativeEvent.composedPath();
+  const onViewerTarget = path.some(
+    (node) =>
+      node instanceof HTMLElement &&
+      (node.hasAttribute("data-expand-button") || node.hasAttribute("data-unmodified-lines")),
+  );
+  if (onViewerTarget) return;
+  const row = path.find(
+    (node): node is HTMLElement =>
+      node instanceof HTMLElement && node.hasAttribute("data-separator"),
+  );
+  const button = row?.querySelector("[data-expand-button]");
+  if (button instanceof HTMLElement) {
+    button.click();
+  }
+}
+
 export function StyledDiffCodeView<LAnnotation = undefined>({
   options,
   viewerRef,
@@ -224,39 +258,46 @@ export function StyledDiffCodeView<LAnnotation = undefined>({
   unsafeCSSExtra,
   ...props
 }: StyledDiffCodeViewProps<LAnnotation>) {
+  const onRowClick = useCallback((event: MouseEvent<HTMLDivElement>) => {
+    expandSeparatorFromRowClick(event);
+  }, []);
+
   return (
     <DiffWorkerPoolProvider>
-      <CodeView<LAnnotation>
-        {...props}
-        {...(viewerRef ? { ref: viewerRef } : {})}
-        className={
-          className
-            ? `diff-render-surface [--code-background:var(--background)] outline-none ${className}`
-            : "diff-render-surface [--code-background:var(--background)] outline-none"
-        }
-        options={{
-          ...options,
-          unsafeCSS: unsafeCSSExtra
-            ? `${DIFF_VIEW_UNSAFE_CSS}\n${unsafeCSSExtra}`
-            : DIFF_VIEW_UNSAFE_CSS,
-          itemMetrics: {
-            diffHeaderHeight: 32,
-            hunkSeparatorHeight: 24,
-            // Pierre uses its general file spacing as a fallback in expanded-file layout paths.
-            // Keep it zero alongside the explicit paddingTop or expanding the first file can
-            // reintroduce the library's default 8px gap above its header.
-            spacing: 0,
-            paddingTop: 0,
-            // Unlike the gap above, the 8px under a file's last line is painted
-            // unconditionally by Pierre's stylesheet (`--diffs-gap-fallback`), so the metric has
-            // to count it: at zero every expanded file's virtual height ran 8px short of its
-            // rendered height, and the end of the list sat past the reachable scroll range —
-            // one clipped file row per expanded file above it.
-            paddingBottom: 8,
-          },
-          layout: { paddingTop: 0, paddingBottom: 0, gap: 0 },
-        }}
-      />
+      {/* `contents` keeps this wrapper out of the viewer's layout. */}
+      <div className="contents" onClickCapture={onRowClick}>
+        <CodeView<LAnnotation>
+          {...props}
+          {...(viewerRef ? { ref: viewerRef } : {})}
+          className={
+            className
+              ? `diff-render-surface [--code-background:var(--background)] outline-none ${className}`
+              : "diff-render-surface [--code-background:var(--background)] outline-none"
+          }
+          options={{
+            ...options,
+            unsafeCSS: unsafeCSSExtra
+              ? `${DIFF_VIEW_UNSAFE_CSS}\n${unsafeCSSExtra}`
+              : DIFF_VIEW_UNSAFE_CSS,
+            itemMetrics: {
+              diffHeaderHeight: 32,
+              hunkSeparatorHeight: 24,
+              // Pierre uses its general file spacing as a fallback in expanded-file layout paths.
+              // Keep it zero alongside the explicit paddingTop or expanding the first file can
+              // reintroduce the library's default 8px gap above its header.
+              spacing: 0,
+              paddingTop: 0,
+              // Unlike the gap above, the 8px under a file's last line is painted
+              // unconditionally by Pierre's stylesheet (`--diffs-gap-fallback`), so the metric has
+              // to count it: at zero every expanded file's virtual height ran 8px short of its
+              // rendered height, and the end of the list sat past the reachable scroll range —
+              // one clipped file row per expanded file above it.
+              paddingBottom: 8,
+            },
+            layout: { paddingTop: 0, paddingBottom: 0, gap: 0 },
+          }}
+        />
+      </div>
     </DiffWorkerPoolProvider>
   );
 }
