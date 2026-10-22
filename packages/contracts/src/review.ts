@@ -16,6 +16,11 @@ export const ReviewDiffChangeType = Schema.Literals([
   "deleted",
 ]);
 export type ReviewDiffChangeType = typeof ReviewDiffChangeType.Type;
+export const ReviewDiffPreviewCommitRange = Schema.Struct({
+  from: TrimmedNonEmptyString,
+  to: TrimmedNonEmptyString,
+});
+export type ReviewDiffPreviewCommitRange = typeof ReviewDiffPreviewCommitRange.Type;
 
 export const ReviewDiffPreviewInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
@@ -23,8 +28,12 @@ export const ReviewDiffPreviewInput = Schema.Struct({
   // A branch-range file read reuses its preview's merge base instead of resolving it again.
   mergeBase: Schema.optionalKey(ReviewMergeBase),
   commitSha: Schema.optional(TrimmedNonEmptyString),
+  /** Set to preview a commit range instead of the working tree or a branch. */
+  commitRange: Schema.optionalKey(ReviewDiffPreviewCommitRange),
   ignoreWhitespace: Schema.optionalKey(Schema.Boolean),
-  sourceKind: Schema.optionalKey(Schema.Literals(["working-tree", "branch-range"])),
+  sourceKind: Schema.optionalKey(
+    Schema.Literals(["working-tree", "branch-range", "commit", "commit-range"]),
+  ),
   trackedOnly: Schema.optionalKey(Schema.Boolean),
   /** From a trackedOnly result, so the complete read adds only the untracked files. */
   completionToken: Schema.optionalKey(Schema.String),
@@ -33,7 +42,7 @@ export const ReviewDiffPreviewInput = Schema.Struct({
     Schema.Struct({
       path: Schema.NonEmptyString,
       previousPath: Schema.NullOr(Schema.NonEmptyString),
-      sourceKind: Schema.Literals(["working-tree", "branch-range", "commit"]),
+      sourceKind: Schema.Literals(["working-tree", "branch-range", "commit", "commit-range"]),
       // The preview's change type; the server still confirms a tracked path before relying on it.
       changeType: Schema.optionalKey(ReviewDiffChangeType),
     }),
@@ -63,6 +72,7 @@ export const ReviewDiffPreviewSourceKind = Schema.Literals([
   "working-tree",
   "branch-range",
   "commit",
+  "commit-range",
 ]);
 export type ReviewDiffPreviewSourceKind = typeof ReviewDiffPreviewSourceKind.Type;
 
