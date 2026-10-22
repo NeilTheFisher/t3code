@@ -13,7 +13,12 @@ import { msg } from "gt-react-native";
 
 import { m, type MessageResolver } from "../../i18n/messages";
 
-export type ReviewSectionKind = "turn" | "working-tree" | "branch-range" | "commit-range";
+export type ReviewSectionKind =
+  | "turn"
+  | "working-tree"
+  | "branch-range"
+  | "commit-range"
+  | "submodule-range";
 
 const CHANGES_SECTION_ID = "git:branch-range";
 const CHANGES_TITLE = msg("Changes", { $context: "diff section: branch changes" });
