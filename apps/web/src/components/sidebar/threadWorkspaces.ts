@@ -1,5 +1,8 @@
 import type { SidebarThreadWorkspace } from "@t3tools/contracts";
 
+import { resolveSidebarThreadStatus } from "../Sidebar.logic";
+import type { SidebarThreadSummary } from "../../types";
+
 /**
  * Workspaces are a fork-local, client-only grouping of threads: a lighter
  * cousin of Chrome tab groups, applied to the sidebar. Nothing here crosses the
@@ -43,6 +46,30 @@ type ScopedThreadIdentity = {
   readonly environmentId: string;
   readonly id: string;
 };
+
+export type ThreadAttentionInput = Pick<
+  SidebarThreadSummary,
+  | "archivedAt"
+  | "settledOverride"
+  | "hasPendingApprovals"
+  | "hasPendingUserInput"
+  | "pendingSubagentRequest"
+  | "runtime"
+  | "blockedOnThreadWait"
+>;
+
+/**
+ * A badge means "this thread needs you": a decision is waiting (approval or
+ * input), a run failed, or a usage limit stopped it. Working, done and woke are
+ * deliberately excluded so the number stays quiet, and a settled thread has
+ * already been dealt with, so it never counts.
+ */
+export function threadNeedsWorkspaceAttention(thread: ThreadAttentionInput): boolean {
+  if (thread.archivedAt !== null) return false;
+  if (thread.settledOverride === "settled") return false;
+  const status = resolveSidebarThreadStatus(thread);
+  return status === "approval" || status === "input" || status === "failed" || status === "limited";
+}
 
 export function threadWorkspaceKey(environmentId: string, threadId: string): string {
   return `${environmentId}:${threadId}`;
