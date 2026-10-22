@@ -3122,7 +3122,17 @@ export default function Sidebar() {
   const threadWorkspaces = useThreadWorkspaces();
   const threadWorkspacesRef = useRef(threadWorkspaces);
   const [dragOverWorkspaceId, setDragOverWorkspaceId] = useState<string | null>(null);
+  const [dragOverWorkspaceStrip, setDragOverWorkspaceStrip] = useState(false);
   const workspaceIconElementsRef = useRef(new Map<string, HTMLButtonElement>());
+  const workspaceStripElementRef = useRef<HTMLDivElement | null>(null);
+  // dnd-kit's autoscroll keeps a running interval alive once it starts, so
+  // clearing the flag mid-drag is not enough: pin the list's offset while the
+  // pointer is over the strip and restore it on the way out.
+  const stripScrollGuardRef = useRef<{
+    readonly element: HTMLElement;
+    readonly scrollTop: number;
+    raf: number;
+  } | null>(null);
   const registerWorkspaceIconElement = useStableCallback(
     (workspaceId: string, element: HTMLButtonElement | null) => {
       if (element === null) workspaceIconElementsRef.current.delete(workspaceId);
@@ -3456,6 +3466,8 @@ export default function Sidebar() {
     dragSensorRef.current = null;
     contextDragKeyRef.current = null;
     setDragOverWorkspaceId(null);
+    setDragOverWorkspaceStrip(false);
+    stopStripScrollGuard();
     endThreadContextDrag();
     if (started) {
       listMotionRef.current?.release();
@@ -3482,6 +3494,45 @@ export default function Sidebar() {
     const bounds = threadListRef.current?.getBoundingClientRect();
     return bounds !== undefined && (point.x < bounds.left || point.x > bounds.right);
   };
+  const threadScroller = (): HTMLElement | null => {
+    let node: HTMLElement | null = threadListRef.current;
+    while (node !== null) {
+      const overflowY = getComputedStyle(node).overflowY;
+      if (/(auto|scroll)/.test(overflowY) && node.scrollHeight > node.clientHeight + 4) return node;
+      node = node.parentElement;
+    }
+    return null;
+  };
+  const stopStripScrollGuard = () => {
+    const guard = stripScrollGuardRef.current;
+    if (guard === null) return;
+    cancelAnimationFrame(guard.raf);
+    guard.element.scrollTop = guard.scrollTop;
+    stripScrollGuardRef.current = null;
+  };
+  const startStripScrollGuard = () => {
+    if (stripScrollGuardRef.current !== null) return;
+    const element = threadScroller();
+    if (element === null) return;
+    const guard = { element, scrollTop: element.scrollTop, raf: 0 };
+    const pin = () => {
+      if (stripScrollGuardRef.current !== guard) return;
+      if (element.scrollTop !== guard.scrollTop) element.scrollTop = guard.scrollTop;
+      guard.raf = requestAnimationFrame(pin);
+    };
+    guard.raf = requestAnimationFrame(pin);
+    stripScrollGuardRef.current = guard;
+  };
+  const pointerOverWorkspaceStrip = (point: { x: number; y: number }): boolean => {
+    const bounds = workspaceStripElementRef.current?.getBoundingClientRect();
+    if (bounds === undefined) return false;
+    return (
+      point.x >= bounds.left &&
+      point.x <= bounds.right &&
+      point.y >= bounds.top &&
+      point.y <= bounds.bottom
+    );
+  };
   /** Workspace icons live outside the thread list, so drags are hit-tested on release. */
   const workspaceIdAtPoint = (point: { x: number; y: number }): string | null => {
     if (!threadWorkspacesRef.current.enabled) return null;
@@ -3499,14 +3550,15 @@ export default function Sidebar() {
     return null;
   };
   const moveThreadContextDrag = (point: { x: number; y: number }) => {
-    const overWorkspaceId = workspaceIdAtPoint(point);
-    setDragOverWorkspaceId(overWorkspaceId);
-    if (overWorkspaceId !== null) {
-      // Filing into a workspace is a different drop than providing chat
-      // context, so it never arms the context-drag ghost.
-      endThreadContextDrag();
-      return true;
-    }
+    const overStrip = pointerOverWorkspaceStrip(point);
+    const overWorkspaceId = overStrip ? workspaceIdAtPoint(point) : null;
+    // The strip sits below the list, where dnd-kit would otherwise keep
+    // scrolling to reach more rows. Guarded so a drag across it re-renders
+    // only on the boundary, not on every pointer move.
+    setDragOverWorkspaceStrip((current) => (current === overStrip ? current : overStrip));
+    setDragOverWorkspaceId((current) => (current === overWorkspaceId ? current : overWorkspaceId));
+    if (overStrip) startStripScrollGuard();
+    else stopStripScrollGuard();
     const contextDrag = pointerOutsideThreadList(point);
     setDragState((current) =>
       current === null || current.contextDrag === contextDrag
@@ -3524,8 +3576,11 @@ export default function Sidebar() {
     return true;
   };
   const dropThreadContextDrag = (point: { x: number; y: number }) => {
-    const overWorkspaceId = workspaceIdAtPoint(point);
+    const overStrip = pointerOverWorkspaceStrip(point);
+    const overWorkspaceId = overStrip ? workspaceIdAtPoint(point) : null;
+    setDragOverWorkspaceStrip(false);
     setDragOverWorkspaceId(null);
+    stopStripScrollGuard();
     if (overWorkspaceId !== null) {
       threadWorkspacesRef.current.assignThreads(
         contextDragThreads().map(scopedThreadKey),
@@ -3533,6 +3588,9 @@ export default function Sidebar() {
       );
       return true;
     }
+    // Over the strip but not on an icon: consume the drop so releasing here
+    // neither reorders the list nor attaches chat context.
+    if (overStrip) return true;
     if (!pointerOutsideThreadList(point)) return false;
     dropThreadContext(point, contextDragThreads());
     return true;
@@ -4968,7 +5026,7 @@ export default function Sidebar() {
             >
               <DndContext
                 sensors={dndSensors}
-                autoScroll={!isContextDrag}
+                autoScroll={!isContextDrag && !dragOverWorkspaceStrip}
                 collisionDetection={dndCollisionDetection}
                 modifiers={dndModifiers}
                 onDragStart={handleThreadDragStart}
@@ -5288,20 +5346,24 @@ export default function Sidebar() {
       <SidebarChromeFooter
         workspacesSlot={
           threadWorkspaces.enabled ? (
-            <ThreadWorkspaceStrip
-              activeWorkspaceId={threadWorkspaces.activeWorkspaceId}
-              attentionByWorkspace={workspaceAttention.byWorkspace}
-              attentionTotal={workspaceAttention.total}
-              dragOverWorkspaceId={dragOverWorkspaceId}
-              onCreate={() => threadWorkspaces.createWorkspace("Workspace")}
-              onDelete={(workspaceId) => threadWorkspaces.deleteWorkspace(workspaceId)}
-              onSelect={(workspaceId) => threadWorkspaces.setActiveWorkspaceId(workspaceId)}
-              onUpdate={(workspaceId, patch) =>
-                threadWorkspaces.updateWorkspace(workspaceId, patch)
-              }
-              registerIconElement={registerWorkspaceIconElement}
-              workspaces={threadWorkspaces.workspaces}
-            />
+            // Measured during a drag so the list stops autoscrolling once the
+            // pointer is over the strip below it.
+            <div ref={workspaceStripElementRef}>
+              <ThreadWorkspaceStrip
+                activeWorkspaceId={threadWorkspaces.activeWorkspaceId}
+                attentionByWorkspace={workspaceAttention.byWorkspace}
+                attentionTotal={workspaceAttention.total}
+                dragOverWorkspaceId={dragOverWorkspaceId}
+                onCreate={() => threadWorkspaces.createWorkspace("Workspace")}
+                onDelete={(workspaceId) => threadWorkspaces.deleteWorkspace(workspaceId)}
+                onSelect={(workspaceId) => threadWorkspaces.setActiveWorkspaceId(workspaceId)}
+                onUpdate={(workspaceId, patch) =>
+                  threadWorkspaces.updateWorkspace(workspaceId, patch)
+                }
+                registerIconElement={registerWorkspaceIconElement}
+                workspaces={threadWorkspaces.workspaces}
+              />
+            </div>
           ) : null
         }
       />
