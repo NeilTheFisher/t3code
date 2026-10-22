@@ -1515,6 +1515,36 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
     );
   });
 
+  describe("log graph", () => {
+    it.effect("marks the checkout's uncommitted changes, and stays quiet when clean", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        const clean = yield* driver.logGraph({ cwd, includeRemotes: false });
+        assert.equal(clean.commits.length, 1);
+        assert.isUndefined(clean.workingTree);
+
+        // One tracked modification and one untracked file: two changed paths, and
+        // the line total covers only what `git diff HEAD` can measure.
+        yield* writeTextFile(cwd, "README.md", "# test\n\nchange\n");
+        yield* writeTextFile(cwd, "untracked.txt", "one\ntwo\n");
+
+        const dirty = yield* driver.logGraph({ cwd, includeRemotes: false });
+        assert.equal(dirty.workingTree?.changedFiles, 2);
+        assert.equal(dirty.workingTree?.additions, 2);
+        assert.equal(dirty.workingTree?.deletions, 0);
+
+        // A staged-then-reverted checkout reads as clean again.
+        yield* git(cwd, ["checkout", "--", "README.md"]);
+        yield* git(cwd, ["clean", "-f"]);
+        const cleanAgain = yield* driver.logGraph({ cwd, includeRemotes: false });
+        assert.isUndefined(cleanAgain.workingTree);
+      }),
+    );
+  });
+
   describe("review diff previews", () => {
     it.effect("loads repository-relative files from a nested project directory", () =>
       Effect.gen(function* () {

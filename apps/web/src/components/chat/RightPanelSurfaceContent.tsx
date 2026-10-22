@@ -67,6 +67,8 @@ export function RightPanelSurfaceContent(props: {
   readonly visible: boolean;
   /** Opens the diff panel scoped to a commit range picked in the graph. */
   readonly onOpenCommitRangeDiff: (range: { from: string; to: string; label: string }) => void;
+  /** Opens the diff panel on the checkout's uncommitted changes. */
+  readonly onOpenWorkingTreeDiff: () => void;
   readonly composerDraftTarget: ScopedThreadRef | DraftId;
   readonly keybindings: ResolvedKeybindingsConfig;
   readonly configuredPreviewUrls: ReadonlyArray<string>;
@@ -178,6 +180,7 @@ export function RightPanelSurfaceContent(props: {
             environmentId={props.environmentId}
             cwd={props.files.workspaceRoot ?? null}
             onOpenCommitDiff={props.onOpenCommitRangeDiff}
+            onOpenWorkingTreeDiff={props.onOpenWorkingTreeDiff}
           />
         </Suspense>
       );
