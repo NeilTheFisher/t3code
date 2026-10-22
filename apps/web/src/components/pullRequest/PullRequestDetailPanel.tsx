@@ -751,40 +751,6 @@ export function PullRequestDetailPanel({
     if (guideWriter.data?.guide == null) selectTab("guide");
   };
 
-  const writeTaskToComposer = (target: ScopedThreadRef | DraftId, task: ThreadTask) => {
-    const store = useComposerDraftStore.getState();
-    const draft = store.getComposerDraft(target);
-    const key = composerTargetKey(target);
-    const previousCommentIds = new Set((draft?.reviewComments ?? []).map((comment) => comment.id));
-    const repeatedCommentIds = new Set(
-      (task.reviewComments ?? [])
-        .filter((comment) => previousCommentIds.has(comment.id))
-        .map((comment) => comment.id),
-    );
-    const promptWithoutPreviousHandoff = stripPullRequestHandoffReferences(
-      draft?.prompt ?? "",
-      draft?.reviewComments ?? [],
-      repeatedCommentIds,
-    );
-    const prompt = handoffPrompt(
-      {
-        prompt: promptWithoutPreviousHandoff,
-        lastHandoffPrompt: lastHandoffPromptByDraft.get(key),
-      },
-      task.prompt,
-    );
-    lastHandoffPromptByDraft.set(key, task.prompt);
-    store.setPrompt(target, prompt);
-    store.setReviewComments(
-      target,
-      handoffReviewComments(draft?.reviewComments ?? [], task.reviewComments ?? []),
-    );
-    for (const comment of task.reviewComments ?? []) {
-      if (!repeatedCommentIds.has(comment.id)) continue;
-      store.addReviewComment(target, comment);
-    }
-  };
-
   const openThreadWithTask = async (
     projectRef: ReturnType<typeof scopeProjectRef>,
     task: ThreadTask | null,
@@ -1159,6 +1125,8 @@ export function PullRequestDetailPanel({
   const selectedMergeMethodLabel = PULL_REQUEST_MERGE_METHOD_LABELS[selectedMergeMethod];
   const pendingAutoMergeLabel = `Auto-merge (${selectedMergeMethodLabel.toLowerCase()})`;
   const conflicting = isPullRequestConflicting(detail);
+  const isGerrit = detail?.provider === "gerrit";
+  const submittable = !isGerrit || detail?.mergeability === "mergeable";
   const autoMergeArmed = detail?.state === "open" && detail.autoMergeEnabled === true;
   const armedMergeMethod = detail?.autoMergeMethod;
   const armedAutoMergeLabel = armedMergeMethod
@@ -1189,7 +1157,7 @@ export function PullRequestDetailPanel({
         checksState,
         autoMergeEnabled: detail.autoMergeEnabled,
         hasMergeMethod: allowedMergeMethods.length > 0,
-        canMerge: !stackOwnsMerge && can("merge"),
+        canMerge: canMergeSinglePullRequest && can("merge") && submittable && !stackOwnsMerge,
         canMarkReady: can("ready"),
         canEnableAutoMerge: !stackOwnsMerge && can("enable-auto-merge"),
       })
@@ -1206,6 +1174,7 @@ export function PullRequestDetailPanel({
         primaryAction !== "enable-auto-merge" &&
         !detail.isDraft &&
         !conflicting &&
+        submittable &&
         can("enable-auto-merge") &&
         allowedMergeMethods.length > 0));
   const showsMergeNow =
@@ -1215,12 +1184,14 @@ export function PullRequestDetailPanel({
     can("merge") &&
     !detail.isDraft &&
     !conflicting &&
+    submittable &&
     allowedMergeMethods.length > 0;
   const showsMergeMethods =
     detail?.state === "open" &&
     can("merge") &&
     !detail.isDraft &&
     !conflicting &&
+    submittable &&
     allowedMergeMethods.length > 1;
   const statePresentation = detail
     ? resolvePullRequestState({ state: detail.state, isDraft: detail.isDraft })
