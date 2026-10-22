@@ -1,12 +1,14 @@
 import "~/index.css";
 
 import { expect, it, vi } from "vite-plus/test";
-import { userEvent } from "vite-plus/test/browser";
+import { page, userEvent } from "vite-plus/test/browser";
 
 import type { SidebarThreadWorkspace } from "@t3tools/contracts";
 
 import { render } from "../../../test/render";
+import { Button } from "../ui/button";
 import { ThreadWorkspaceStrip } from "./ThreadWorkspaceStrip";
+import { THREAD_WORKSPACE_ICON_KEYS } from "./threadWorkspaces";
 
 const workspaces: readonly SidebarThreadWorkspace[] = [
   { id: "work", name: "Work", icon: "building-2", tint: "info" },
@@ -84,4 +86,45 @@ it("marks the active workspace and switches on click, with All clearing the filt
 
   await userEvent.click(screen.getByRole("button", { name: "All workspaces" }));
   expect(onSelect).toHaveBeenCalledWith(null);
+});
+
+it("paints the badge with the theme's primary, matching a primary button", async () => {
+  await using screen = await render(
+    <>
+      <ThreadWorkspaceStrip
+        {...baseProps}
+        attentionByWorkspace={new Map([["work", 4]])}
+        attentionTotal={4}
+        onSelect={() => {}}
+      />
+      <Button variant="default">Send</Button>
+    </>,
+    { router: false },
+  );
+
+  const badge = screen
+    .getByRole("button", { name: "Work workspace" })
+    .element()
+    .querySelector("span");
+  expect(badge).not.toBeNull();
+  const primary = screen.getByRole("button", { name: "Send" }).element();
+  expect(getComputedStyle(badge!).backgroundColor).toBe(getComputedStyle(primary).backgroundColor);
+});
+
+it("keeps every glyph on one row in the editor", async () => {
+  await using screen = await render(<ThreadWorkspaceStrip {...baseProps} onSelect={() => {}} />, {
+    router: false,
+  });
+
+  // The strip opens the editor on right-click; the popover renders in a portal.
+  screen
+    .getByRole("button", { name: "Work workspace" })
+    .element()
+    .dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+  await expect.element(page.getByRole("group", { name: "Workspace icon" })).toBeVisible();
+
+  const tops = THREAD_WORKSPACE_ICON_KEYS.map(
+    (icon) => page.getByRole("button", { name: icon }).element().getBoundingClientRect().top,
+  );
+  expect(new Set(tops).size).toBe(1);
 });
