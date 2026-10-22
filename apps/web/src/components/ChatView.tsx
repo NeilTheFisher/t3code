@@ -7957,6 +7957,18 @@ export default function ChatView(props: ChatViewProps) {
     onDiffPanelOpen?.();
   };
   const onOpenTurnDiffStable = useStableCallback(onOpenTurnDiff);
+  // Same explicit-open bookkeeping as a turn diff: without it the diff panel's
+  // activation effect resets the scope to the branch and discards the range.
+  const onOpenCommitRangeDiff = (range: { from: string; to: string; label: string }) => {
+    if (!activeThreadRef) return;
+    const diffOpen =
+      selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, activeThreadRef) === "diff";
+    explicitDiffOpenRef.current = diffOpen ? null : activeThreadRef;
+    useDiffPanelStore.getState().selectCommitRange(activeThreadRef, range);
+    useRightPanelStore.getState().open(activeThreadRef, "diff");
+    onDiffPanelOpen?.();
+  };
+  const onOpenCommitRangeDiffStable = useStableCallback(onOpenCommitRangeDiff);
   const onTimelineRollbackCheckpoint = (input: {
     readonly checkpointId: string;
     readonly scopeId: string;
@@ -8029,6 +8041,7 @@ export default function ChatView(props: ChatViewProps) {
       getShortcutContext={getShortcutContextStable}
       onSendAnnotation={sendPreviewAnnotationStable}
       onCloseSurface={closeRightPanelSurface}
+      onOpenCommitRangeDiff={onOpenCommitRangeDiffStable}
       terminal={{
         launchContext: activeTerminalLaunchContext ?? null,
         focusRequestId: terminalFocusRequestId,

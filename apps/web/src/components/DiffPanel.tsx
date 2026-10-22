@@ -6,7 +6,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
-import type { ScopedThreadRef, RunId } from "@t3tools/contracts";
+import type { ReviewDiffPreviewSourceKind, ScopedThreadRef, RunId } from "@t3tools/contracts";
 import {
   ArrowRightIcon,
   CheckIcon,
@@ -272,6 +272,7 @@ export default function DiffPanel({
   }, [diffSelection, orderedTurnDiffSummaries, routeThreadRef]);
 
   const selectedRunId = diffSelection.kind === "turn" ? diffSelection.turnId : null;
+  const selectedCommitRange = diffSelection.kind === "commit-range" ? diffSelection : null;
   const selectedGitScope = diffSelection.kind === "unstaged" ? "unstaged" : "branch";
   const selectedBaseRef = diffSelection.kind === "branch" ? diffSelection.baseRef : null;
   const selectedFilePath = diffSelection.kind === "turn" ? diffSelection.filePath : null;
@@ -285,23 +286,31 @@ export default function DiffPanel({
   const selectedCheckpointTurnCount = selectedTurn?.checkpointTurnCount;
   const latestTurn = orderedTurnDiffSummaries[0];
   const selectedScopeLabel =
-    selectedRunId === null
-      ? selectedGitScope === "unstaged"
-        ? "Uncommitted"
-        : "Changes"
-      : selectedTurn?.runId === latestTurn?.runId
-        ? "Latest turn"
-        : `Turn ${selectedCheckpointTurnCount ?? "?"}`;
-  const reviewSectionId = selectedTurn ? `turn:${selectedTurn.runId}` : selectedGitScope;
+    selectedCommitRange !== null
+      ? selectedCommitRange.label
+      : selectedRunId === null
+        ? selectedGitScope === "unstaged"
+          ? "Uncommitted"
+          : "Changes"
+        : selectedTurn?.runId === latestTurn?.runId
+          ? "Latest turn"
+          : `Turn ${selectedCheckpointTurnCount ?? "?"}`;
+  const reviewSectionId = selectedCommitRange
+    ? `commit:${selectedCommitRange.from}..${selectedCommitRange.to}`
+    : selectedTurn
+      ? `turn:${selectedTurn.runId}`
+      : selectedGitScope;
   const collapseScopeKey = routeThreadRef
     ? `${routeThreadRef.environmentId}:${routeThreadRef.threadId}:${reviewSectionId}`
     : null;
   const codeViewMountKey = `${collapseScopeKey ?? reviewSectionId}:${codeViewRevision}`;
-  const reviewSectionTitle = selectedTurn
-    ? `Turn ${selectedCheckpointTurnCount ?? "?"}`
-    : selectedGitScope === "unstaged"
-      ? "Uncommitted"
-      : "Changes";
+  const reviewSectionTitle = selectedCommitRange
+    ? selectedCommitRange.label
+    : selectedTurn
+      ? `Turn ${selectedCheckpointTurnCount ?? "?"}`
+      : selectedGitScope === "unstaged"
+        ? "Uncommitted"
+        : "Changes";
   const selectedCheckpointRange =
     typeof selectedCheckpointTurnCount === "number"
       ? {
@@ -327,6 +336,14 @@ export default function DiffPanel({
           input: {
             cwd: activeCwd,
             ...(selectedBaseRef ? { baseRef: selectedBaseRef } : {}),
+            ...(selectedCommitRange
+              ? {
+                  commitRange: {
+                    from: selectedCommitRange.from,
+                    to: selectedCommitRange.to,
+                  },
+                }
+              : {}),
             ignoreWhitespace: diffIgnoreWhitespace,
           },
         })
@@ -338,8 +355,13 @@ export default function DiffPanel({
     ? `${routeThreadRef.environmentId}:${routeThreadRef.threadId}`
     : null;
 
+  const selectedGitSourceKind: ReviewDiffPreviewSourceKind = selectedCommitRange
+    ? "commit-range"
+    : selectedGitScope === "unstaged"
+      ? "working-tree"
+      : "branch-range";
   const selectedGitSource = branchDiffPreview.data?.sources.find(
-    (source) => source.kind === (selectedGitScope === "unstaged" ? "working-tree" : "branch-range"),
+    (source) => source.kind === selectedGitSourceKind,
   );
   const refreshPreviewQuery = branchDiffPreview.refresh;
   const refreshDiffFromUserAction = refreshPreviewQuery;
@@ -394,6 +416,7 @@ export default function DiffPanel({
   });
   const localBranchRefs = useEnvironmentQuery(
     selectedRunId === null &&
+      selectedCommitRange === null &&
       selectedGitScope === "branch" &&
       activeThread &&
       branchDiffPreview.data?.cwd
@@ -411,6 +434,7 @@ export default function DiffPanel({
   );
   const remoteBranchRefs = useEnvironmentQuery(
     selectedRunId === null &&
+      selectedCommitRange === null &&
       selectedGitScope === "branch" &&
       activeThread &&
       branchDiffPreview.data?.cwd
@@ -644,8 +668,9 @@ export default function DiffPanel({
     useDiffPanelStore.getState().selectBranchBaseRef(routeThreadRef, baseRef);
   };
   const selectedTurnValue = selectedTurn ? `turn:${selectedTurn.runId}` : "";
-  const selectedScopeValue =
-    selectedRunId === null
+  const selectedScopeValue = selectedCommitRange
+    ? "commit-range"
+    : selectedRunId === null
       ? selectedGitScope
       : selectedTurn?.runId === latestTurn?.runId
         ? "latest"
@@ -675,6 +700,11 @@ export default function DiffPanel({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
             <DropdownMenuRadioGroup value={selectedScopeValue} onValueChange={selectScopeValue}>
+              {selectedCommitRange ? (
+                <DropdownMenuRadioItem value="commit-range" closeOnClick>
+                  <span>{selectedCommitRange.label}</span>
+                </DropdownMenuRadioItem>
+              ) : null}
               <DropdownMenuRadioItem value="branch" closeOnClick>
                 <span>Changes</span>
               </DropdownMenuRadioItem>
@@ -711,127 +741,130 @@ export default function DiffPanel({
             </DropdownMenuSub>
           </DropdownMenuContent>
         </DropdownMenu>
-        {selectedRunId === null && selectedGitScope === "branch" && selectedGitSource?.baseRef && (
-          <div
-            className="flex min-w-0 max-w-full items-center gap-2 overflow-hidden text-xs text-muted-foreground"
-            aria-label={`Comparing ${selectedGitSource.headRef ?? "HEAD"} against ${selectedGitSource.baseRef}`}
-          >
-            {/* The head ref keeps 3rem while the row has room; below that the
-                base-ref button keeps 2.25rem so its menu stays reachable. */}
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <span className="flex min-w-[min(3rem,calc(100%-2.75rem))] items-center gap-2 overflow-hidden" />
-                }
-              >
-                <span className="min-w-0 max-w-48 truncate">
-                  {selectedGitSource.headRef ?? "HEAD"}
-                </span>
-                <ArrowRightIcon className="size-3.5 shrink-0 opacity-70" />
-              </TooltipTrigger>
-              <TooltipPopup side="top">
-                {`${selectedGitSource.headRef ?? "HEAD"} → ${selectedGitSource.baseRef}`}
-              </TooltipPopup>
-            </Tooltip>
-            <Combobox
-              items={baseRefItems}
-              filteredItems={filteredBaseRefItems}
-              value={selectedBaseRef ?? AUTOMATIC_BASE_REF}
-              onOpenChange={(open) => {
-                if (!open) setBaseRefQuery("");
-              }}
-              onValueChange={(value) => {
-                if (!value) return;
-                selectBranchBaseRef(value === AUTOMATIC_BASE_REF ? null : value);
-              }}
+        {selectedRunId === null &&
+          selectedCommitRange === null &&
+          selectedGitScope === "branch" &&
+          selectedGitSource?.baseRef && (
+            <div
+              className="flex min-w-0 max-w-full items-center gap-2 overflow-hidden text-xs text-muted-foreground"
+              aria-label={`Comparing ${selectedGitSource.headRef ?? "HEAD"} against ${selectedGitSource.baseRef}`}
             >
-              <ComboboxTrigger
-                render={<Button variant="ghost-muted" size="xs" />}
-                className="min-w-9 max-w-48 shrink"
-                aria-label={`Change comparison target. Currently ${selectedGitSource.baseRef}`}
+              {/* The head ref keeps 3rem while the row has room; below that the
+                base-ref button keeps 2.25rem so its menu stays reachable. */}
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <span className="flex min-w-[min(3rem,calc(100%-2.75rem))] items-center gap-2 overflow-hidden" />
+                  }
+                >
+                  <span className="min-w-0 max-w-48 truncate">
+                    {selectedGitSource.headRef ?? "HEAD"}
+                  </span>
+                  <ArrowRightIcon className="size-3.5 shrink-0 opacity-70" />
+                </TooltipTrigger>
+                <TooltipPopup side="top">
+                  {`${selectedGitSource.headRef ?? "HEAD"} → ${selectedGitSource.baseRef}`}
+                </TooltipPopup>
+              </Tooltip>
+              <Combobox
+                items={baseRefItems}
+                filteredItems={filteredBaseRefItems}
+                value={selectedBaseRef ?? AUTOMATIC_BASE_REF}
+                onOpenChange={(open) => {
+                  if (!open) setBaseRefQuery("");
+                }}
+                onValueChange={(value) => {
+                  if (!value) return;
+                  selectBranchBaseRef(value === AUTOMATIC_BASE_REF ? null : value);
+                }}
               >
-                <span className="min-w-0 truncate">{selectedGitSource.baseRef}</span>
-                <ChevronDownIcon className="size-3.5 shrink-0 opacity-70" />
-              </ComboboxTrigger>
-              <ComboboxPopup
-                align="start"
-                className="w-72 min-w-0 max-w-[calc(100vw-1rem)] overflow-hidden"
-              >
-                <ComboboxSearchInput
-                  placeholder="Search refs..."
-                  value={baseRefQuery}
-                  onChange={(event) => setBaseRefQuery(event.target.value)}
-                />
-                <div className="grid shrink-0 grid-cols-[1rem_minmax(0,1fr)] items-center gap-2 border-b border-border/70 ps-3 pe-6.5 pt-2 pb-1.5 font-medium text-3xs text-muted-foreground uppercase tracking-wide">
-                  <span aria-hidden="true" />
-                  <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_2rem] items-center">
-                    <span>Branch</span>
-                    <span className="text-right">Remote</span>
+                <ComboboxTrigger
+                  render={<Button variant="ghost-muted" size="xs" />}
+                  className="min-w-9 max-w-48 shrink"
+                  aria-label={`Change comparison target. Currently ${selectedGitSource.baseRef}`}
+                >
+                  <span className="min-w-0 truncate">{selectedGitSource.baseRef}</span>
+                  <ChevronDownIcon className="size-3.5 shrink-0 opacity-70" />
+                </ComboboxTrigger>
+                <ComboboxPopup
+                  align="start"
+                  className="w-72 min-w-0 max-w-[calc(100vw-1rem)] overflow-hidden"
+                >
+                  <ComboboxSearchInput
+                    placeholder="Search refs..."
+                    value={baseRefQuery}
+                    onChange={(event) => setBaseRefQuery(event.target.value)}
+                  />
+                  <div className="grid shrink-0 grid-cols-[1rem_minmax(0,1fr)] items-center gap-2 border-b border-border/70 ps-3 pe-6.5 pt-2 pb-1.5 font-medium text-3xs text-muted-foreground uppercase tracking-wide">
+                    <span aria-hidden="true" />
+                    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_2rem] items-center">
+                      <span>Branch</span>
+                      <span className="text-right">Remote</span>
+                    </div>
                   </div>
-                </div>
-                <ComboboxEmpty>No matching refs.</ComboboxEmpty>
-                <ComboboxList className="max-h-64 min-w-0 overflow-x-hidden">
-                  <ComboboxItem
-                    className="w-full min-w-0 grid-cols-[1rem_minmax(0,1fr)]"
-                    value={AUTOMATIC_BASE_REF}
-                  >
-                    <span className="block min-w-0 truncate">Automatic</span>
-                  </ComboboxItem>
-                  {baseRefChoices.map((choice) => {
-                    const item = valueForBaseRefChoice(choice);
-                    const hasBoth = choice.local !== null && choice.remote !== null;
-                    const useRemote = choice.remote?.name === item;
-                    return (
-                      <ComboboxItem
-                        key={choice.id}
-                        className="w-full min-w-0 grid-cols-[1rem_minmax(0,1fr)]"
-                        value={item}
-                      >
-                        <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_2rem] items-center overflow-hidden">
-                          <span className="block min-w-0 truncate pe-2">{choice.label}</span>
-                          {hasBoth ? (
-                            <div
-                              className="flex justify-end"
-                              onClick={(event) => event.stopPropagation()}
-                              onPointerDown={(event) => event.stopPropagation()}
-                            >
-                              <Switch
-                                aria-label={`Use remote version of ${choice.label}`}
-                                checked={useRemote}
-                                className="[--thumb-size:--spacing(3)]"
-                                onCheckedChange={(checked) => {
-                                  const nextRef = checked
-                                    ? choice.remote?.name
-                                    : choice.local?.name;
-                                  if (nextRef) selectBranchBaseRef(nextRef);
-                                }}
-                              />
-                            </div>
-                          ) : choice.remote ? (
-                            <Tooltip>
-                              <TooltipTrigger
-                                render={
-                                  <span className="flex justify-end text-muted-foreground">
-                                    <CheckIcon
-                                      role="img"
-                                      aria-label="Remote only"
-                                      className="size-3"
-                                    />
-                                  </span>
-                                }
-                              />
-                              <TooltipPopup side="top">Remote only</TooltipPopup>
-                            </Tooltip>
-                          ) : null}
-                        </div>
-                      </ComboboxItem>
-                    );
-                  })}
-                </ComboboxList>
-              </ComboboxPopup>
-            </Combobox>
-          </div>
-        )}
+                  <ComboboxEmpty>No matching refs.</ComboboxEmpty>
+                  <ComboboxList className="max-h-64 min-w-0 overflow-x-hidden">
+                    <ComboboxItem
+                      className="w-full min-w-0 grid-cols-[1rem_minmax(0,1fr)]"
+                      value={AUTOMATIC_BASE_REF}
+                    >
+                      <span className="block min-w-0 truncate">Automatic</span>
+                    </ComboboxItem>
+                    {baseRefChoices.map((choice) => {
+                      const item = valueForBaseRefChoice(choice);
+                      const hasBoth = choice.local !== null && choice.remote !== null;
+                      const useRemote = choice.remote?.name === item;
+                      return (
+                        <ComboboxItem
+                          key={choice.id}
+                          className="w-full min-w-0 grid-cols-[1rem_minmax(0,1fr)]"
+                          value={item}
+                        >
+                          <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_2rem] items-center overflow-hidden">
+                            <span className="block min-w-0 truncate pe-2">{choice.label}</span>
+                            {hasBoth ? (
+                              <div
+                                className="flex justify-end"
+                                onClick={(event) => event.stopPropagation()}
+                                onPointerDown={(event) => event.stopPropagation()}
+                              >
+                                <Switch
+                                  aria-label={`Use remote version of ${choice.label}`}
+                                  checked={useRemote}
+                                  className="[--thumb-size:--spacing(3)]"
+                                  onCheckedChange={(checked) => {
+                                    const nextRef = checked
+                                      ? choice.remote?.name
+                                      : choice.local?.name;
+                                    if (nextRef) selectBranchBaseRef(nextRef);
+                                  }}
+                                />
+                              </div>
+                            ) : choice.remote ? (
+                              <Tooltip>
+                                <TooltipTrigger
+                                  render={
+                                    <span className="flex justify-end text-muted-foreground">
+                                      <CheckIcon
+                                        role="img"
+                                        aria-label="Remote only"
+                                        className="size-3"
+                                      />
+                                    </span>
+                                  }
+                                />
+                                <TooltipPopup side="top">Remote only</TooltipPopup>
+                              </Tooltip>
+                            ) : null}
+                          </div>
+                        </ComboboxItem>
+                      );
+                    })}
+                  </ComboboxList>
+                </ComboboxPopup>
+              </Combobox>
+            </div>
+          )}
       </div>
       <div className="flex shrink-0 items-center gap-1 [-webkit-app-region:no-drag]">
         {codeViewFiles.length > 0 || (!selectedTurn && selectedGitSource?.files?.length) ? (

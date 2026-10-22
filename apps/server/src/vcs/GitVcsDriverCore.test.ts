@@ -2298,6 +2298,73 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
       }),
     );
 
+    it.effect("previews an explicit commit range without touching the working tree", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const first = yield* git(cwd, ["rev-parse", "HEAD"]);
+        yield* writeTextFile(cwd, "a.txt", "one\n");
+        yield* git(cwd, ["add", "."]);
+        yield* git(cwd, ["commit", "-m", "add a"]);
+        const second = yield* git(cwd, ["rev-parse", "HEAD"]);
+        yield* writeTextFile(cwd, "a.txt", "one\ntwo\n");
+        yield* git(cwd, ["add", "."]);
+        yield* git(cwd, ["commit", "-m", "extend a"]);
+        const third = yield* git(cwd, ["rev-parse", "HEAD"]);
+        // A dirty tree must not leak into an object-to-object preview.
+        yield* writeTextFile(cwd, "a.txt", "one\ntwo\nthree\n");
+
+        const single = yield* driver.getReviewDiffPreview({
+          cwd,
+          commitRange: { from: `${third}^`, to: third },
+        });
+        assert.deepStrictEqual(
+          single.sources.map((source) => source.kind),
+          ["commit-range"],
+        );
+        const source = single.sources[0]!;
+        assert.equal(source.title, `${third.slice(0, 8)}..${third.slice(0, 8)}`);
+        assert.deepStrictEqual(
+          source.files?.map((file) => file.path),
+          ["a.txt"],
+        );
+        assert.include(source.diff, "+two");
+        assert.notInclude(source.diff, "+three");
+
+        const range = yield* driver.getReviewDiffPreview({
+          cwd,
+          commitRange: { from: first, to: third },
+        });
+        assert.deepStrictEqual(
+          range.sources[0]?.files?.map((file) => file.path),
+          ["a.txt"],
+        );
+        assert.include(range.sources[0]?.diff ?? "", "+one");
+        assert.include(range.sources[0]?.diff ?? "", "+two");
+
+        const contents = yield* driver.getReviewDiffFileContents({
+          cwd,
+          sourceKind: "commit-range",
+          changeType: "change",
+          baseRef: `${third}^`,
+          headRef: third,
+          oldPath: "a.txt",
+          newPath: "a.txt",
+        });
+        assert.equal(contents.oldContents, "one\n");
+        assert.equal(contents.newContents, "one\ntwo\n");
+
+        const empty = yield* driver.getReviewDiffPreview({
+          cwd,
+          commitRange: { from: second, to: second },
+        });
+        assert.deepStrictEqual(empty.sources[0]?.files, []);
+        assert.equal(empty.sources[0]?.diff, "");
+        assert.isFalse(empty.sources[0]?.truncated);
+      }),
+    );
+
     it.effect("keeps a/ and b/ patch prefixes when the repository disables them", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();

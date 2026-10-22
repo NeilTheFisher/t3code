@@ -3026,6 +3026,13 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     return { baseRef, insertions, deletions };
   }, Effect.scoped);
 
+  // Commit-range titles read as `abc1234..def5678`; a `<sha>^` base loses the
+  // parent marker because the panel shows the range, not the git revision.
+  const shortRevisionForDisplay = (revision: string): string => {
+    const name = revision.replace(/^refs\/(?:heads|remotes)\//, "").replace(/(?:\^|~\d+)+$/, "");
+    return /^[0-9a-f]{7,40}$/i.test(name) ? name.slice(0, 8) : name;
+  };
+
   const getReviewDiffPreview = Effect.fn("getReviewDiffPreview")(function* (
     input: ReviewDiffPreviewInput,
   ) {
@@ -3052,12 +3059,20 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     }
 
     const cwd = repository.worktreeRoot;
-    const dirtyRef = input.file?.sourceKind === "branch-range" ? null : "HEAD";
-    const review =
-      input.file?.sourceKind === "working-tree"
-        ? { baseRef: input.baseRef ?? null, mergeBase: null }
-        : yield* resolveReviewMergeBase(cwd, repository.currentBranch, input.baseRef);
-
+    const hashDiff = (diff: string, files: ReadonlyArray<ReviewDiffFileStat>) =>
+      crypto.digest("SHA-256", new TextEncoder().encode(JSON.stringify([diff, files]))).pipe(
+        Effect.map(Hex.encode),
+        Effect.mapError(
+          (cause) =>
+            new GitCommandError({
+              operation: "GitVcsDriver.getReviewDiffPreview.hash",
+              command: "crypto.digest SHA-256",
+              cwd,
+              detail: "Failed to hash review diff.",
+              cause,
+            }),
+        ),
+      );
     const diffArgs = [
       ...REVIEW_DIFF_ARGS,
       // Fork: review previews carry full-file context; the client collapses and
@@ -3065,6 +3080,64 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       "--unified=999999",
       ...(input.ignoreWhitespace ? ["--ignore-all-space"] : []),
     ];
+
+    if (input.commitRange) {
+      // A commit range is a pure object read: it never involves the working
+      // tree or the index, so untracked staging and merge-base resolution are
+      // skipped entirely and the preview carries this single source.
+      const { from, to } = input.commitRange;
+      const readRange = Effect.fn("GitVcsDriver.getReviewDiffPreview.commitRange")(function* (
+        args: ReadonlyArray<string>,
+      ) {
+        return yield* executeGit(
+          "GitVcsDriver.getReviewDiffPreview.commitRange",
+          cwd,
+          [...diffArgs, ...args, from, to, "--", ...pathArgs],
+          {
+            allowNonZeroExit: true,
+            maxOutputBytes: patchLimit,
+            appendTruncationMarker: true,
+          },
+        );
+      });
+      const stat = yield* readRange(["--numstat", "-z"]);
+      if (stat.exitCode !== 0) {
+        return yield* new GitCommandError({
+          operation: "GitVcsDriver.getReviewDiffPreview.commitRange",
+          cwd,
+          command: "git diff --numstat",
+          detail: "Could not read the selected commits.",
+          exitCode: stat.exitCode,
+        });
+      }
+      const files = parseReviewNumstat(stat.stdout);
+      const patch =
+        files.length === 0 ? { stdout: "", stdoutTruncated: false } : yield* readRange(["--patch"]);
+      return {
+        cwd: input.cwd,
+        generatedAt: yield* DateTime.now,
+        sources: [
+          {
+            id: "commit-range",
+            kind: "commit-range" as const,
+            title: `${shortRevisionForDisplay(from)}..${shortRevisionForDisplay(to)}`,
+            baseRef: from,
+            headRef: to,
+            diff: patch.stdout,
+            files,
+            diffHash: yield* hashDiff(patch.stdout, files),
+            truncated: patch.stdoutTruncated,
+          },
+        ],
+      };
+    }
+
+    const dirtyRef = input.file?.sourceKind === "branch-range" ? null : "HEAD";
+    const review =
+      input.file?.sourceKind === "working-tree"
+        ? { baseRef: input.baseRef ?? null, mergeBase: null }
+        : yield* resolveReviewMergeBase(cwd, repository.currentBranch, input.baseRef);
+
     const readStats = Effect.fn("GitVcsDriver.getReviewDiffPreview.stat")(function* (
       ref: string,
       env?: NodeJS.ProcessEnv,
@@ -3133,20 +3206,6 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     const baseFiles = baseResult.files;
     const dirtyDiff = dirtyTrackedResult.stdout;
     const baseDiff = baseResult.stdout;
-    const hashDiff = (diff: string, files: ReadonlyArray<ReviewDiffFileStat>) =>
-      crypto.digest("SHA-256", new TextEncoder().encode(JSON.stringify([diff, files]))).pipe(
-        Effect.map(Hex.encode),
-        Effect.mapError(
-          (cause) =>
-            new GitCommandError({
-              operation: "GitVcsDriver.getReviewDiffPreview.hash",
-              command: "crypto.digest SHA-256",
-              cwd,
-              detail: "Failed to hash review diff.",
-              cause,
-            }),
-        ),
-      );
     const [dirtyDiffHash, baseDiffHash] = yield* Effect.all([
       hashDiff(dirtyDiff, dirtyFiles ?? []),
       hashDiff(baseDiff, baseFiles ?? []),
@@ -3297,6 +3356,27 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     ).pipe(Effect.map((value) => value.trim()));
     if (repositoryRoot.length === 0) {
       return yield* reviewDiffFileError(input, "Could not resolve the Git repository root.");
+    }
+    if (input.sourceKind === "commit-range") {
+      // Both sides of a commit range are objects, so neither side comes from the
+      // working tree the way a branch or unstaged preview does.
+      const from = input.baseRef;
+      const to = input.headRef;
+      if (from === null || to === null) {
+        return yield* reviewDiffFileError(input, "A commit range needs both revisions.");
+      }
+      const [oldContents, newContents] = yield* Effect.all(
+        [
+          input.changeType === "new"
+            ? Effect.succeed("")
+            : readReviewFileAtRevision(input, from, input.oldPath),
+          input.changeType === "deleted"
+            ? Effect.succeed("")
+            : readReviewFileAtRevision(input, to, input.newPath),
+        ],
+        { concurrency: 2 },
+      );
+      return { oldContents, newContents };
     }
     const oldRevision =
       input.sourceKind === "working-tree"
