@@ -3130,6 +3130,73 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       ...(input.ignoreWhitespace ? ["--ignore-all-space"] : []),
     ];
 
+    if (input.submodule) {
+      // A submodule's commits live in its own repository, so this reads that
+      // work tree instead of the parent one. Both ends must already be present
+      // locally, which a fetch that recorded the gitlink guarantees.
+      const { path: submodulePath, from, to } = input.submodule;
+      const submoduleCwd = path.join(cwd, submodulePath);
+      // A missing directory cannot even spawn git, so every failure here means
+      // the same thing: no usable submodule work tree at that path.
+      const isWorkTree = yield* executeGit(
+        "GitVcsDriver.getReviewDiffPreview.submoduleRoot",
+        submoduleCwd,
+        ["rev-parse", "--is-inside-work-tree"],
+        { allowNonZeroExit: true },
+      ).pipe(Effect.catchTags({ GitCommandError: () => Effect.succeed(null) }));
+      if (isWorkTree === null || isWorkTree.exitCode !== 0) {
+        return yield* new GitCommandError({
+          operation: "GitVcsDriver.getReviewDiffPreview.submodule",
+          cwd: submoduleCwd,
+          command: "git rev-parse --is-inside-work-tree",
+          detail: `'${submodulePath}' is not a checked-out git submodule in this repository.`,
+          exitCode: isWorkTree?.exitCode ?? 1,
+        });
+      }
+      const stat = yield* executeGit(
+        "GitVcsDriver.getReviewDiffPreview.submodule.stat",
+        submoduleCwd,
+        [...diffArgs, "--numstat", "-z", from, to],
+        { allowNonZeroExit: true, maxOutputBytes: REVIEW_METADATA_MAX_OUTPUT_BYTES },
+      );
+      if (stat.exitCode !== 0) {
+        return yield* new GitCommandError({
+          operation: "GitVcsDriver.getReviewDiffPreview.submodule",
+          cwd: submoduleCwd,
+          command: "git diff --numstat",
+          detail: `Could not compare ${submodulePath} between ${shortRevisionForDisplay(from)} and ${shortRevisionForDisplay(to)}; the submodule commits may not be present locally.`,
+          exitCode: stat.exitCode,
+        });
+      }
+      const submoduleFiles = parseReviewNumstat(stat.stdout);
+      const patch =
+        submoduleFiles.length === 0
+          ? { stdout: "", stdoutTruncated: false }
+          : yield* executeGit(
+              "GitVcsDriver.getReviewDiffPreview.submodule.patch",
+              submoduleCwd,
+              [...diffArgs, "--patch", from, to],
+              { allowNonZeroExit: true, maxOutputBytes: patchLimit, appendTruncationMarker: true },
+            );
+      return {
+        cwd: input.cwd,
+        generatedAt: yield* DateTime.now,
+        sources: [
+          {
+            id: "submodule-range",
+            kind: "submodule-range" as const,
+            title: `${submodulePath} ${shortRevisionForDisplay(from)}..${shortRevisionForDisplay(to)}`,
+            baseRef: from,
+            headRef: to,
+            diff: patch.stdout,
+            files: submoduleFiles,
+            diffHash: yield* hashDiff(patch.stdout, submoduleFiles),
+            truncated: patch.stdoutTruncated,
+          },
+        ],
+      };
+    }
+
     if (input.commitRange) {
       // A commit range is a pure object read: it never involves the working
       // tree or the index, so untracked staging and merge-base resolution are
@@ -3405,6 +3472,28 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     ).pipe(Effect.map((value) => value.trim()));
     if (repositoryRoot.length === 0) {
       return yield* reviewDiffFileError(input, "Could not resolve the Git repository root.");
+    }
+    if (input.sourceKind === "submodule-range") {
+      const submodulePath = input.submodulePath;
+      if (submodulePath === undefined || input.baseRef === null || input.headRef === null) {
+        return yield* reviewDiffFileError(
+          input,
+          "A submodule range needs the submodule path, not just its revisions.",
+        );
+      }
+      const submoduleInput = { ...input, cwd: path.join(input.cwd, submodulePath) };
+      const [oldContents, newContents] = yield* Effect.all(
+        [
+          input.changeType === "new"
+            ? Effect.succeed("")
+            : readReviewFileAtRevision(submoduleInput, input.baseRef, input.oldPath),
+          input.changeType === "deleted"
+            ? Effect.succeed("")
+            : readReviewFileAtRevision(submoduleInput, input.headRef, input.newPath),
+        ],
+        { concurrency: 2 },
+      );
+      return { oldContents, newContents };
     }
     if (input.sourceKind === "commit-range") {
       // Both sides of a commit range are objects, so neither side comes from the
