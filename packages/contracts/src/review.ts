@@ -3,19 +3,29 @@ import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { GitCommandError } from "./git.ts";
 import { VcsError } from "./vcs.ts";
 
+export const ReviewDiffPreviewCommitRange = Schema.Struct({
+  from: TrimmedNonEmptyString,
+  to: TrimmedNonEmptyString,
+});
+export type ReviewDiffPreviewCommitRange = typeof ReviewDiffPreviewCommitRange.Type;
+
 export const ReviewDiffPreviewInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   baseRef: Schema.optional(TrimmedNonEmptyString),
   commitSha: Schema.optional(TrimmedNonEmptyString),
+  /** Set to preview a commit range instead of the working tree or a branch. */
+  commitRange: Schema.optionalKey(ReviewDiffPreviewCommitRange),
   ignoreWhitespace: Schema.optionalKey(Schema.Boolean),
-  sourceKind: Schema.optionalKey(Schema.Literals(["working-tree", "branch-range"])),
+  sourceKind: Schema.optionalKey(
+    Schema.Literals(["working-tree", "branch-range", "commit", "commit-range"]),
+  ),
   trackedOnly: Schema.optionalKey(Schema.Boolean),
   metadataOnly: Schema.optionalKey(Schema.Boolean),
   file: Schema.optionalKey(
     Schema.Struct({
       path: Schema.NonEmptyString,
       previousPath: Schema.NullOr(Schema.NonEmptyString),
-      sourceKind: Schema.Literals(["working-tree", "branch-range", "commit"]),
+      sourceKind: Schema.Literals(["working-tree", "branch-range", "commit", "commit-range"]),
     }),
   ),
 });
@@ -43,6 +53,7 @@ export const ReviewDiffPreviewSourceKind = Schema.Literals([
   "working-tree",
   "branch-range",
   "commit",
+  "commit-range",
 ]);
 export type ReviewDiffPreviewSourceKind = typeof ReviewDiffPreviewSourceKind.Type;
 
