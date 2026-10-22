@@ -21,6 +21,8 @@ function getDiffPanelHeaderRowClassName(mode: DiffPanelMode) {
 export function DiffPanelShell(props: {
   mode: DiffPanelMode;
   header: ReactNode;
+  /** A slim row above the header, for panel-level navigation. */
+  nav?: ReactNode;
   children: ReactNode;
 }) {
   const shouldUseDragRegion = isElectron && props.mode !== "sheet" && props.mode !== "embedded";
@@ -34,6 +36,11 @@ export function DiffPanelShell(props: {
           : "w-full",
       )}
     >
+      {props.nav ? (
+        <div className="flex h-7 min-h-7 shrink-0 items-center gap-0.5 border-b border-border/50 px-1.5">
+          {props.nav}
+        </div>
+      ) : null}
       {shouldUseDragRegion ? (
         <div className={getDiffPanelHeaderRowClassName(props.mode)}>{props.header}</div>
       ) : (
