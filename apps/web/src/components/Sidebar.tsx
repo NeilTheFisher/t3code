@@ -484,9 +484,19 @@ function useSidebarThreads(input: {
   const workspaceAttention = countThreadWorkspaceAttention(threads, {
     assignments: threadWorkspaces.assignments,
     workspaces: threadWorkspaces.workspaces,
+    // Mirrors the status pill each row renders, so the number always equals the
+    // flags the user can count in that workspace. The muted "Waiting" pill an
+    // idle thread shows is deliberately not a signal.
     needsAttention: (thread) => {
       const status = resolveSidebarThreadStatus(thread);
-      return status === "approval" || status === "input" || status === "failed";
+      if (status === "waiting") return false;
+      if (status !== "ready") return true;
+      const wokeAt = threadWokeAt(thread, { now: new Date().toISOString() });
+      if (wokeAt !== null && thread.settledOverride !== "settled") {
+        const lastVisited = thread.lastVisitedAt ?? null;
+        if (lastVisited === null || Date.parse(lastVisited) < Date.parse(wokeAt)) return true;
+      }
+      return hasUnseenCompletion({ ...thread, lastVisitedAt: thread.lastVisitedAt ?? null });
     },
   });
   const routeRowThreadKey =
@@ -595,18 +605,6 @@ function useSidebarThreads(input: {
     threads,
     workingShelfEnabled,
     workspaceAttention,
-    // Search deliberately escapes the active workspace, so it searches the
-    // project-scoped list rather than the workspace-filtered sections.
-    searchableThreads:
-      workspaceFilter === null
-        ? [
-            ...pinnedThreads,
-            ...activeThreads,
-            ...workingThreads,
-            ...snoozedThreads,
-            ...settledThreads,
-          ]
-        : partition.workspaceUnfilteredThreads,
     settledVisibleCount,
     hiddenSettledCount: settledThreads.length - visibleSettledThreads.length,
     showMoreSettled: () =>
@@ -649,9 +647,11 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
     workspaceFilter,
   } = input;
   const preciseNow = new Date().toISOString();
-  const scoped = filterSidebarV2VisibleThreads(threads, scopedProjectKeys);
-  const visible =
-    workspaceFilter === null ? scoped : filterThreadsByWorkspace(scoped, workspaceFilter);
+  // Partition the project-scoped list and narrow each section for display
+  // afterwards. Search has to keep reaching every workspace, and it reads the
+  // same section order the sidebar shows, so the filter cannot be applied to
+  // the partition's input.
+  const visible = filterSidebarV2VisibleThreads(threads, scopedProjectKeys);
   inboxReturns.observe(workingShelfEnabled ? threads : null);
   const pinned: EnvironmentThreadShell[] = [];
   const active: EnvironmentThreadShell[] = [];
@@ -711,18 +711,20 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
   const sortedActive = workingShelfEnabled
     ? sortInboxThreadsByReturn(active, inboxReturns.returnedAt)
     : sortThreadsForSidebar(active);
+  const sortedWorking = sortWorkingThreadsBySend(working);
+  const sortedSnoozed = snoozed.toSorted(
+    (left, right) =>
+      firstValidTimestampMs(left.snoozedUntil ?? null) -
+      firstValidTimestampMs(right.snoozedUntil ?? null),
+  );
+  const sortedSettled = sortSettledThreads(settled);
+  const forDisplay = (list: readonly EnvironmentThreadShell[]): EnvironmentThreadShell[] =>
+    workspaceFilter === null ? [...list] : [...filterThreadsByWorkspace(list, workspaceFilter)];
   return {
-    pinnedThreads:
-      optimisticDrop?.section !== "pinned" || optimisticDrop.order === null
-        ? sortedPinned
-        : orderItemsByPreferredIds({
-            items: sortedPinned,
-            preferredIds: optimisticDrop.order,
-            getId: (thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-          }),
+    pinnedThreads: forDisplay(pinned),
     draggableThreadKeys: draggable,
     activeReorderableThreadKeys: activeReorderable,
-    activeThreads:
+    activeThreads: forDisplay(
       optimisticDrop?.section !== "active" || optimisticDrop.order === null
         ? sortedActive
         : orderItemsByPreferredIds({
@@ -730,14 +732,18 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
             preferredIds: optimisticDrop.order,
             getId: (thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
           }),
-    workingThreads: sortWorkingThreadsBySend(working),
-    snoozedThreads: snoozed.toSorted(
-      (left, right) =>
-        firstValidTimestampMs(left.snoozedUntil ?? null) -
-        firstValidTimestampMs(right.snoozedUntil ?? null),
     ),
-    settledThreads: sortSettledThreads(settled),
-    workspaceUnfilteredThreads: scoped,
+    workingThreads: forDisplay(sortedWorking),
+    snoozedThreads: forDisplay(sortedSnoozed),
+    settledThreads: forDisplay(sortedSettled),
+    // Every section-ordered thread: search deliberately escapes the workspace.
+    searchableThreads: [
+      ...pinned,
+      ...sortedActive,
+      ...sortedWorking,
+      ...sortedSnoozed,
+      ...sortedSettled,
+    ],
     snoozeNow: preciseNow,
   };
 }
@@ -3122,16 +3128,17 @@ export default function Sidebar() {
   const threadWorkspaces = useThreadWorkspaces();
   const threadWorkspacesRef = useRef(threadWorkspaces);
   const [dragOverWorkspaceId, setDragOverWorkspaceId] = useState<string | null>(null);
-  const [dragOverWorkspaceStrip, setDragOverWorkspaceStrip] = useState(false);
+  const [dragBelowThreadList, setDragBelowThreadList] = useState(false);
   const workspaceIconElementsRef = useRef(new Map<string, HTMLButtonElement>());
-  const workspaceStripElementRef = useRef<HTMLDivElement | null>(null);
   // dnd-kit's autoscroll keeps a running interval alive once it starts, so
-  // clearing the flag mid-drag is not enough: pin the list's offset while the
-  // pointer is over the strip and restore it on the way out.
-  const stripScrollGuardRef = useRef<{
+  // clearing its flag mid-drag is not enough: pin the list's offset whenever a
+  // drag is below the list (the strip and the rest of the footer) and restore
+  // it on the way out.
+  const listScrollGuardRef = useRef<{
     readonly element: HTMLElement;
     readonly scrollTop: number;
     raf: number;
+    release: () => void;
   } | null>(null);
   const registerWorkspaceIconElement = useStableCallback(
     (workspaceId: string, element: HTMLButtonElement | null) => {
@@ -3466,8 +3473,8 @@ export default function Sidebar() {
     dragSensorRef.current = null;
     contextDragKeyRef.current = null;
     setDragOverWorkspaceId(null);
-    setDragOverWorkspaceStrip(false);
-    stopStripScrollGuard();
+    setDragBelowThreadList(false);
+    stopListScrollGuard();
     endThreadContextDrag();
     if (started) {
       listMotionRef.current?.release();
@@ -3503,35 +3510,41 @@ export default function Sidebar() {
     }
     return null;
   };
-  const stopStripScrollGuard = () => {
-    const guard = stripScrollGuardRef.current;
+  const stopListScrollGuard = () => {
+    const guard = listScrollGuardRef.current;
     if (guard === null) return;
     cancelAnimationFrame(guard.raf);
+    window.removeEventListener("pointerup", guard.release);
+    window.removeEventListener("pointercancel", guard.release);
     guard.element.scrollTop = guard.scrollTop;
-    stripScrollGuardRef.current = null;
+    listScrollGuardRef.current = null;
   };
-  const startStripScrollGuard = () => {
-    if (stripScrollGuardRef.current !== null) return;
+  const startListScrollGuard = () => {
+    if (listScrollGuardRef.current !== null) return;
     const element = threadScroller();
     if (element === null) return;
-    const guard = { element, scrollTop: element.scrollTop, raf: 0 };
+    const guard = {
+      element,
+      scrollTop: element.scrollTop,
+      raf: 0,
+      // A drag that ends without its sensor reporting still has to release the
+      // pin, or the list would stay frozen.
+      release: () => stopListScrollGuard(),
+    };
     const pin = () => {
-      if (stripScrollGuardRef.current !== guard) return;
+      if (listScrollGuardRef.current !== guard) return;
       if (element.scrollTop !== guard.scrollTop) element.scrollTop = guard.scrollTop;
       guard.raf = requestAnimationFrame(pin);
     };
     guard.raf = requestAnimationFrame(pin);
-    stripScrollGuardRef.current = guard;
+    listScrollGuardRef.current = guard;
+    window.addEventListener("pointerup", guard.release, { once: true });
+    window.addEventListener("pointercancel", guard.release, { once: true });
   };
-  const pointerOverWorkspaceStrip = (point: { x: number; y: number }): boolean => {
-    const bounds = workspaceStripElementRef.current?.getBoundingClientRect();
-    if (bounds === undefined) return false;
-    return (
-      point.x >= bounds.left &&
-      point.x <= bounds.right &&
-      point.y >= bounds.top &&
-      point.y <= bounds.bottom
-    );
+  /** Everything below the list is drop-target territory, never a scroll zone. */
+  const pointerBelowThreadList = (point: { x: number; y: number }): boolean => {
+    const bounds = threadListRef.current?.getBoundingClientRect();
+    return bounds !== undefined && point.y > bounds.bottom;
   };
   /** Workspace icons live outside the thread list, so drags are hit-tested on release. */
   const workspaceIdAtPoint = (point: { x: number; y: number }): string | null => {
@@ -3550,15 +3563,24 @@ export default function Sidebar() {
     return null;
   };
   const moveThreadContextDrag = (point: { x: number; y: number }) => {
-    const overStrip = pointerOverWorkspaceStrip(point);
-    const overWorkspaceId = overStrip ? workspaceIdAtPoint(point) : null;
-    // The strip sits below the list, where dnd-kit would otherwise keep
-    // scrolling to reach more rows. Guarded so a drag across it re-renders
-    // only on the boundary, not on every pointer move.
-    setDragOverWorkspaceStrip((current) => (current === overStrip ? current : overStrip));
+    const belowList = pointerBelowThreadList(point);
+    const overWorkspaceId = belowList ? workspaceIdAtPoint(point) : null;
+    // Below the list, dnd-kit would otherwise keep scrolling to reach more
+    // rows. Guarded so a drag across the boundary re-renders only on the
+    // crossing, not on every pointer move.
+    setDragBelowThreadList((current) => (current === belowList ? current : belowList));
     setDragOverWorkspaceId((current) => (current === overWorkspaceId ? current : overWorkspaceId));
-    if (overStrip) startStripScrollGuard();
-    else stopStripScrollGuard();
+    if (belowList) startListScrollGuard();
+    else stopListScrollGuard();
+    if (belowList) {
+      // Below the list the drop files into a workspace rather than providing
+      // chat context, but the ghost still names the thread being moved.
+      const threads = contextDragThreads();
+      const title =
+        threadByKeyRef.current.get(contextDragKeyRef.current ?? "")?.title.trim() || "Thread";
+      moveThreadContextDragGhost(point, { title, count: threads.length });
+      return true;
+    }
     const contextDrag = pointerOutsideThreadList(point);
     setDragState((current) =>
       current === null || current.contextDrag === contextDrag
@@ -3576,11 +3598,11 @@ export default function Sidebar() {
     return true;
   };
   const dropThreadContextDrag = (point: { x: number; y: number }) => {
-    const overStrip = pointerOverWorkspaceStrip(point);
-    const overWorkspaceId = overStrip ? workspaceIdAtPoint(point) : null;
-    setDragOverWorkspaceStrip(false);
+    const belowList = pointerBelowThreadList(point);
+    const overWorkspaceId = belowList ? workspaceIdAtPoint(point) : null;
+    setDragBelowThreadList(false);
     setDragOverWorkspaceId(null);
-    stopStripScrollGuard();
+    stopListScrollGuard();
     if (overWorkspaceId !== null) {
       threadWorkspacesRef.current.assignThreads(
         contextDragThreads().map(scopedThreadKey),
@@ -3588,9 +3610,9 @@ export default function Sidebar() {
       );
       return true;
     }
-    // Over the strip but not on an icon: consume the drop so releasing here
+    // Below the list but not on an icon: consume the drop so releasing here
     // neither reorders the list nor attaches chat context.
-    if (overStrip) return true;
+    if (belowList) return true;
     if (!pointerOutsideThreadList(point)) return false;
     dropThreadContext(point, contextDragThreads());
     return true;
@@ -5026,7 +5048,7 @@ export default function Sidebar() {
             >
               <DndContext
                 sensors={dndSensors}
-                autoScroll={!isContextDrag && !dragOverWorkspaceStrip}
+                autoScroll={!isContextDrag && !dragBelowThreadList}
                 collisionDetection={dndCollisionDetection}
                 modifiers={dndModifiers}
                 onDragStart={handleThreadDragStart}
@@ -5346,24 +5368,20 @@ export default function Sidebar() {
       <SidebarChromeFooter
         workspacesSlot={
           threadWorkspaces.enabled ? (
-            // Measured during a drag so the list stops autoscrolling once the
-            // pointer is over the strip below it.
-            <div ref={workspaceStripElementRef}>
-              <ThreadWorkspaceStrip
-                activeWorkspaceId={threadWorkspaces.activeWorkspaceId}
-                attentionByWorkspace={workspaceAttention.byWorkspace}
-                attentionTotal={workspaceAttention.total}
-                dragOverWorkspaceId={dragOverWorkspaceId}
-                onCreate={() => threadWorkspaces.createWorkspace("Workspace")}
-                onDelete={(workspaceId) => threadWorkspaces.deleteWorkspace(workspaceId)}
-                onSelect={(workspaceId) => threadWorkspaces.setActiveWorkspaceId(workspaceId)}
-                onUpdate={(workspaceId, patch) =>
-                  threadWorkspaces.updateWorkspace(workspaceId, patch)
-                }
-                registerIconElement={registerWorkspaceIconElement}
-                workspaces={threadWorkspaces.workspaces}
-              />
-            </div>
+            <ThreadWorkspaceStrip
+              activeWorkspaceId={threadWorkspaces.activeWorkspaceId}
+              attentionByWorkspace={workspaceAttention.byWorkspace}
+              attentionTotal={workspaceAttention.total}
+              dragOverWorkspaceId={dragOverWorkspaceId}
+              onCreate={() => threadWorkspaces.createWorkspace("Workspace")}
+              onDelete={(workspaceId) => threadWorkspaces.deleteWorkspace(workspaceId)}
+              onSelect={(workspaceId) => threadWorkspaces.setActiveWorkspaceId(workspaceId)}
+              onUpdate={(workspaceId, patch) =>
+                threadWorkspaces.updateWorkspace(workspaceId, patch)
+              }
+              registerIconElement={registerWorkspaceIconElement}
+              workspaces={threadWorkspaces.workspaces}
+            />
           ) : null
         }
       />
