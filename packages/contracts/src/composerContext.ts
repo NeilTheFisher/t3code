@@ -28,6 +28,7 @@ export const COMPOSER_CONTEXT_KINDS = [
   "thread",
   "environment",
   "response",
+  "commit",
 ] as const;
 export type KnownComposerContextKind = (typeof COMPOSER_CONTEXT_KINDS)[number];
 
@@ -81,6 +82,17 @@ export const PullRequestContextMetadata = Schema.Struct({
   isDraft: Schema.Boolean,
 });
 export type PullRequestContextMetadata = typeof PullRequestContextMetadata.Type;
+
+/** A commit the user pointed the agent at, with the threads that produced it. */
+export const CommitContextMetadata = Schema.Struct({
+  sha: TrimmedNonEmptyString.check(Schema.isMaxLength(64)),
+  subject: ShortString,
+  repositoryPath: TrimmedNonEmptyString.check(Schema.isMaxLength(2_048)),
+  threadIds: Schema.Array(TrimmedNonEmptyString.check(Schema.isMaxLength(128))).check(
+    Schema.isMaxLength(50),
+  ),
+});
+export type CommitContextMetadata = typeof CommitContextMetadata.Type;
 
 const recordBase = {
   version: Schema.Literal(1),
@@ -226,6 +238,15 @@ export const EnvironmentContextRecord = Schema.Struct({
   environmentId: EnvironmentId,
 });
 export type EnvironmentContextRecord = typeof EnvironmentContextRecord.Type;
+export const CommitContextRecord = Schema.Struct({
+  ...recordBase,
+  kind: Schema.Literal("commit"),
+  sha: CommitContextMetadata.fields.sha,
+  subject: CommitContextMetadata.fields.subject,
+  repositoryPath: CommitContextMetadata.fields.repositoryPath,
+  threadIds: CommitContextMetadata.fields.threadIds,
+});
+export type CommitContextRecord = typeof CommitContextRecord.Type;
 
 /**
  * An earlier assistant response the user is replying to. Only its identity and opening travel:
@@ -283,6 +304,7 @@ export const KnownComposerContextRecord = Schema.Union([
   ThreadContextRecord,
   EnvironmentContextRecord,
   ResponseContextRecord,
+  CommitContextRecord,
 ]);
 export type KnownComposerContextRecord = typeof KnownComposerContextRecord.Type;
 

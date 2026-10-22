@@ -55,6 +55,8 @@ const DEFINITIONS = [
   {
     kind: "response",
     capabilities: { details: "none", expanded: "inline-block", defaultDraftView: "compact" },
+    kind: "commit",
+    capabilities: { details: "tooltip", expanded: "none", defaultDraftView: "compact" },
   },
 ] as const satisfies ReadonlyArray<ContextPresentationDefinition>;
 
