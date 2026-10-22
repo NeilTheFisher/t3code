@@ -7969,6 +7969,16 @@ export default function ChatView(props: ChatViewProps) {
     onDiffPanelOpen?.();
   };
   const onOpenCommitRangeDiffStable = useStableCallback(onOpenCommitRangeDiff);
+  const onOpenWorkingTreeDiff = () => {
+    if (!activeThreadRef) return;
+    const diffOpen =
+      selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, activeThreadRef) === "diff";
+    explicitDiffOpenRef.current = diffOpen ? null : activeThreadRef;
+    useDiffPanelStore.getState().selectGitScope(activeThreadRef, "unstaged");
+    useRightPanelStore.getState().open(activeThreadRef, "diff");
+    onDiffPanelOpen?.();
+  };
+  const onOpenWorkingTreeDiffStable = useStableCallback(onOpenWorkingTreeDiff);
   const onTimelineRollbackCheckpoint = (input: {
     readonly checkpointId: string;
     readonly scopeId: string;
@@ -8042,6 +8052,7 @@ export default function ChatView(props: ChatViewProps) {
       onSendAnnotation={sendPreviewAnnotationStable}
       onCloseSurface={closeRightPanelSurface}
       onOpenCommitRangeDiff={onOpenCommitRangeDiffStable}
+      onOpenWorkingTreeDiff={onOpenWorkingTreeDiffStable}
       terminal={{
         launchContext: activeTerminalLaunchContext ?? null,
         focusRequestId: terminalFocusRequestId,

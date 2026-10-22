@@ -585,6 +585,7 @@ it("restores the selected PR tab when switching threads and remounting the right
         onSendAnnotation={() => {}}
         onCloseSurface={() => {}}
         onOpenCommitRangeDiff={() => {}}
+        onOpenWorkingTreeDiff={() => {}}
         terminal={{
           launchContext: null,
           focusRequestId: 0,

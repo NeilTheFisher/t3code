@@ -22,6 +22,7 @@ import {
   AuthSourceControlWriteScope,
   type ContextMenuItem,
   type EnvironmentId,
+  type VcsGraphWorkingTree,
   type VcsLogGraphResult,
 } from "@t3tools/contracts";
 import {
@@ -336,6 +337,9 @@ function CommitRow(props: {
   threadColor: (id: string) => string;
   onSelect: (event: ReactMouseEvent) => void;
   onOpenDiff: () => void;
+  /** The checkout's uncommitted state, shown on the checked-out commit. */
+  uncommitted: VcsGraphWorkingTree | null;
+  onOpenWorkingTreeDiff: () => void;
   /** Null when the panel has no resolved checkout, which a commit chip requires. */
   repositoryPath: string | null;
   onFilterThread: (id: string) => void;
@@ -352,6 +356,8 @@ function CommitRow(props: {
     threadColor,
     onSelect,
     onOpenDiff,
+    uncommitted,
+    onOpenWorkingTreeDiff,
     repositoryPath,
     onFilterThread,
     onOpenMenu,
@@ -437,6 +443,21 @@ function CommitRow(props: {
         <div className="flex min-w-0 items-center gap-1.5">
           {isHead ? (
             <RefBadge kind="head" name="HEAD" current className="@max-[26rem]/graph:hidden" />
+          ) : null}
+          {isHead && uncommitted !== null ? (
+            <button
+              type="button"
+              aria-label={`Open ${uncommitted.changedFiles} uncommitted changes`}
+              title={`${uncommitted.changedFiles} uncommitted path(s), +${uncommitted.additions} -${uncommitted.deletions}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                onOpenWorkingTreeDiff();
+              }}
+              className="inline-flex shrink-0 items-center gap-1 rounded-sm border border-warning/25 bg-warning/10 px-1 py-px text-3xs leading-4 font-medium text-warning-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            >
+              <span aria-hidden className="size-1.5 rounded-full bg-warning" />
+              {uncommitted.changedFiles} uncommitted
+            </button>
           ) : null}
           {commit.refs
             .filter((ref) => ref.kind !== "head")
@@ -603,8 +624,10 @@ export function GitGraphPanel(props: {
   readonly environmentId: EnvironmentId;
   readonly cwd: string | null;
   readonly onOpenCommitDiff: (range: { from: string; to: string; label: string }) => void;
+  readonly onOpenWorkingTreeDiff: () => void;
 }) {
   const [graph, setGraph] = useState<VcsLogGraphResult | null>(null);
+  const [workingTree, setWorkingTree] = useState<VcsGraphWorkingTree | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
@@ -650,6 +673,7 @@ export function GitGraphPanel(props: {
           if (cancelled) return;
           if (result._tag === "Success") {
             setGraph(result.value);
+            setWorkingTree(result.value.workingTree ?? null);
             setLoading(false);
             setLoadingMore(false);
             return;
@@ -1065,6 +1089,8 @@ export function GitGraphPanel(props: {
                       selectCommit(commit.sha, event.shiftKey || event.metaKey || event.ctrlKey)
                     }
                     onOpenDiff={() => openSelectedDiff(commit)}
+                    uncommitted={workingTree}
+                    onOpenWorkingTreeDiff={props.onOpenWorkingTreeDiff}
                     repositoryPath={props.cwd}
                     onFilterThread={(id) => applyFilter(filterThreadId === id ? null : id)}
                     onOpenMenu={(commit, position) => {

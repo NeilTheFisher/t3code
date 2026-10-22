@@ -313,11 +313,26 @@ export const VcsLogGraphInput = Schema.Struct({
 });
 export type VcsLogGraphInput = typeof VcsLogGraphInput.Type;
 
+/**
+ * The checkout's uncommitted state, so the graph can mark the working tree
+ * without inventing a commit row for it. `changedFiles` counts every path git
+ * reports (staged, unstaged and untracked); the line counts cover tracked
+ * changes only, which is what `git diff HEAD` can measure.
+ */
+export const VcsGraphWorkingTree = Schema.Struct({
+  changedFiles: NonNegativeInt,
+  additions: NonNegativeInt,
+  deletions: NonNegativeInt,
+});
+export type VcsGraphWorkingTree = typeof VcsGraphWorkingTree.Type;
+
 export const VcsLogGraphResult = Schema.Struct({
   commits: Schema.Array(VcsGraphCommit),
   currentBranch: Schema.NullOr(TrimmedNonEmptyStringSchema),
   truncated: Schema.Boolean,
   isRepo: Schema.Boolean,
+  /** Absent when the checkout is clean or its state could not be read. */
+  workingTree: Schema.optionalKey(VcsGraphWorkingTree),
 });
 export type VcsLogGraphResult = typeof VcsLogGraphResult.Type;
 

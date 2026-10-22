@@ -3920,8 +3920,48 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       );
       const currentBranch = branch.exitCode === 0 ? branch.stdout.trim() : null;
 
+      // The graph marks the working tree rather than inventing a commit for it.
+      // Porcelain output quotes paths that need it, so counting lines is safe;
+      // the line totals come from the tracked diff, which `HEAD` can measure.
+      const workingTreeResult = yield* executeGit(
+        "GitVcsDriver.logGraph.workingTree",
+        input.cwd,
+        ["status", "--porcelain"],
+        { allowNonZeroExit: true, maxOutputBytes: 4_000_000 },
+      );
+      const numstatResult = yield* executeGit(
+        "GitVcsDriver.logGraph.workingTree.numstat",
+        input.cwd,
+        ["diff", "--numstat", "HEAD"],
+        { allowNonZeroExit: true, maxOutputBytes: REVIEW_METADATA_MAX_OUTPUT_BYTES },
+      );
+      const workingTree = (() => {
+        if (workingTreeResult.exitCode !== 0) return undefined;
+        const changedFiles = workingTreeResult.stdout
+          .split("\n")
+          .filter((line) => line.trim().length > 0).length;
+        if (changedFiles === 0) return undefined;
+        let additions = 0;
+        let deletions = 0;
+        if (numstatResult.exitCode === 0) {
+          for (const line of numstatResult.stdout.split("\n")) {
+            const [added = "", removed = ""] = line.split("\t");
+            // Binary files report "-" instead of a count.
+            if (/^\d+$/.test(added)) additions += Number(added);
+            if (/^\d+$/.test(removed)) deletions += Number(removed);
+          }
+        }
+        return { changedFiles, additions, deletions };
+      })();
+
       if (log.exitCode !== 0) {
-        return { commits: [], currentBranch, truncated: false, isRepo: true };
+        return {
+          commits: [],
+          currentBranch,
+          truncated: false,
+          isRepo: true,
+          ...(workingTree ? { workingTree } : {}),
+        };
       }
 
       const parsed: Array<{
@@ -3952,6 +3992,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         currentBranch: currentBranch !== null && currentBranch.length > 0 ? currentBranch : null,
         truncated: parsed.length > limit,
         isRepo: true,
+        ...(workingTree ? { workingTree } : {}),
       };
     },
   );
