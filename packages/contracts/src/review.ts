@@ -3,6 +3,13 @@ import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { GitCommandError } from "./git.ts";
 import { VcsError } from "./vcs.ts";
 
+export const ReviewDiffPreviewSubmodule = Schema.Struct({
+  path: TrimmedNonEmptyString,
+  from: TrimmedNonEmptyString,
+  to: TrimmedNonEmptyString,
+});
+export type ReviewDiffPreviewSubmodule = typeof ReviewDiffPreviewSubmodule.Type;
+
 export const ReviewDiffPreviewCommitRange = Schema.Struct({
   from: TrimmedNonEmptyString,
   to: TrimmedNonEmptyString,
@@ -15,6 +22,8 @@ export const ReviewDiffPreviewInput = Schema.Struct({
   commitSha: Schema.optional(TrimmedNonEmptyString),
   /** Set to preview a commit range instead of the working tree or a branch. */
   commitRange: Schema.optionalKey(ReviewDiffPreviewCommitRange),
+  /** Set to preview a submodule's own history instead of the parent repository. */
+  submodule: Schema.optionalKey(ReviewDiffPreviewSubmodule),
   ignoreWhitespace: Schema.optionalKey(Schema.Boolean),
   sourceKind: Schema.optionalKey(
     Schema.Literals(["working-tree", "branch-range", "commit", "commit-range"]),
@@ -25,7 +34,13 @@ export const ReviewDiffPreviewInput = Schema.Struct({
     Schema.Struct({
       path: Schema.NonEmptyString,
       previousPath: Schema.NullOr(Schema.NonEmptyString),
-      sourceKind: Schema.Literals(["working-tree", "branch-range", "commit", "commit-range"]),
+      sourceKind: Schema.Literals([
+        "working-tree",
+        "branch-range",
+        "commit",
+        "commit-range",
+        "submodule-range",
+      ]),
     }),
   ),
 });
@@ -54,6 +69,7 @@ export const ReviewDiffPreviewSourceKind = Schema.Literals([
   "branch-range",
   "commit",
   "commit-range",
+  "submodule-range",
 ]);
 export type ReviewDiffPreviewSourceKind = typeof ReviewDiffPreviewSourceKind.Type;
 
@@ -86,6 +102,8 @@ export type ReviewDiffPreviewSource = typeof ReviewDiffPreviewSource.Type;
 export const ReviewDiffFileContentsInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   sourceKind: ReviewDiffPreviewSourceKind,
+  /** The submodule to read inside when `sourceKind` is `submodule-range`. */
+  submodulePath: Schema.optionalKey(TrimmedNonEmptyString),
   changeType: Schema.Literals(["change", "rename-pure", "rename-changed", "new", "deleted"]),
   baseRef: Schema.NullOr(TrimmedNonEmptyString),
   headRef: Schema.NullOr(TrimmedNonEmptyString),
