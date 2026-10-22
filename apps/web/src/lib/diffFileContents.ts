@@ -21,6 +21,8 @@ interface GitDiffFileContentsSource {
   readonly sourceKind: ReviewDiffPreviewSourceKind;
   readonly baseRef: string | null;
   readonly headRef: string | null;
+  /** Set when the source is a submodule range, so the read happens inside it. */
+  readonly submodulePath?: string | undefined;
   readonly cacheKey: string;
 }
 
@@ -87,6 +89,7 @@ export function createGitDiffFileContentsLoader<E>(
         changeType,
         baseRef: source.baseRef,
         headRef: source.headRef,
+        ...(source.submodulePath ? { submodulePath: source.submodulePath } : {}),
         oldPath,
         newPath,
       },
