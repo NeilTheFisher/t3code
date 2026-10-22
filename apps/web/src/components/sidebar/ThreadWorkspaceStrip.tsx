@@ -94,10 +94,13 @@ function WorkspaceGlyph({ icon, className }: { icon: string; className?: string 
 
 function AttentionBadge({ count }: { count: number }) {
   if (count <= 0) return null;
+  // The app's one strong accent, the same token the send button uses. A count
+  // badge means "this needs you", not "this workspace", so it is deliberately
+  // identical on every workspace rather than following the workspace tint.
   return (
     <span
       aria-hidden="true"
-      className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-error px-1 text-3xs leading-none font-semibold text-error-foreground tabular-nums"
+      className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-3xs leading-none font-semibold text-primary-foreground tabular-nums"
     >
       {formatThreadWorkspaceAttentionCount(count)}
     </span>
