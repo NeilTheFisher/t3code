@@ -215,6 +215,7 @@ import {
   resolveSidebarThreadSection,
   resolveSidebarRowAccessibility,
   type SidebarDropVerb,
+  isSidebarSubagentThread,
   resolveSidebarThreadStatus,
   resolveThreadLastVisitedAt,
   searchSidebarThreads,
@@ -290,6 +291,7 @@ import {
   filterThreadsByWorkspace,
   orderThreadWorkspaceSearch,
   resolveAssignedWorkspaceId,
+  threadNeedsWorkspaceAttention,
   type ThreadWorkspaceAssignments,
 } from "./sidebar/threadWorkspaces";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuShortcut, MenuTrigger } from "./ui/menu";
@@ -481,24 +483,17 @@ function useSidebarThreads(input: {
         activeWorkspaceId: threadWorkspaces.activeWorkspaceId,
       }
     : null;
-  const workspaceAttention = countThreadWorkspaceAttention(threads, {
-    assignments: threadWorkspaces.assignments,
-    workspaces: threadWorkspaces.workspaces,
-    // Mirrors the status pill each row renders, so the number always equals the
-    // flags the user can count in that workspace. The muted "Waiting" pill an
-    // idle thread shows is deliberately not a signal.
-    needsAttention: (thread) => {
-      const status = resolveSidebarThreadStatus(thread);
-      if (status === "waiting") return false;
-      if (status !== "ready") return true;
-      const wokeAt = threadWokeAt(thread, { now: new Date().toISOString() });
-      if (wokeAt !== null && thread.settledOverride !== "settled") {
-        const lastVisited = thread.lastVisitedAt ?? null;
-        if (lastVisited === null || Date.parse(lastVisited) < Date.parse(wokeAt)) return true;
-      }
-      return hasUnseenCompletion({ ...thread, lastVisitedAt: thread.lastVisitedAt ?? null });
+  // Counted over the threads that can actually render a row: a badge for an
+  // archived thread, or one folded into a subagent's row, would name a thread
+  // the user cannot see or act on.
+  const workspaceAttention = countThreadWorkspaceAttention(
+    threads.filter((thread) => thread.archivedAt === null && !isSidebarSubagentThread(thread)),
+    {
+      assignments: threadWorkspaces.assignments,
+      workspaces: threadWorkspaces.workspaces,
+      needsAttention: threadNeedsWorkspaceAttention,
     },
-  });
+  );
   const routeRowThreadKey =
     routeThreadRef === null
       ? null
@@ -3134,9 +3129,9 @@ export default function Sidebar() {
   // clearing its flag mid-drag is not enough: pin the list's offset whenever a
   // drag is below the list (the strip and the rest of the footer) and restore
   // it on the way out.
+  const listViewportRef = useRef<HTMLElement | null>(null);
   const listScrollGuardRef = useRef<{
-    readonly element: HTMLElement;
-    readonly scrollTop: number;
+    readonly entries: ReadonlyArray<{ element: HTMLElement; scrollTop: number }>;
     raf: number;
     release: () => void;
   } | null>(null);
@@ -3501,14 +3496,32 @@ export default function Sidebar() {
     const bounds = threadListRef.current?.getBoundingClientRect();
     return bounds !== undefined && (point.x < bounds.left || point.x > bounds.right);
   };
-  const threadScroller = (): HTMLElement | null => {
-    let node: HTMLElement | null = threadListRef.current;
+  /**
+   * Every scrollable box that could move while a drag sits below the list. The
+   * sidebar subtree is scanned, not just the list's ancestors, because which
+   * element dnd-kit autoscrolls depends on the layout (its own scrollable
+   * ancestors).
+   */
+  const threadScrollers = (): ReadonlyArray<{ element: HTMLElement; scrollTop: number }> => {
+    const scrollers: Array<{ element: HTMLElement; scrollTop: number }> = [];
+    const seen = new Set<HTMLElement>();
+    const add = (candidate: Element | null | undefined) => {
+      if (!(candidate instanceof HTMLElement) || seen.has(candidate)) return;
+      const overflowY = getComputedStyle(candidate).overflowY;
+      if (!/(auto|scroll)/.test(overflowY)) return;
+      if (candidate.scrollHeight <= candidate.clientHeight + 4) return;
+      seen.add(candidate);
+      scrollers.push({ element: candidate, scrollTop: candidate.scrollTop });
+    };
+    let node: HTMLElement | null = threadListRef.current?.parentElement ?? null;
     while (node !== null) {
-      const overflowY = getComputedStyle(node).overflowY;
-      if (/(auto|scroll)/.test(overflowY) && node.scrollHeight > node.clientHeight + 4) return node;
+      add(node);
       node = node.parentElement;
     }
-    return null;
+    const root = threadListRef.current?.closest('[data-sidebar="sidebar"]') ?? null;
+    if (root !== null) for (const candidate of root.querySelectorAll("*")) add(candidate);
+    add(threadListRef.current?.ownerDocument.scrollingElement);
+    return scrollers;
   };
   const stopListScrollGuard = () => {
     const guard = listScrollGuardRef.current;
@@ -3516,16 +3529,15 @@ export default function Sidebar() {
     cancelAnimationFrame(guard.raf);
     window.removeEventListener("pointerup", guard.release);
     window.removeEventListener("pointercancel", guard.release);
-    guard.element.scrollTop = guard.scrollTop;
+    for (const entry of guard.entries) entry.element.scrollTop = entry.scrollTop;
     listScrollGuardRef.current = null;
   };
   const startListScrollGuard = () => {
     if (listScrollGuardRef.current !== null) return;
-    const element = threadScroller();
-    if (element === null) return;
+    const entries = threadScrollers();
+    if (entries.length === 0) return;
     const guard = {
-      element,
-      scrollTop: element.scrollTop,
+      entries,
       raf: 0,
       // A drag that ends without its sensor reporting still has to release the
       // pin, or the list would stay frozen.
@@ -3533,7 +3545,9 @@ export default function Sidebar() {
     };
     const pin = () => {
       if (listScrollGuardRef.current !== guard) return;
-      if (element.scrollTop !== guard.scrollTop) element.scrollTop = guard.scrollTop;
+      for (const entry of entries) {
+        if (entry.element.scrollTop !== entry.scrollTop) entry.element.scrollTop = entry.scrollTop;
+      }
       guard.raf = requestAnimationFrame(pin);
     };
     guard.raf = requestAnimationFrame(pin);
@@ -3541,9 +3555,27 @@ export default function Sidebar() {
     window.addEventListener("pointerup", guard.release, { once: true });
     window.addEventListener("pointercancel", guard.release, { once: true });
   };
-  /** Everything below the list is drop-target territory, never a scroll zone. */
+  /**
+   * The list's scroll viewport, cached: the <ul> is as tall as its content, so
+   * its own rect reaches far below the visible list and cannot stand in for it.
+   */
+  const listViewport = (): HTMLElement | null => {
+    const cached = listViewportRef.current;
+    if (cached !== null && cached.isConnected) return cached;
+    let node: HTMLElement | null = threadListRef.current?.parentElement ?? null;
+    while (node !== null) {
+      const overflowY = getComputedStyle(node).overflowY;
+      if (/(auto|scroll)/.test(overflowY) && node.scrollHeight > node.clientHeight + 4) {
+        listViewportRef.current = node;
+        return node;
+      }
+      node = node.parentElement;
+    }
+    return null;
+  };
+  /** Everything below the visible list is drop-target territory, never a scroll zone. */
   const pointerBelowThreadList = (point: { x: number; y: number }): boolean => {
-    const bounds = threadListRef.current?.getBoundingClientRect();
+    const bounds = (listViewport() ?? threadListRef.current)?.getBoundingClientRect();
     return bounds !== undefined && point.y > bounds.bottom;
   };
   /** Workspace icons live outside the thread list, so drags are hit-tested on release. */
