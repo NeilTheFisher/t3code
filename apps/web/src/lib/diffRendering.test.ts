@@ -12,6 +12,36 @@ import {
   resolveFileDiffPreviousPath,
 } from "./diffRendering";
 
+describe("getRenderablePatch", () => {
+  const hunkCounts = (patch: string) => {
+    const renderable = getRenderablePatch(patch, "test:trailing-blank-lines");
+    const file = renderable?.kind === "files" ? renderable.files[0] : undefined;
+    return file?.hunks.map((hunk) => [hunk.deletionCount, hunk.additionCount]) ?? [];
+  };
+
+  it("keeps a hunk's trailing blank context lines", () => {
+    // The file ends with two empty lines, so its hunk ends with two context
+    // lines that are nothing but a space.
+    const patch = [
+      "diff --git a/a.py b/a.py",
+      "index 1111111..2222222 100644",
+      "--- a/a.py",
+      "+++ b/a.py",
+      "@@ -1,5 +1,5 @@",
+      " line 1",
+      "-line 2",
+      "+changed 2",
+      " line 3",
+      " ",
+      " ",
+    ].join("\n");
+
+    expect(hunkCounts(patch)).toEqual([[5, 5]]);
+    // Trimming those lines is what made the parser read the hunk short.
+    expect(hunkCounts(patch.trim())).toEqual([[3, 3]]);
+  });
+});
+
 describe("buildPatchCacheKey", () => {
   it("normalizes outer whitespace before hashing", () => {
     const patch = "diff --git a/a.ts b/a.ts\n+console.log('hello')";
