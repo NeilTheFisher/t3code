@@ -34,7 +34,11 @@ import { useEnvironmentScope } from "~/state/session";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { vcsEnvironment } from "~/state/vcs";
 
-import { COMPOSER_MENTION_DRAG_TYPE } from "../components/chat/composerMentionDrag";
+import {
+  COMPOSER_COMMIT_DRAG_TYPE,
+  COMPOSER_MENTION_DRAG_TYPE,
+  encodeCommitDragPayload,
+} from "../components/chat/composerMentionDrag";
 import { PullRequestGlyph } from "../components/pullRequest/pullRequestIcons";
 import { Button } from "../components/ui/button";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
@@ -44,6 +48,7 @@ import {
   graphSelectionEdge,
   resolveGraphSelection,
   selectionDiffRange,
+  shortSha,
   type GraphSelectionEdge,
 } from "./graphSelection";
 import type { MockCommit, MockGraphData, MockThread, MockWorktree } from "./mockGraph";
@@ -344,6 +349,8 @@ function CommitRow(props: {
   threadColor: (id: string) => string;
   onSelect: (event: ReactMouseEvent) => void;
   onOpenDiff: () => void;
+  /** Null when the panel has no resolved checkout, which a commit chip requires. */
+  repositoryPath: string | null;
   onFilterThread: (id: string) => void;
   onOpenMenu: (commit: MockCommit, position: { x: number; y: number }) => void;
 }) {
@@ -358,6 +365,7 @@ function CommitRow(props: {
     threadColor,
     onSelect,
     onOpenDiff,
+    repositoryPath,
     onFilterThread,
     onOpenMenu,
   } = props;
@@ -377,7 +385,20 @@ function CommitRow(props: {
       draggable
       onDragStart={(event) => {
         event.dataTransfer.effectAllowed = "move";
-        event.dataTransfer.setData("text/plain", commit.sha);
+        event.dataTransfer.setData("text/plain", commitDragText({ ...commit, threads }));
+        // Without a repository the commit chip would carry nothing the agent
+        // could act on, so the drag falls back to its text form.
+        if (repositoryPath !== null && repositoryPath.trim().length > 0) {
+          event.dataTransfer.setData(
+            COMPOSER_COMMIT_DRAG_TYPE,
+            encodeCommitDragPayload({
+              sha: commit.sha,
+              subject: commit.subject,
+              repositoryPath: repositoryPath.trim(),
+              threadIds: threads.map((thread) => thread.id),
+            }),
+          );
+        }
         event.dataTransfer.setData(
           COMPOSER_MENTION_DRAG_TYPE,
           commitDragText({
@@ -388,7 +409,7 @@ function CommitRow(props: {
         // A native drag image reads as a real object being moved instead of the
         // browser's default row snapshot, matching the sidebar's thread ghost.
         const ghost = document.createElement("div");
-        ghost.textContent = `${commit.sha.slice(0, 8)}  ${commit.subject}`;
+        ghost.textContent = `${shortSha(commit.sha)}  ${commit.subject}`;
         Object.assign(ghost.style, {
           position: "fixed",
           top: "-1000px",
@@ -1059,6 +1080,7 @@ export function GitGraphPanel(props: {
                     selectCommit(commit.sha, event.shiftKey || event.metaKey || event.ctrlKey)
                   }
                   onOpenDiff={() => openSelectedDiff(commit)}
+                  repositoryPath={props.cwd}
                   onFilterThread={(id) => applyFilter(filterThreadId === id ? null : id)}
                   onOpenMenu={(commit, position) => {
                     void openCommitMenu(commit, position);
