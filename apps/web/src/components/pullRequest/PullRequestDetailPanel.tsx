@@ -1462,6 +1462,8 @@ export function PullRequestDetailPanel({
   const selectedMergeMethodLabel = PULL_REQUEST_MERGE_METHOD_LABELS[selectedMergeMethod];
   const pendingAutoMergeLabel = `Auto-merge (${selectedMergeMethodLabel.toLowerCase()})`;
   const conflicting = detail?.state === "open" && detail.mergeability === "conflicting";
+  const isGerrit = detail?.provider === "gerrit";
+  const submittable = !isGerrit || detail?.mergeability === "mergeable";
   const autoMergeArmed = detail?.state === "open" && detail.autoMergeEnabled === true;
   const armedMergeMethod = detail?.autoMergeMethod;
   const armedAutoMergeLabel = armedMergeMethod
@@ -1502,7 +1504,7 @@ export function PullRequestDetailPanel({
         checksState,
         autoMergeEnabled: detail.autoMergeEnabled,
         hasMergeMethod: allowedMergeMethods.length > 0,
-        canMerge: canMergeSinglePullRequest && can("merge"),
+        canMerge: canMergeSinglePullRequest && can("merge") && submittable,
         canMarkReady: can("ready"),
         canEnableAutoMerge: canMergeSinglePullRequest && can("enable-auto-merge"),
       })
@@ -1519,6 +1521,7 @@ export function PullRequestDetailPanel({
         primaryAction !== "enable-auto-merge" &&
         !detail.isDraft &&
         !conflicting &&
+        submittable &&
         can("enable-auto-merge") &&
         allowedMergeMethods.length > 0));
   const showsMergeNow =
@@ -1528,12 +1531,14 @@ export function PullRequestDetailPanel({
     can("merge") &&
     !detail.isDraft &&
     !conflicting &&
+    submittable &&
     allowedMergeMethods.length > 0;
   const showsMergeMethods =
     detail?.state === "open" &&
     can("merge") &&
     !detail.isDraft &&
     !conflicting &&
+    submittable &&
     allowedMergeMethods.length > 1;
   const statePresentation = detail
     ? resolvePullRequestState({ state: detail.state, isDraft: detail.isDraft })

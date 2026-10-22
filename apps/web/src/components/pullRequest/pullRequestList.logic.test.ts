@@ -1584,15 +1584,32 @@ describe("pull request quick actions", () => {
       host: "bitbucket.org",
       provider: SourceControlProviderKind.make("bitbucket"),
     });
-    expect(pullRequestQuickActions({ state: "closed", isDraft: false }, bitbucket)).toEqual([]);
+    expect(
+      pullRequestQuickActions(
+        {
+          state: "closed",
+          isDraft: false,
+          provider: SourceControlProviderKind.make("bitbucket"),
+          mergeability: "mergeable",
+        },
+        bitbucket,
+      ),
+    ).toEqual([]);
     const github = actionsOf({
       host: "github.com",
       provider: SourceControlProviderKind.make("github"),
     });
-    expect(pullRequestQuickActions({ state: "open", isDraft: true }, github)).toEqual([
-      "close",
-      "ready",
-    ]);
+    expect(
+      pullRequestQuickActions(
+        {
+          state: "open",
+          isDraft: true,
+          provider: SourceControlProviderKind.make("github"),
+          mergeability: "mergeable",
+        },
+        github,
+      ),
+    ).toEqual(["close", "ready"]);
   });
 });
 
