@@ -274,6 +274,9 @@ export function getRenderablePatch(
   if (!patch?.trim()) return null;
 
   try {
+    // Parse the patch exactly as git wrote it. Trimming strips a hunk's trailing
+    // blank context lines (a context line for an empty file line is just a
+    // space), and the parser then reads that hunk shorter than its header claims.
     const parsedPatches = parsePatchFiles(patch, buildPatchCacheKey(patch, cacheScope));
     const sourceFiles = parsedPatches.flatMap((parsedPatch) => parsedPatch.files);
     const binaryPaths = extractBinaryPatchPaths(normalizedPatch);
