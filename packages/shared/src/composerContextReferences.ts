@@ -286,6 +286,21 @@ function formatComposerContextProviderPayload(record: KnownComposerContextRecord
         `environmentId: ${record.environmentId}`,
         "The user means this machine. Not linked here yet: call t3_environment_link with this environmentId. Linked: pass it as environmentId, or target.environmentId for delegate_task.",
       ].join("\n");
+    case "commit": {
+      const lines = [
+        `commit: ${record.sha}`,
+        `subject: ${record.subject}`,
+        `repository: ${record.repositoryPath}`,
+        "The user attached this commit from the app's git graph. Inspect it with git against that repository.",
+      ];
+      if (record.threadIds.length > 0) {
+        lines.push(
+          `threads: ${record.threadIds.join(", ")}`,
+          "These threads produced the commit; read them with t3_thread_read(threadId).",
+        );
+      }
+      return lines.join("\n");
+    }
   }
 }
 
