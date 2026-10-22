@@ -6,11 +6,14 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
+import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import type { ReviewDiffPreviewSourceKind, ScopedThreadRef, RunId } from "@t3tools/contracts";
 import {
   ArrowRightIcon,
   CheckIcon,
   ChevronDownIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
   Columns2Icon,
   FolderTreeIcon,
   PilcrowIcon,
@@ -254,6 +257,9 @@ export default function DiffPanel({
   );
   const diffSelection = useDiffPanelStore((state) =>
     selectThreadDiffPanelSelection(state.byThreadKey, routeThreadRef),
+  );
+  const diffHistory = useDiffPanelStore((state) =>
+    routeThreadRef ? (state.historyByThreadKey[scopedThreadKey(routeThreadRef)] ?? null) : null,
   );
   const isGitRepo = gitStatusQuery.data?.isRepo ?? true;
   const turnDiffSummaries = useThreadCheckpointSummaries(routeThreadRef);
@@ -1050,7 +1056,39 @@ export default function DiffPanel({
   );
 
   return (
-    <DiffPanelShell mode={mode} header={headerRow}>
+    <DiffPanelShell
+      mode={mode}
+      nav={
+        <div className="flex min-w-0 flex-1 items-center gap-0.5">
+          <Button
+            size="icon-tiny"
+            variant="ghost"
+            aria-label="Back to the previous diff"
+            disabled={!diffHistory || diffHistory.index <= 0}
+            onClick={() => {
+              if (routeThreadRef) useDiffPanelStore.getState().goBack(routeThreadRef);
+            }}
+          >
+            <ChevronLeftIcon />
+          </Button>
+          <Button
+            size="icon-tiny"
+            variant="ghost"
+            aria-label="Forward to the next diff"
+            disabled={!diffHistory || diffHistory.index >= diffHistory.entries.length - 1}
+            onClick={() => {
+              if (routeThreadRef) useDiffPanelStore.getState().goForward(routeThreadRef);
+            }}
+          >
+            <ChevronRightIcon />
+          </Button>
+          <span className="min-w-0 truncate pl-1 text-2xs text-muted-foreground">
+            {selectedScopeLabel}
+          </span>
+        </div>
+      }
+      header={headerRow}
+    >
       {!activeThread ? (
         <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
           Select a thread to inspect turn diffs.
@@ -1173,14 +1211,33 @@ export default function DiffPanel({
                     renderHeaderFilenameSuffix={(fileDiff) => {
                       const path = resolveFileDiffPath(fileDiff);
                       const state = fileStates.get(path);
+                      const pointer = submodulePointers.get(path);
                       return (
-                        <DiffFileHeaderSuffix
-                          filePath={path}
-                          hasStat={fileStats.has(path)}
-                          error={state?.error ?? false}
-                          truncated={state?.truncated ?? false}
-                          onRetry={retry}
-                        />
+                        <>
+                          {/* The submodule action sits at the row's own height, so it
+                              reads as an action on that file rather than on the diff. */}
+                          {pointer && selectedSubmodule === null ? (
+                            <Button
+                              size="micro"
+                              variant="ghost"
+                              className="-my-px"
+                              aria-label={`Show ${pointer.path} submodule changes`}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                selectSubmodulePointer(pointer);
+                              }}
+                            >
+                              Submodule changes
+                            </Button>
+                          ) : null}
+                          <DiffFileHeaderSuffix
+                            filePath={path}
+                            hasStat={fileStats.has(path)}
+                            error={state?.error ?? false}
+                            truncated={state?.truncated ?? false}
+                            onRetry={retry}
+                          />
+                        </>
                       );
                     }}
                     {...(lazySource
@@ -1201,32 +1258,15 @@ export default function DiffPanel({
                     onRevealSearchMatch={unfoldDiffFile}
                     renderHeaderPrefix={(fileDiff, fileKey) => {
                       const unavailable = fileDiff.cacheKey?.endsWith(":pending") === true;
-                      const filePath = resolveFileDiffPath(fileDiff);
-                      const pointer = submodulePointers.get(filePath);
                       return (
-                        <>
-                          <DiffFileCollapseToggle
-                            filePath={filePath}
-                            fileKey={fileKey}
-                            collapsed={unavailable || collapsedDiffFileKeys.has(fileKey)}
-                            unavailable={unavailable}
-                            iconClassName={getDiffCollapseIconClassName(fileDiff)}
-                            onToggle={toggleDiffFileCollapsed}
-                          />
-                          {pointer && selectedSubmodule === null ? (
-                            <Button
-                              size="xs"
-                              variant="ghost"
-                              aria-label={`Show ${pointer.path} submodule changes`}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                selectSubmodulePointer(pointer);
-                              }}
-                            >
-                              Submodule changes
-                            </Button>
-                          ) : null}
-                        </>
+                        <DiffFileCollapseToggle
+                          filePath={resolveFileDiffPath(fileDiff)}
+                          fileKey={fileKey}
+                          collapsed={unavailable || collapsedDiffFileKeys.has(fileKey)}
+                          unavailable={unavailable}
+                          iconClassName={getDiffCollapseIconClassName(fileDiff)}
+                          onToggle={toggleDiffFileCollapsed}
+                        />
                       );
                     }}
                     options={{
