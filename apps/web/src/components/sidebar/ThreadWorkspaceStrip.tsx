@@ -266,7 +266,9 @@ export function ThreadWorkspaceStrip(props: ThreadWorkspaceStripProps) {
           padding="compact"
           side="top"
           sideOffset={8}
-          width="sm"
+          // Wide enough to keep the eight glyphs on one line: `sm` wraps the
+          // last one onto its own row.
+          width="md"
         >
           <div className="flex flex-col gap-3">
             <div className="flex flex-col gap-0.5">
