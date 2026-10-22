@@ -2382,6 +2382,93 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
       }),
     );
 
+    it.effect("reads a submodule's own diff behind a gitlink change", () =>
+      Effect.gen(function* () {
+        // The submodule is a repository of its own with two commits to compare.
+        const sub = yield* makeTmpDir();
+        yield* initRepoWithCommit(sub);
+        const subFrom = yield* git(sub, ["rev-parse", "HEAD"]);
+        // One modified file and one added file, so both sides of the range exist.
+        yield* writeTextFile(sub, "README.md", "# test\n\ninner change\n");
+        yield* writeTextFile(sub, "inner.txt", "one\n");
+        yield* git(sub, ["add", "."]);
+        yield* git(sub, ["commit", "-m", "inner change"]);
+        const subTo = yield* git(sub, ["rev-parse", "HEAD"]);
+
+        // The parent records a gitlink and holds a real checkout at that path.
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        yield* git(cwd, ["clone", sub, "t3code"]);
+        yield* git(cwd, ["update-index", "--add", "--cacheinfo", `160000,${subFrom},t3code`]);
+        yield* git(cwd, ["commit", "-m", "record submodule pointer"]);
+
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const preview = yield* driver.getReviewDiffPreview({
+          cwd,
+          submodule: { path: "t3code", from: subFrom, to: subTo },
+        });
+        assert.deepStrictEqual(
+          preview.sources.map((source) => source.kind),
+          ["submodule-range"],
+        );
+        const source = preview.sources[0]!;
+        assert.equal(source.baseRef, subFrom);
+        assert.equal(source.headRef, subTo);
+        assert.include(source.title, "t3code");
+        assert.deepStrictEqual(source.files?.map((file) => file.path).toSorted(), [
+          "README.md",
+          "inner.txt",
+        ]);
+        assert.include(source.diff, "+inner change");
+
+        const scoped = yield* driver.getReviewDiffPreview({
+          cwd,
+          submodule: { path: "t3code", from: subFrom, to: subTo },
+          file: { path: "README.md", previousPath: null, sourceKind: "submodule-range" },
+        });
+        assert.include(scoped.sources[0]?.diff ?? "", "+inner change");
+
+        const contents = yield* driver.getReviewDiffFileContents({
+          cwd,
+          sourceKind: "submodule-range",
+          submodulePath: "t3code",
+          changeType: "change",
+          baseRef: subFrom,
+          headRef: subTo,
+          oldPath: "README.md",
+          newPath: "README.md",
+        });
+        assert.equal(contents.oldContents, "# test\n");
+        assert.equal(contents.newContents, "# test\n\ninner change\n");
+
+        // A path that is not a checked-out submodule has to say so.
+        const notCheckedOut = yield* driver
+          .getReviewDiffPreview({
+            cwd,
+            submodule: { path: "absent", from: subFrom, to: subTo },
+          })
+          .pipe(Effect.result);
+        assert.equal(notCheckedOut._tag, "Failure");
+        assert.include(
+          String(notCheckedOut._tag === "Failure" ? notCheckedOut.failure.detail : ""),
+          "not a checked-out git submodule",
+        );
+
+        // Revisions the local submodule does not have must not read as clean.
+        const absentRevision = yield* driver
+          .getReviewDiffPreview({
+            cwd,
+            submodule: { path: "t3code", from: subFrom, to: "0".repeat(40) },
+          })
+          .pipe(Effect.result);
+        assert.equal(absentRevision._tag, "Failure");
+        assert.include(
+          String(absentRevision._tag === "Failure" ? absentRevision.failure.detail : ""),
+          "may not be present locally",
+        );
+      }),
+    );
+
     it.effect("keeps a/ and b/ patch prefixes when the repository disables them", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();
