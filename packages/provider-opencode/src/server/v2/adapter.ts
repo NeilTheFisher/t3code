@@ -2208,6 +2208,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
             output,
             metadata: event.data.metadata,
           });
+          // OpenCode exposes todowrite only with { "experimental": { "todo": true } } in its config.
           const tool = turn.tools.get(event.data.id);
           if (tool !== undefined && tool.name.toLowerCase() === "todowrite") {
             const todos = Array.isArray(tool.input.todos) ? tool.input.todos : [];
