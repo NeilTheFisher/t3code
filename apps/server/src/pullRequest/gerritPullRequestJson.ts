@@ -1,7 +1,11 @@
 import * as DateTime from "effect/DateTime";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
-import type { ChangeRequestState, PullRequestState } from "@t3tools/contracts";
+import type {
+  ChangeRequestState,
+  PullRequestMergeability,
+  PullRequestState,
+} from "@t3tools/contracts";
 
 /**
  * Gerrit's SSH `gerrit query` answers in newline-delimited JSON — one object per change, then a
@@ -109,6 +113,7 @@ export interface GerritChange {
   readonly title: string;
   readonly state: PullRequestState;
   readonly isDraft: boolean;
+  readonly mergeability: PullRequestMergeability;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly mergedAt: string | null;
@@ -201,8 +206,43 @@ export function gerritChangeUrl(host: string, project: string, number: number): 
   return `https://${host}/c/${project}/+/${number}`;
 }
 
+/** Gerrit's review label, whose `+2`/`-2` is the submit gate. */
+const CODE_REVIEW_LABEL = "Code-Review";
+/** Gerrit's verification label, when the project requires it. */
+const VERIFIED_LABEL = "Verified";
+
 export function currentPatchSet(record: GerritQueryChange): RawPatchSet | null {
   return record.currentPatchSet ?? record.patchSets?.at(-1) ?? null;
+}
+
+/** Whether Gerrit would let this change be submitted right now: Code-Review +2 with no
+ *  blocking vote, and Verified (when the project uses it) at +1 with no negative vote. */
+export function gerritChangeIsSubmittable(record: GerritQueryChange): boolean {
+  const patchSet = currentPatchSet(record);
+  const approvals = patchSet?.approvals ?? [];
+  let codeReviewMax = Number.NEGATIVE_INFINITY;
+  let codeReviewHasNegative = false;
+  let hasVerified = false;
+  let verifiedMax = Number.NEGATIVE_INFINITY;
+  let verifiedHasNegative = false;
+  for (const approval of approvals) {
+    const value = Number(approval.value ?? 0);
+    if (approval.type === CODE_REVIEW_LABEL) {
+      if (value > codeReviewMax) codeReviewMax = value;
+      if (value < 0) codeReviewHasNegative = true;
+    } else if (approval.type === VERIFIED_LABEL) {
+      hasVerified = true;
+      if (value > verifiedMax) verifiedMax = value;
+      if (value < 0) verifiedHasNegative = true;
+    }
+  }
+  if (!Number.isFinite(codeReviewMax) || codeReviewMax < 2) return false;
+  if (codeReviewHasNegative) return false;
+  if (hasVerified) {
+    if (verifiedHasNegative) return false;
+    if (!Number.isFinite(verifiedMax) || verifiedMax < 1) return false;
+  }
+  return true;
 }
 
 export function gerritChangeFromRecord(
@@ -233,6 +273,7 @@ export function gerritChangeFromRecord(
     title: subject,
     state,
     isDraft: record.wip === true,
+    mergeability: gerritChangeIsSubmittable(record) ? "mergeable" : "unknown",
     createdAt,
     updatedAt,
     mergedAt: state === "merged" ? updatedAt : null,

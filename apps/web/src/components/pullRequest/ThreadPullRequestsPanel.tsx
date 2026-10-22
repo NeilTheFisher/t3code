@@ -128,6 +128,7 @@ function LinkRowImpl({
           number: link.number,
           state: snapshot.state,
           isDraft: snapshot.isDraft,
+          mergeability: "mergeable" as const,
           ...(link.stack === null ? {} : { stack: link.stack }),
         }
       : null;
