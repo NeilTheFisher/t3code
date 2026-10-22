@@ -19,11 +19,46 @@ const filePathCollator = new Intl.Collator(undefined, {
 });
 const INITIAL_FILE_COUNT = 4;
 
+/**
+ * The single-file patch request for one row. A commit range and a submodule
+ * range both compare two revisions, and neither can be resolved from the
+ * working tree, so each has to name its own scope or the server reads HEAD.
+ */
+export function reviewFilePatchRequest(input: {
+  readonly cwd: string;
+  readonly baseRef: string | null;
+  readonly submodulePath: string | undefined;
+  readonly ignoreWhitespace: boolean;
+  readonly source: ReviewDiffPreviewSource;
+  readonly file: { readonly path: string; readonly previousPath: string | null };
+}): ReviewDiffPreviewInput & { file: NonNullable<ReviewDiffPreviewInput["file"]> } {
+  const { source, file } = input;
+  const range =
+    source.baseRef !== null && source.headRef !== null
+      ? { from: source.baseRef, to: source.headRef }
+      : null;
+  return {
+    cwd: input.cwd,
+    ...(input.baseRef ? { baseRef: input.baseRef } : {}),
+    ...(source.kind === "commit-range" && range ? { commitRange: range } : {}),
+    ...(source.kind === "submodule-range" && range && input.submodulePath
+      ? { submodule: { path: input.submodulePath, ...range } }
+      : {}),
+    ignoreWhitespace: input.ignoreWhitespace,
+    file: {
+      path: file.path,
+      previousPath: file.previousPath,
+      sourceKind: source.kind,
+    },
+  };
+}
+
 export function useReviewFilePatches({
   environmentId,
   cwd,
   source,
   baseRef,
+  submodulePath,
   ignoreWhitespace,
   theme,
   previewInput,
@@ -33,6 +68,8 @@ export function useReviewFilePatches({
   cwd: string | undefined;
   source: ReviewDiffPreviewSource | null;
   baseRef: string | null;
+  /** Set when `source` is a submodule range; its two ends ride on the source. */
+  submodulePath?: string | undefined;
   ignoreWhitespace: boolean;
   theme: "light" | "dark";
   /** The preview the file list came from; a newer revision of it refreshes loaded patches. */
@@ -47,6 +84,7 @@ export function useReviewFilePatches({
     source?.baseRef,
     source?.headRef,
     baseRef,
+    submodulePath,
     ignoreWhitespace,
   ]);
   const files = sortedReviewFiles(source);
@@ -62,6 +100,7 @@ export function useReviewFilePatches({
     cwd,
     source,
     baseRef,
+    submodulePath,
     ignoreWhitespace,
     previewInput,
     scope,
@@ -167,6 +206,7 @@ function reviewFileQueries({
   cwd,
   source,
   baseRef,
+  submodulePath,
   ignoreWhitespace,
   previewInput,
   scope,
@@ -176,6 +216,7 @@ function reviewFileQueries({
   cwd: string | undefined;
   source: ReviewDiffPreviewSource | null;
   baseRef: string | null;
+  submodulePath: string | undefined;
   ignoreWhitespace: boolean;
   previewInput: ReviewDiffPreviewInput | undefined;
   scope: string;
@@ -197,9 +238,10 @@ function reviewFileQueries({
               input: {
                 cacheKey: scope,
                 ...(previewInput ? { preview: previewInput } : {}),
-                request: {
+                request: reviewFilePatchRequest({
                   cwd,
                   ...(baseRef ? { baseRef } : {}),
+                  ...(submodulePath ? { submodulePath } : {}),
                   ...(source.kind === "commit" ? { commitSha: source.id } : {}),
                   // A commit range has no merge base to resolve, so the file patch
                   // must carry the range itself; its two ends are on the source.
@@ -209,12 +251,9 @@ function reviewFileQueries({
                     ? { commitRange: { from: source.baseRef, to: source.headRef } }
                     : {}),
                   ignoreWhitespace,
-                  file: {
-                    path: file.path,
-                    previousPath: file.previousPath,
-                    sourceKind: source.kind,
-                  },
-                },
+                  source,
+                  file,
+                }),
               },
             };
             return { index, target, query: reviewEnvironment.diffFilePatch(target) };
