@@ -17,6 +17,7 @@ export type DiffPanelSelection =
   | ({ kind: "tool-call" } & ToolCallDiffTarget)
   | { kind: "branch"; baseRef: string | null }
   | { kind: "unstaged" }
+  | { kind: "commit-range"; from: string; to: string; label: string }
   | { kind: "turn"; turnId: RunId; filePath: string | null; revealRequestId: number };
 
 const DEFAULT_SELECTION: DiffPanelSelection = { kind: "branch", baseRef: null };
@@ -28,6 +29,10 @@ interface DiffPanelStoreState {
   selectGitScope: (ref: ScopedThreadRef, scope: "branch" | "unstaged") => void;
   selectBranchBaseRef: (ref: ScopedThreadRef, baseRef: string | null) => void;
   selectToolCall: (ref: ScopedThreadRef, target: ToolCallDiffTarget) => void;
+  selectCommitRange: (
+    ref: ScopedThreadRef,
+    range: { from: string; to: string; label: string },
+  ) => void;
   selectTurn: (ref: ScopedThreadRef, turnId: RunId, filePath?: string) => void;
   reconcileTurnSelection: (ref: ScopedThreadRef, availableTurnIds: ReadonlyArray<RunId>) => void;
   removeThread: (ref: ScopedThreadRef) => void;
@@ -87,6 +92,28 @@ export const useDiffPanelStore = create<DiffPanelStoreState>()(
             [scopedThreadKey(ref)]: { kind: "tool-call", ...target },
           },
         })),
+      selectCommitRange: (ref, range) =>
+        set((state) => {
+          const threadKey = scopedThreadKey(ref);
+          const previous = state.byThreadKey[threadKey];
+          return {
+            byThreadKey: {
+              ...state.byThreadKey,
+              [threadKey]: {
+                kind: "commit-range",
+                from: range.from,
+                to: range.to,
+                label: range.label,
+              },
+            },
+            // A commit range replaces the branch base ref, so the branch scope
+            // keeps the base the user last chose once they leave the range.
+            branchBaseRefByThreadKey:
+              previous?.kind === "branch"
+                ? { ...state.branchBaseRefByThreadKey, [threadKey]: previous.baseRef }
+                : state.branchBaseRefByThreadKey,
+          };
+        }),
       selectTurn: (ref, turnId, filePath) =>
         set((state) => {
           const threadKey = scopedThreadKey(ref);
