@@ -4,6 +4,7 @@ import { ReadOnlySourcePreview } from "./files/AttachmentFilePreview";
 import type {
   ChatAttachment,
   ComposerContextId,
+  CommitContextRecord,
   EnvironmentContextRecord,
   EnvironmentId,
   PreviewAnnotationPayload,
@@ -45,6 +46,7 @@ import type { TerminalContextDraft } from "~/lib/terminalContext";
 import type { ReviewCommentContext } from "~/reviewCommentContext";
 import { isQueuedFileAttachment, isQueuedImageAttachment } from "./chat/queuedMessageEdit";
 import { ComposerPendingTerminalContextChip } from "./chat/ComposerPendingTerminalContexts";
+import { CommitContextChip } from "./CommitContextChip";
 import { EnvironmentContextChip } from "./EnvironmentContextChip";
 import { ThreadContextChip } from "./ThreadContextChip";
 import { useLinkedEnvironments } from "~/state/peerLinks";
@@ -90,6 +92,7 @@ export type ComposerDraftContextRecord =
       contextId?: ComposerContextId | undefined;
     }
   | { kind: "thread"; record: ThreadContextRecord }
+  | { kind: "commit"; record: CommitContextRecord }
   | { kind: "environment"; record: EnvironmentContextRecord };
 
 export {
@@ -115,6 +118,7 @@ export function composerContextRecordsFromDraft(input: {
   reviewComments?: ReadonlyArray<ReviewCommentContext>;
   previewAnnotations?: ReadonlyArray<PreviewAnnotationPayload>;
   threadContexts?: ReadonlyArray<ThreadContextRecord>;
+  commitContexts?: ReadonlyArray<CommitContextRecord>;
   environmentContexts?: ReadonlyArray<EnvironmentContextRecord>;
   images?: ReadonlyArray<ComposerImageAttachment>;
   files?: ReadonlyArray<ComposerFileAttachment>;
@@ -186,6 +190,9 @@ export function composerContextRecordsFromDraft(input: {
   }
   for (const record of input.threadContexts ?? []) {
     records.set(record.contextId, { kind: "thread", record });
+  }
+  for (const record of input.commitContexts ?? []) {
+    records.set(record.contextId, { kind: "commit", record });
   }
   for (const record of input.environmentContexts ?? []) {
     records.set(record.contextId, { kind: "environment", record });
@@ -530,6 +537,7 @@ const composerContextPresentationRegistry = createContextPresentationRegistry<
     "review-comment",
     "preview-annotation",
     "thread",
+    "commit",
     "environment",
   ],
   handlers: [
@@ -613,6 +621,16 @@ const composerContextPresentationRegistry = createContextPresentationRegistry<
       render: (entry, context) =>
         entry.kind === "thread" ? (
           <ComposerThreadContextChip record={entry.record} />
+        ) : (
+          <UnresolvedContextChip label={context.label} />
+        ),
+    },
+    {
+      kind: "commit",
+      canRender: (entry) => entry.kind === "commit",
+      render: (entry, context) =>
+        entry.kind === "commit" ? (
+          <CommitContextChip record={entry.record} />
         ) : (
           <UnresolvedContextChip label={context.label} />
         ),
