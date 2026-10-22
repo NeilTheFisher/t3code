@@ -6,6 +6,7 @@ const baseState: ThreadActionMenuState = {
   canOperate: true,
   branch: null,
   projectFilter: null,
+  workspaceMenu: null,
   isPinned: false,
   isSettled: false,
   autoSettleEnabled: true,
