@@ -1545,6 +1545,37 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
     );
   });
 
+  describe("log graph worktrees", () => {
+    it.effect("lists every checkout, marking the primary one and each dirty state", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const primaryBranch = yield* git(cwd, ["branch", "--show-current"]);
+        const pathService = yield* Path.Path;
+        const linkedPath = pathService.join(yield* makeTmpDir(), "linked");
+        yield* git(cwd, ["worktree", "add", "-b", "feature/linked", linkedPath]);
+
+        const clean = yield* driver.logGraph({ cwd, includeRemotes: false });
+        assert.equal(clean.worktrees?.length, 2);
+        const primary = clean.worktrees?.find((worktree) => worktree.isPrimary);
+        const linked = clean.worktrees?.find((worktree) => !worktree.isPrimary);
+        assert.equal(primary?.path, cwd);
+        assert.equal(primary?.branch, primaryBranch);
+        assert.equal(linked?.path, linkedPath);
+        assert.equal(linked?.branch, "feature/linked");
+        assert.isFalse(primary?.dirty);
+        assert.isFalse(linked?.dirty);
+
+        // Uncommitted work marks only the checkout that holds it.
+        yield* writeTextFile(linkedPath, "README.md", "# test\n\nchanged\n");
+        const dirty = yield* driver.logGraph({ cwd, includeRemotes: false });
+        assert.isTrue(dirty.worktrees?.find((worktree) => !worktree.isPrimary)?.dirty);
+        assert.isFalse(dirty.worktrees?.find((worktree) => worktree.isPrimary)?.dirty);
+      }),
+    );
+  });
+
   describe("review diff previews", () => {
     it.effect("loads repository-relative files from a nested project directory", () =>
       Effect.gen(function* () {

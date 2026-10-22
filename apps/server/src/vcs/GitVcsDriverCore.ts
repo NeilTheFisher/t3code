@@ -299,6 +299,48 @@ function parseWorktreeBranchPaths(stdout: string): ReadonlyMap<string, string> {
   return worktreePaths;
 }
 
+/**
+ * `git worktree list --porcelain -z` reports one record per checkout, fields
+ * NUL-separated and records ended by an empty field. The ref is either
+ * `branch refs/heads/<name>` or `detached`, and the primary checkout is the one
+ * whose path is the requested repository root (git lists it first, which is the
+ * fallback for a bare or pruned layout).
+ */
+function parseWorktreeEntries(
+  stdout: string,
+  primaryCwd: string,
+): ReadonlyArray<{ path: string; branch: string | null; head: string; isPrimary: boolean }> {
+  const entries: Array<{ path: string; branch: string | null; head: string }> = [];
+  let current: { path: string; branch: string | null; head: string } | null = null;
+
+  const flush = () => {
+    if (current !== null && current.path.length > 0) entries.push(current);
+    current = null;
+  };
+
+  for (const field of stdout.split("\0")) {
+    if (field === "") {
+      flush();
+    } else if (field.startsWith("worktree ")) {
+      flush();
+      current = { path: field.slice("worktree ".length), branch: null, head: "" };
+    } else if (current === null) {
+      continue;
+    } else if (field.startsWith("HEAD ")) {
+      current.head = field.slice("HEAD ".length);
+    } else if (field.startsWith("branch refs/heads/")) {
+      current.branch = field.slice("branch refs/heads/".length);
+    }
+  }
+  flush();
+
+  const primaryIndex = entries.findIndex((entry) => entry.path === primaryCwd);
+  return entries.map((entry, index) => ({
+    ...entry,
+    isPrimary: primaryIndex === -1 ? index === 0 : primaryIndex === index,
+  }));
+}
+
 function splitNullSeparatedPaths(input: string, truncated: boolean): string[] {
   const parts = input.split("\0");
   if (parts.length === 0) return [];
@@ -4055,6 +4097,44 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         ["diff", "--numstat", "HEAD"],
         { allowNonZeroExit: true, maxOutputBytes: REVIEW_METADATA_MAX_OUTPUT_BYTES },
       );
+      const worktreeListResult = yield* executeGit(
+        "GitVcsDriver.logGraph.worktrees",
+        input.cwd,
+        ["worktree", "list", "--porcelain", "-z"],
+        { allowNonZeroExit: true, maxOutputBytes: 1_000_000 },
+      );
+      const listedWorktrees =
+        worktreeListResult.exitCode === 0
+          ? parseWorktreeEntries(
+              worktreeListResult.stdout,
+              repositoryPaths.worktreeRoot ?? input.cwd,
+            )
+          : [];
+      // Bounded so a repository with many checkouts cannot turn one graph read
+      // into an unbounded burst of git calls.
+      const WORKTREE_STATUS_MAX = 24;
+      const worktrees = yield* Effect.forEach(
+        listedWorktrees.slice(0, WORKTREE_STATUS_MAX),
+        (entry) =>
+          executeGit(
+            "GitVcsDriver.logGraph.worktrees.status",
+            entry.path,
+            ["status", "--porcelain"],
+            { allowNonZeroExit: true, maxOutputBytes: 4_000_000 },
+          ).pipe(
+            Effect.map((status) => ({
+              path: entry.path,
+              branch: entry.branch,
+              head: entry.head,
+              isPrimary: entry.isPrimary,
+              dirty:
+                status.exitCode === 0 &&
+                status.stdout.split("\n").some((line) => line.trim().length > 0),
+            })),
+          ),
+        { concurrency: 4 },
+      );
+
       const workingTree = (() => {
         if (workingTreeResult.exitCode !== 0) return undefined;
         const changedFiles = workingTreeResult.stdout
@@ -4081,6 +4161,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           truncated: false,
           isRepo: true,
           ...(workingTree ? { workingTree } : {}),
+          ...(worktrees.length > 0 ? { worktrees } : {}),
         };
       }
 
@@ -4113,6 +4194,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         truncated: parsed.length > limit,
         isRepo: true,
         ...(workingTree ? { workingTree } : {}),
+        ...(worktrees.length > 0 ? { worktrees } : {}),
       };
     },
   );

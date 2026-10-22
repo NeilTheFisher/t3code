@@ -326,6 +326,19 @@ export const VcsGraphWorkingTree = Schema.Struct({
 });
 export type VcsGraphWorkingTree = typeof VcsGraphWorkingTree.Type;
 
+/**
+ * One checkout on disk. `isPrimary` marks the main worktree, which has no branch
+ * of its own to recreate and is therefore never removable from the graph.
+ */
+export const VcsGraphWorktree = Schema.Struct({
+  path: TrimmedNonEmptyStringSchema,
+  branch: Schema.NullOr(TrimmedNonEmptyStringSchema),
+  head: TrimmedNonEmptyStringSchema,
+  isPrimary: Schema.Boolean,
+  dirty: Schema.Boolean,
+});
+export type VcsGraphWorktree = typeof VcsGraphWorktree.Type;
+
 export const VcsLogGraphResult = Schema.Struct({
   commits: Schema.Array(VcsGraphCommit),
   currentBranch: Schema.NullOr(TrimmedNonEmptyStringSchema),
@@ -333,6 +346,8 @@ export const VcsLogGraphResult = Schema.Struct({
   isRepo: Schema.Boolean,
   /** Absent when the checkout is clean or its state could not be read. */
   workingTree: Schema.optionalKey(VcsGraphWorkingTree),
+  /** Every checkout of this repository, main worktree first. */
+  worktrees: Schema.optionalKey(Schema.Array(VcsGraphWorktree)),
 });
 export type VcsLogGraphResult = typeof VcsLogGraphResult.Type;
 
