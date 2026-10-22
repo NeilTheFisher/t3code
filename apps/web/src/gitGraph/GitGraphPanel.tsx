@@ -54,6 +54,23 @@ const ROW_HEIGHT = 46;
 const LANE_WIDTH = 14;
 const LANE_INSET = 9;
 
+// Drawn as inset shadows rather than borders: a border changes the row's box
+// and would shift the whole graph sideways the moment a row is selected. Only
+// the run's outer edges get a line, so the outline grows as the selection grows.
+const SELECTION_EDGE_SHADOW: Record<Exclude<GraphSelectionEdge, "none">, string> = (() => {
+  const outline = "color-mix(in oklab, var(--primary) 60%, transparent)";
+  const left = `inset 2px 0 0 0 ${outline}`;
+  const right = `inset -2px 0 0 0 ${outline}`;
+  const top = `inset 0 2px 0 0 ${outline}`;
+  const bottom = `inset 0 -2px 0 0 ${outline}`;
+  return {
+    single: [top, bottom, left, right].join(", "),
+    top: [top, left, right].join(", "),
+    middle: [left, right].join(", "),
+    bottom: [bottom, left, right].join(", "),
+  };
+})();
+
 const LANE_COLORS = [
   "oklch(0.63 0.09 250)",
   "oklch(0.66 0.09 165)",
@@ -326,6 +343,7 @@ function CommitRow(props: {
   threadsById: ReadonlyMap<string, MockThread>;
   threadColor: (id: string) => string;
   onSelect: (event: ReactMouseEvent) => void;
+  onOpenDiff: () => void;
   onFilterThread: (id: string) => void;
   onOpenMenu: (commit: MockCommit, position: { x: number; y: number }) => void;
 }) {
@@ -339,6 +357,7 @@ function CommitRow(props: {
     threadsById,
     threadColor,
     onSelect,
+    onOpenDiff,
     onFilterThread,
     onOpenMenu,
   } = props;
@@ -391,20 +410,20 @@ function CommitRow(props: {
         window.setTimeout(() => ghost.remove(), 0);
       }}
       onClick={onSelect}
+      onDoubleClick={() => onOpenDiff()}
       onContextMenu={(event: ReactMouseEvent) => {
         event.preventDefault();
         onOpenMenu(commit, { x: event.clientX, y: event.clientY });
       }}
       className={cn(
         "group relative flex cursor-default select-none items-stretch gap-1 pr-2",
-        selectionEdge === "none" && "hover:bg-accent/35",
-        selectionEdge === "single" && "border-x-2 border-y-2 border-primary/60 bg-primary/10",
-        selectionEdge === "top" && "border-x-2 border-t-2 border-primary/60 bg-primary/10",
-        selectionEdge === "middle" && "border-x-2 border-primary/60 bg-primary/10",
-        selectionEdge === "bottom" && "border-x-2 border-b-2 border-primary/60 bg-primary/10",
+        selectionEdge === "none" ? "hover:bg-accent/35" : "bg-primary/10",
         isDimmed && "opacity-35",
       )}
-      style={{ height: ROW_HEIGHT }}
+      style={{
+        height: ROW_HEIGHT,
+        ...(selectionEdge === "none" ? {} : { boxShadow: SELECTION_EDGE_SHADOW[selectionEdge] }),
+      }}
     >
       <div className="shrink-0 border-r border-border/40">
         <LaneGraph row={row} laneCount={laneCount} isTip={isTip} />
@@ -610,26 +629,40 @@ export function GitGraphPanel(props: {
       return;
     }
     let cancelled = false;
-    setLoadingMore(true);
-    setLoadError(null);
-    void loadGraphRef
-      .current({
-        environmentId: props.environmentId,
-        input: { cwd, limit, includeRemotes: showRemotes },
-      })
-      .then((result) => {
-        if (cancelled) return;
-        if (result._tag === "Success") {
-          setGraph(result.value);
-        } else {
+    let retryTimer: number | null = null;
+    // The first read of a fresh panel can race the environment's repository
+    // detection and fail transiently, so retry before showing an error.
+    const LOAD_ATTEMPTS = 3;
+    const load = (attempt: number) => {
+      setLoadingMore(true);
+      setLoadError(null);
+      void loadGraphRef
+        .current({
+          environmentId: props.environmentId,
+          input: { cwd, limit, includeRemotes: showRemotes },
+        })
+        .then((result) => {
+          if (cancelled) return;
+          if (result._tag === "Success") {
+            setGraph(result.value);
+            setLoading(false);
+            setLoadingMore(false);
+            return;
+          }
+          if (attempt < LOAD_ATTEMPTS) {
+            retryTimer = window.setTimeout(() => load(attempt + 1), 350 * attempt);
+            return;
+          }
           setGraph(null);
           setLoadError("Could not read this repository's history.");
-        }
-        setLoading(false);
-        setLoadingMore(false);
-      });
+          setLoading(false);
+          setLoadingMore(false);
+        });
+    };
+    load(1);
     return () => {
       cancelled = true;
+      if (retryTimer !== null) window.clearTimeout(retryTimer);
     };
   }, [props.cwd, props.environmentId, limit, reloadToken, showRemotes]);
 
@@ -1025,6 +1058,7 @@ export function GitGraphPanel(props: {
                   onSelect={(event) =>
                     selectCommit(commit.sha, event.shiftKey || event.metaKey || event.ctrlKey)
                   }
+                  onOpenDiff={() => openSelectedDiff(commit)}
                   onFilterThread={(id) => applyFilter(filterThreadId === id ? null : id)}
                   onOpenMenu={(commit, position) => {
                     void openCommitMenu(commit, position);
