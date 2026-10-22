@@ -138,6 +138,14 @@ const knownRecords: Record<(typeof COMPOSER_CONTEXT_KINDS)[number], Record<strin
       { threadId: "thread-2", title: "review pr 412 (search)" },
       { threadId: "thread-3", title: "review pr 413", environmentId: "environment-2" },
     ],
+  commit: {
+    ...base,
+    kind: "commit",
+    label: "abc12345 fix the thing",
+    sha: "abc1234567890abc1234567890abc1234567890a",
+    subject: "fix the thing",
+    repositoryPath: "/repos/example",
+    threadIds: ["thread-1"],
   },
 };
 
