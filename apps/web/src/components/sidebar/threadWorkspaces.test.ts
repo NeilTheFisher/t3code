@@ -11,7 +11,9 @@ import {
   orderThreadWorkspaceSearch,
   removeThreadWorkspaceAssignments,
   resolveAssignedWorkspaceId,
+  threadNeedsWorkspaceAttention,
   threadWorkspaceKeyFor,
+  type ThreadAttentionInput,
 } from "./threadWorkspaces";
 
 const workspaces: readonly SidebarThreadWorkspace[] = [
@@ -121,5 +123,58 @@ describe("thread workspaces", () => {
     const id = createThreadWorkspaceId(taken, random);
     expect(id).not.toBe("ws-abc");
     expect(id.startsWith("ws-")).toBe(true);
+  });
+});
+
+describe("workspace attention", () => {
+  const attentionThread = (overrides: Partial<ThreadAttentionInput> = {}): ThreadAttentionInput =>
+    ({
+      archivedAt: null,
+      settledOverride: null,
+      hasPendingApprovals: false,
+      hasPendingUserInput: false,
+      pendingSubagentRequest: null,
+      runtime: null,
+      blockedOnThreadWait: false,
+      ...overrides,
+    }) as ThreadAttentionInput;
+  const runtime = (value: unknown) => value as ThreadAttentionInput["runtime"];
+
+  it("counts a decision waiting on the user", () => {
+    expect(threadNeedsWorkspaceAttention(attentionThread({ hasPendingApprovals: true }))).toBe(
+      true,
+    );
+    expect(threadNeedsWorkspaceAttention(attentionThread({ hasPendingUserInput: true }))).toBe(
+      true,
+    );
+  });
+
+  it("counts a failed or limited run, but not a working one", () => {
+    expect(
+      threadNeedsWorkspaceAttention(attentionThread({ runtime: runtime({ status: "failed" }) })),
+    ).toBe(true);
+    expect(
+      threadNeedsWorkspaceAttention(
+        attentionThread({ runtime: runtime({ status: "failed", lastErrorClass: "usage_limit" }) }),
+      ),
+    ).toBe(true);
+    // Working is deliberately not a "needs you" state.
+    expect(
+      threadNeedsWorkspaceAttention(attentionThread({ runtime: runtime({ status: "running" }) })),
+    ).toBe(false);
+  });
+
+  it("ignores an idle thread, an archived one, and a settled one", () => {
+    expect(threadNeedsWorkspaceAttention(attentionThread())).toBe(false);
+    expect(
+      threadNeedsWorkspaceAttention(
+        attentionThread({ archivedAt: "2026-01-01T00:00:00.000Z", hasPendingApprovals: true }),
+      ),
+    ).toBe(false);
+    expect(
+      threadNeedsWorkspaceAttention(
+        attentionThread({ settledOverride: "settled", hasPendingApprovals: true }),
+      ),
+    ).toBe(false);
   });
 });
