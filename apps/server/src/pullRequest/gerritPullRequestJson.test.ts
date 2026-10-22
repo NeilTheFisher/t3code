@@ -134,6 +134,7 @@ describe("gerritChangeFromRecord", () => {
       title: "fix clients left unserved when joining an event",
       state: "merged",
       isDraft: false,
+      mergeability: "mergeable",
       createdAt: "2026-10-06T20:08:46Z",
       updatedAt: "2026-10-06T21:01:44Z",
       mergedAt: "2026-10-06T21:01:44Z",
