@@ -40,6 +40,12 @@ import { Button } from "../components/ui/button";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { commitDragText } from "./commitDrag";
 import { layoutGraph, type GraphRow } from "./graphLayout";
+import {
+  graphSelectionEdge,
+  resolveGraphSelection,
+  selectionDiffRange,
+  type GraphSelectionEdge,
+} from "./graphSelection";
 import type { MockCommit, MockGraphData, MockThread, MockWorktree } from "./mockGraph";
 
 // Two lines plus 20px ref badges come to 44px; leave a couple of pixels of
@@ -315,11 +321,11 @@ function CommitRow(props: {
   row: GraphRow;
   laneCount: number;
   isTip: boolean;
-  isSelected: boolean;
+  selectionEdge: GraphSelectionEdge;
   isDimmed: boolean;
   threadsById: ReadonlyMap<string, MockThread>;
   threadColor: (id: string) => string;
-  onSelect: () => void;
+  onSelect: (event: ReactMouseEvent) => void;
   onFilterThread: (id: string) => void;
   onOpenMenu: (commit: MockCommit, position: { x: number; y: number }) => void;
 }) {
@@ -328,7 +334,7 @@ function CommitRow(props: {
     row,
     laneCount,
     isTip,
-    isSelected,
+    selectionEdge,
     isDimmed,
     threadsById,
     threadColor,
@@ -346,7 +352,7 @@ function CommitRow(props: {
   return (
     <div
       role="option"
-      aria-selected={isSelected}
+      aria-selected={selectionEdge !== "none"}
       tabIndex={-1}
       data-sha={commit.sha}
       draggable
@@ -391,7 +397,11 @@ function CommitRow(props: {
       }}
       className={cn(
         "group relative flex cursor-default select-none items-stretch gap-1 pr-2",
-        isSelected ? "bg-accent ring-1 ring-primary/20 ring-inset" : "hover:bg-accent/35",
+        selectionEdge === "none" && "hover:bg-accent/35",
+        selectionEdge === "single" && "border-x-2 border-y-2 border-primary/60 bg-primary/10",
+        selectionEdge === "top" && "border-x-2 border-t-2 border-primary/60 bg-primary/10",
+        selectionEdge === "middle" && "border-x-2 border-primary/60 bg-primary/10",
+        selectionEdge === "bottom" && "border-x-2 border-b-2 border-primary/60 bg-primary/10",
         isDimmed && "opacity-35",
       )}
       style={{ height: ROW_HEIGHT }}
@@ -423,7 +433,7 @@ function CommitRow(props: {
           <span
             className={cn(
               "min-w-0 flex-1 truncate text-xs leading-4",
-              isSelected ? "text-foreground" : "text-foreground/90",
+              selectionEdge !== "none" ? "text-foreground" : "text-foreground/90",
             )}
           >
             {commit.subject}
@@ -568,6 +578,7 @@ export function GitGraphPanel(props: {
   readonly repositoryLabel?: string | null;
   readonly environmentId: EnvironmentId;
   readonly cwd: string | null;
+  readonly onOpenCommitDiff: (range: { from: string; to: string; label: string }) => void;
 }) {
   const [graph, setGraph] = useState<VcsLogGraphResult | null>(null);
   const [loading, setLoading] = useState(true);
@@ -578,6 +589,9 @@ export function GitGraphPanel(props: {
   const [view, setView] = useState<PanelView>("graph");
   const [showRemotes, setShowRemotes] = useState(true);
   const [selectedSha, setSelectedSha] = useState<string | null>(null);
+  // The selection is always contiguous, so only its two ends are stored; every
+  // commit between them is selected even when it was never clicked.
+  const [selectionHeadSha, setSelectionHeadSha] = useState<string | null>(null);
   const [filterThreadId, setFilterThreadId] = useState<string | null>(null);
   const [confirmPath, setConfirmPath] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -648,13 +662,32 @@ export function GitGraphPanel(props: {
   const visibleCommits = commits;
   const layout = layoutGraph(visibleCommits.map(({ sha, parents }) => ({ sha, parents })));
   const rowBySha = new Map(layout.rows.map((row) => [row.sha, row]));
+  const selection = resolveGraphSelection(visibleCommits, selectedSha, selectionHeadSha);
+
+  const selectCommit = (sha: string, extend: boolean) => {
+    if (!extend || selectedSha === null) {
+      setSelectedSha(sha);
+      setSelectionHeadSha(sha);
+      return;
+    }
+    setSelectionHeadSha(sha);
+  };
+
+  const openSelectedDiff = (commit: MockCommit) => {
+    const inSelection = selection?.shas.has(commit.sha) ?? false;
+    const target =
+      inSelection && selection !== null
+        ? selection
+        : { top: commit, bottom: commit, shas: new Set([commit.sha]) };
+    props.onOpenCommitDiff(selectionDiffRange(target));
+  };
   const tipShas = new Set(
     visibleCommits.filter((commit) => commit.refs.length > 0).map((commit) => commit.sha),
   );
 
   const applyFilter = (next: string | null) => {
     setFilterThreadId(next);
-    setSelectedSha(null);
+    clearSelection();
   };
 
   const runningThreads = threads.filter((thread) => thread.state === "running").length;
@@ -719,9 +752,22 @@ export function GitGraphPanel(props: {
   };
 
   const openCommitMenu = async (commit: MockCommit, position: { x: number; y: number }) => {
-    setSelectedSha(commit.sha);
+    const inSelection = selection?.shas.has(commit.sha) ?? false;
+    if (!inSelection) {
+      setSelectedSha(commit.sha);
+      setSelectionHeadSha(commit.sha);
+    }
     const api = readLocalApi();
     if (!api) return;
+    const diffTarget =
+      inSelection && selection !== null
+        ? selection
+        : { top: commit, bottom: commit, shas: new Set([commit.sha]) };
+    const diffRange = selectionDiffRange(diffTarget);
+    const diffLabel =
+      diffTarget.top.sha === diffTarget.bottom.sha
+        ? `Open diff ${diffRange.label}`
+        : `Open diff ${diffRange.label} (${diffTarget.shas.size} commits)`;
     const thread = commit.threadIds[0] ? threadsById.get(commit.threadIds[0]) : undefined;
     const branchRef = commit.refs.find((ref) => ref.kind === "branch");
     // A remote tip checks out through its own ref; the server derives the local
@@ -729,7 +775,7 @@ export function GitGraphPanel(props: {
     const checkoutRef = branchRef ?? commit.refs.find((ref) => ref.kind === "remote");
     const alreadyCheckedOut = checkoutRef !== undefined && checkoutRef.name === currentBranch;
     const items: ContextMenuItem<CommitMenuAction>[] = [
-      { id: "open-diff", label: "Open diff" },
+      { id: "open-diff", label: diffLabel },
       { id: "copy-sha", label: "Copy SHA" },
       { id: "copy-subject", label: "Copy subject" },
       {
@@ -758,7 +804,7 @@ export function GitGraphPanel(props: {
     const action = await api.contextMenu.show(items, position);
     switch (action) {
       case "open-diff":
-        showNotice("Commit diff lands with the logGraph slice");
+        openSelectedDiff(commit);
         break;
       case "copy-sha":
         await copyText(commit.sha, "SHA");
@@ -787,7 +833,7 @@ export function GitGraphPanel(props: {
   };
 
   const moveSelection = (direction: 1 | -1) => {
-    const currentIndex = visibleCommits.findIndex((commit) => commit.sha === selectedSha);
+    const currentIndex = visibleCommits.findIndex((commit) => commit.sha === selectionHeadSha);
     const nextIndex =
       currentIndex === -1
         ? direction === 1
@@ -797,9 +843,15 @@ export function GitGraphPanel(props: {
     const next = visibleCommits[nextIndex];
     if (!next) return;
     setSelectedSha(next.sha);
+    setSelectionHeadSha(next.sha);
     document
       .querySelector<HTMLElement>(`[data-sha="${next.sha}"]`)
       ?.scrollIntoView({ block: "nearest" });
+  };
+
+  const clearSelection = () => {
+    setSelectedSha(null);
+    setSelectionHeadSha(null);
   };
 
   return (
@@ -935,7 +987,7 @@ export function GitGraphPanel(props: {
                 event.preventDefault();
                 moveSelection(-1);
               } else if (event.key === "Escape") {
-                setSelectedSha(null);
+                clearSelection();
               } else if (
                 selectedSha !== null &&
                 (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10"))
@@ -966,11 +1018,13 @@ export function GitGraphPanel(props: {
                   row={row}
                   laneCount={layout.laneCount}
                   isTip={tipShas.has(commit.sha)}
-                  isSelected={commit.sha === selectedSha}
+                  selectionEdge={graphSelectionEdge(selection, commit.sha)}
                   isDimmed={!matchesFilter}
                   threadsById={threadsById}
                   threadColor={threadColor}
-                  onSelect={() => setSelectedSha(commit.sha)}
+                  onSelect={(event) =>
+                    selectCommit(commit.sha, event.shiftKey || event.metaKey || event.ctrlKey)
+                  }
                   onFilterThread={(id) => applyFilter(filterThreadId === id ? null : id)}
                   onOpenMenu={(commit, position) => {
                     void openCommitMenu(commit, position);
