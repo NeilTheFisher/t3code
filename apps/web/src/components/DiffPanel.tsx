@@ -28,6 +28,7 @@ import { useFileContextMenuHandler } from "../fileContextMenu";
 import { type DraftId } from "../composerDraftStore";
 import { openDiffFilePrimaryAction } from "../diffFileActions";
 import { useCheckpointDiff } from "~/lib/checkpointDiffState";
+import { submodulePointerChanges } from "~/lib/submodulePointerChanges";
 import { cn } from "~/lib/utils";
 import {
   selectThreadDiffPanelSelection,
@@ -273,6 +274,7 @@ export default function DiffPanel({
 
   const selectedRunId = diffSelection.kind === "turn" ? diffSelection.turnId : null;
   const selectedCommitRange = diffSelection.kind === "commit-range" ? diffSelection : null;
+  const selectedSubmodule = diffSelection.kind === "submodule" ? diffSelection : null;
   const selectedGitScope = diffSelection.kind === "unstaged" ? "unstaged" : "branch";
   const selectedBaseRef = diffSelection.kind === "branch" ? diffSelection.baseRef : null;
   const selectedFilePath = diffSelection.kind === "turn" ? diffSelection.filePath : null;
@@ -285,32 +287,36 @@ export default function DiffPanel({
         orderedTurnDiffSummaries[0]);
   const selectedCheckpointTurnCount = selectedTurn?.checkpointTurnCount;
   const latestTurn = orderedTurnDiffSummaries[0];
-  const selectedScopeLabel =
-    selectedCommitRange !== null
-      ? selectedCommitRange.label
-      : selectedRunId === null
-        ? selectedGitScope === "unstaged"
-          ? "Uncommitted"
-          : "Changes"
-        : selectedTurn?.runId === latestTurn?.runId
-          ? "Latest turn"
-          : `Turn ${selectedCheckpointTurnCount ?? "?"}`;
-  const reviewSectionId = selectedCommitRange
-    ? `commit:${selectedCommitRange.from}..${selectedCommitRange.to}`
-    : selectedTurn
-      ? `turn:${selectedTurn.runId}`
-      : selectedGitScope;
+  const selectedScopeLabel = (() => {
+    if (selectedSubmodule !== null) return selectedSubmodule.label;
+    if (selectedCommitRange !== null) return selectedCommitRange.label;
+    if (selectedRunId === null) {
+      return selectedGitScope === "unstaged" ? "Uncommitted" : "Changes";
+    }
+    return selectedTurn?.runId === latestTurn?.runId
+      ? "Latest turn"
+      : `Turn ${selectedCheckpointTurnCount ?? "?"}`;
+  })();
+  const reviewSectionId = selectedSubmodule
+    ? `submodule:${selectedSubmodule.path}:${selectedSubmodule.from}..${selectedSubmodule.to}`
+    : selectedCommitRange
+      ? `commit:${selectedCommitRange.from}..${selectedCommitRange.to}`
+      : selectedTurn
+        ? `turn:${selectedTurn.runId}`
+        : selectedGitScope;
   const collapseScopeKey = routeThreadRef
     ? `${routeThreadRef.environmentId}:${routeThreadRef.threadId}:${reviewSectionId}`
     : null;
   const codeViewMountKey = `${collapseScopeKey ?? reviewSectionId}:${codeViewRevision}`;
-  const reviewSectionTitle = selectedCommitRange
-    ? selectedCommitRange.label
-    : selectedTurn
-      ? `Turn ${selectedCheckpointTurnCount ?? "?"}`
-      : selectedGitScope === "unstaged"
-        ? "Uncommitted"
-        : "Changes";
+  const reviewSectionTitle = selectedSubmodule
+    ? selectedSubmodule.label
+    : selectedCommitRange
+      ? selectedCommitRange.label
+      : selectedTurn
+        ? `Turn ${selectedCheckpointTurnCount ?? "?"}`
+        : selectedGitScope === "unstaged"
+          ? "Uncommitted"
+          : "Changes";
   const selectedCheckpointRange =
     typeof selectedCheckpointTurnCount === "number"
       ? {
@@ -344,6 +350,15 @@ export default function DiffPanel({
                   },
                 }
               : {}),
+            ...(selectedSubmodule
+              ? {
+                  submodule: {
+                    path: selectedSubmodule.path,
+                    from: selectedSubmodule.from,
+                    to: selectedSubmodule.to,
+                  },
+                }
+              : {}),
             ignoreWhitespace: diffIgnoreWhitespace,
           },
         })
@@ -355,14 +370,36 @@ export default function DiffPanel({
     ? `${routeThreadRef.environmentId}:${routeThreadRef.threadId}`
     : null;
 
-  const selectedGitSourceKind: ReviewDiffPreviewSourceKind = selectedCommitRange
-    ? "commit-range"
-    : selectedGitScope === "unstaged"
-      ? "working-tree"
-      : "branch-range";
+  const selectedGitSourceKind: ReviewDiffPreviewSourceKind = selectedSubmodule
+    ? "submodule-range"
+    : selectedCommitRange
+      ? "commit-range"
+      : selectedGitScope === "unstaged"
+        ? "working-tree"
+        : "branch-range";
   const selectedGitSource = branchDiffPreview.data?.sources.find(
     (source) => source.kind === selectedGitSourceKind,
   );
+
+  // A gitlink change records two revisions the parent repository cannot show;
+  // the row offers the submodule's own diff instead.
+  const submodulePointers = new Map(
+    submodulePointerChanges(selectedGitSource?.diff ?? "").map((pointer) => [
+      pointer.path,
+      pointer,
+    ]),
+  );
+  const selectSubmodulePointer = (pointer: {
+    readonly path: string;
+    readonly from: string;
+    readonly to: string;
+  }) => {
+    if (!routeThreadRef) return;
+    useDiffPanelStore.getState().selectSubmodule(routeThreadRef, {
+      ...pointer,
+      label: `${pointer.path} ${pointer.from.slice(0, 8)}..${pointer.to.slice(0, 8)}`,
+    });
+  };
   const refreshPreviewQuery = branchDiffPreview.refresh;
   const refreshDiffFromUserAction = refreshPreviewQuery;
 
@@ -404,6 +441,7 @@ export default function DiffPanel({
           sourceKind: selectedGitSource.kind,
           baseRef: selectedGitSource.baseRef,
           headRef: selectedGitSource.headRef,
+          ...(selectedSubmodule ? { submodulePath: selectedSubmodule.path } : {}),
           cacheKey: selectedGitSource.diffHash,
         })
       : undefined;
@@ -479,6 +517,7 @@ export default function DiffPanel({
     cwd: branchDiffPreview.data?.cwd,
     source: lazySource,
     baseRef: lazySource?.baseRef ?? selectedBaseRef,
+    ...(selectedSubmodule ? { submodulePath: selectedSubmodule.path } : {}),
     ignoreWhitespace: diffIgnoreWhitespace,
     theme: resolvedTheme,
     revision: branchDiffPreview.data
@@ -668,13 +707,15 @@ export default function DiffPanel({
     useDiffPanelStore.getState().selectBranchBaseRef(routeThreadRef, baseRef);
   };
   const selectedTurnValue = selectedTurn ? `turn:${selectedTurn.runId}` : "";
-  const selectedScopeValue = selectedCommitRange
-    ? "commit-range"
-    : selectedRunId === null
-      ? selectedGitScope
-      : selectedTurn?.runId === latestTurn?.runId
-        ? "latest"
-        : selectedTurnValue;
+  const selectedScopeValue = selectedSubmodule
+    ? "submodule-range"
+    : selectedCommitRange
+      ? "commit-range"
+      : selectedRunId === null
+        ? selectedGitScope
+        : selectedTurn?.runId === latestTurn?.runId
+          ? "latest"
+          : selectedTurnValue;
   const selectScopeValue = (value: string) => {
     if (value === "unstaged" || value === "branch") {
       selectGitScope(value);
@@ -703,6 +744,11 @@ export default function DiffPanel({
               {selectedCommitRange ? (
                 <DropdownMenuRadioItem value="commit-range" closeOnClick>
                   <span>{selectedCommitRange.label}</span>
+                </DropdownMenuRadioItem>
+              ) : null}
+              {selectedSubmodule ? (
+                <DropdownMenuRadioItem value="submodule-range" closeOnClick>
+                  <span>{selectedSubmodule.label}</span>
                 </DropdownMenuRadioItem>
               ) : null}
               <DropdownMenuRadioItem value="branch" closeOnClick>
@@ -1155,15 +1201,32 @@ export default function DiffPanel({
                     onRevealSearchMatch={unfoldDiffFile}
                     renderHeaderPrefix={(fileDiff, fileKey) => {
                       const unavailable = fileDiff.cacheKey?.endsWith(":pending") === true;
+                      const filePath = resolveFileDiffPath(fileDiff);
+                      const pointer = submodulePointers.get(filePath);
                       return (
-                        <DiffFileCollapseToggle
-                          filePath={resolveFileDiffPath(fileDiff)}
-                          fileKey={fileKey}
-                          collapsed={unavailable || collapsedDiffFileKeys.has(fileKey)}
-                          unavailable={unavailable}
-                          iconClassName={getDiffCollapseIconClassName(fileDiff)}
-                          onToggle={toggleDiffFileCollapsed}
-                        />
+                        <>
+                          <DiffFileCollapseToggle
+                            filePath={filePath}
+                            fileKey={fileKey}
+                            collapsed={unavailable || collapsedDiffFileKeys.has(fileKey)}
+                            unavailable={unavailable}
+                            iconClassName={getDiffCollapseIconClassName(fileDiff)}
+                            onToggle={toggleDiffFileCollapsed}
+                          />
+                          {pointer && selectedSubmodule === null ? (
+                            <Button
+                              size="xs"
+                              variant="ghost"
+                              aria-label={`Show ${pointer.path} submodule changes`}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                selectSubmodulePointer(pointer);
+                              }}
+                            >
+                              Submodule changes
+                            </Button>
+                          ) : null}
+                        </>
                       );
                     }}
                     options={{

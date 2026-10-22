@@ -1,6 +1,10 @@
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import type { FileDiffMetadata } from "@pierre/diffs";
-import type { EnvironmentId, ReviewDiffPreviewSource } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  ReviewDiffPreviewInput,
+  ReviewDiffPreviewSource,
+} from "@t3tools/contracts";
 import * as AsyncResult from "effect/reactivity/AsyncResult";
 import * as Atom from "effect/reactivity/Atom";
 import { useContext, useEffect, useRef, useState } from "react";
@@ -14,11 +18,46 @@ const filePathCollator = new Intl.Collator(undefined, {
 });
 const DEFAULT_INDICES = [0, 1, 2, 3];
 
+/**
+ * The single-file patch request for one row. A commit range and a submodule
+ * range both compare two revisions, and neither can be resolved from the
+ * working tree, so each has to name its own scope or the server reads HEAD.
+ */
+export function reviewFilePatchRequest(input: {
+  readonly cwd: string;
+  readonly baseRef: string | null;
+  readonly submodulePath: string | undefined;
+  readonly ignoreWhitespace: boolean;
+  readonly source: ReviewDiffPreviewSource;
+  readonly file: { readonly path: string; readonly previousPath: string | null };
+}): ReviewDiffPreviewInput & { file: NonNullable<ReviewDiffPreviewInput["file"]> } {
+  const { source, file } = input;
+  const range =
+    source.baseRef !== null && source.headRef !== null
+      ? { from: source.baseRef, to: source.headRef }
+      : null;
+  return {
+    cwd: input.cwd,
+    ...(input.baseRef ? { baseRef: input.baseRef } : {}),
+    ...(source.kind === "commit-range" && range ? { commitRange: range } : {}),
+    ...(source.kind === "submodule-range" && range && input.submodulePath
+      ? { submodule: { path: input.submodulePath, ...range } }
+      : {}),
+    ignoreWhitespace: input.ignoreWhitespace,
+    file: {
+      path: file.path,
+      previousPath: file.previousPath,
+      sourceKind: source.kind,
+    },
+  };
+}
+
 export function useReviewFilePatches({
   environmentId,
   cwd,
   source,
   baseRef,
+  submodulePath,
   ignoreWhitespace,
   theme,
   revision,
@@ -28,6 +67,8 @@ export function useReviewFilePatches({
   cwd: string | undefined;
   source: ReviewDiffPreviewSource | null;
   baseRef: string | null;
+  /** Set when `source` is a submodule range; its two ends ride on the source. */
+  submodulePath?: string | undefined;
   ignoreWhitespace: boolean;
   theme: "light" | "dark";
   revision: string | undefined;
@@ -40,6 +81,7 @@ export function useReviewFilePatches({
     source?.kind,
     source?.diffHash,
     baseRef,
+    submodulePath,
     ignoreWhitespace,
   ]);
   const [requested, setRequested] = useState(() => ({ scope, indices: DEFAULT_INDICES }));
@@ -48,6 +90,7 @@ export function useReviewFilePatches({
     cwd,
     source,
     baseRef,
+    submodulePath,
     ignoreWhitespace,
     scope,
     requested,
@@ -165,6 +208,7 @@ function reviewFileQueries({
   cwd,
   source,
   baseRef,
+  submodulePath,
   ignoreWhitespace,
   scope,
   requested,
@@ -173,6 +217,7 @@ function reviewFileQueries({
   cwd: string | undefined;
   source: ReviewDiffPreviewSource | null;
   baseRef: string | null;
+  submodulePath: string | undefined;
   ignoreWhitespace: boolean;
   scope: string;
   requested: { scope: string; indices: number[] };
@@ -190,23 +235,14 @@ function reviewFileQueries({
               environmentId,
               input: {
                 cacheKey: scope,
-                request: {
+                request: reviewFilePatchRequest({
                   cwd,
-                  ...(baseRef ? { baseRef } : {}),
-                  // A commit range has no merge base to resolve, so the file patch
-                  // must carry the range itself; its two ends are on the source.
-                  ...(source.kind === "commit-range" &&
-                  source.baseRef !== null &&
-                  source.headRef !== null
-                    ? { commitRange: { from: source.baseRef, to: source.headRef } }
-                    : {}),
+                  baseRef,
+                  submodulePath,
                   ignoreWhitespace,
-                  file: {
-                    path: file.path,
-                    previousPath: file.previousPath,
-                    sourceKind: source.kind,
-                  },
-                },
+                  source,
+                  file,
+                }),
               },
             };
             return { index, target, query: reviewEnvironment.diffFilePatch(target) };
