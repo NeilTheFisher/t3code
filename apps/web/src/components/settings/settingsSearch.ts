@@ -470,6 +470,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["beta alpha simlock callstack simulator emulator ios android pool lease gateway"],
   },
   {
+    id: "thread-workspaces",
+    title: "Thread workspaces (beta)",
+    to: "/settings/general",
+    searchTerms: [
+      "workspace group threads personal work office sidebar footer strip drag organize context",
+    ],
+  },
+  {
     id: "auto-settle-inactive-threads",
     title: "Auto-settle inactive threads",
     to: "/settings/threads",

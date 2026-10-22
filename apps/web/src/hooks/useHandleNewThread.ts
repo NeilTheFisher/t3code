@@ -15,6 +15,7 @@ import {
 } from "../composerDraftStore";
 import { newDraftId, newThreadId } from "../lib/utils";
 import { orderItemsByPreferredIds } from "../components/Sidebar.logic";
+import { fileThreadInActiveWorkspace } from "./useThreadWorkspaces";
 import {
   deriveLogicalProjectKeyFromSettings,
   getProjectOrderKey,
@@ -75,7 +76,7 @@ export function createNewThreadHandler(router: AnyRouter) {
     return resolveThreadRouteTarget(currentRouteParams);
   };
 
-  return (
+  const startNewThread = (
     projectRef: ScopedProjectRef,
     options?: {
       branch?: string | null;
@@ -420,6 +421,31 @@ export function createNewThreadHandler(router: AnyRouter) {
       });
       return { draftId, threadId };
     })();
+  };
+
+  // Every thread-creation path funnels through this handler, so filing the
+  // thread here covers the sidebar, the command palette, and the keybindings
+  // at once instead of at each call site.
+  return async (
+    projectRef: ScopedProjectRef,
+    options?: {
+      branch?: string | null;
+      worktreePath?: string | null;
+      envMode?: DraftThreadEnvMode;
+      startFromOrigin?: boolean;
+      replace?: boolean;
+      /** Composer text for the draft, set before it shows. A draft with user text keeps it. */
+      prompt?: string;
+    },
+  ) => {
+    const created = await startNewThread(projectRef, options);
+    if (created !== null) {
+      fileThreadInActiveWorkspace({
+        environmentId: projectRef.environmentId,
+        threadId: created.threadId,
+      });
+    }
+    return created;
   };
 }
 
