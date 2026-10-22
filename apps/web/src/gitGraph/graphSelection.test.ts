@@ -2,7 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   EMPTY_TREE_SHA,
-  graphSelectionEdge,
+  partitionCommitRuns,
   resolveGraphSelection,
   selectionDiffRange,
 } from "./graphSelection";
@@ -73,15 +73,24 @@ describe("graph selection", () => {
     expect(selectionDiffRange({ top: COMMITS[0]!, bottom: COMMITS[3]! }).from).toBe(EMPTY_TREE_SHA);
   });
 
-  it("marks only the run's edges so the outline can grow with the selection", () => {
-    const selection = resolveGraphSelection(COMMITS, "aaaaaaaa", "cccccccc")!;
+  it("groups the selected rows into one run so a single outline can wrap them", () => {
+    const selection = resolveGraphSelection(COMMITS, "bbbbbbbb", "cccccccc")!;
+    const runs = partitionCommitRuns(COMMITS, selection);
 
-    expect(graphSelectionEdge(selection, "aaaaaaaa")).toBe("top");
-    expect(graphSelectionEdge(selection, "bbbbbbbb")).toBe("middle");
-    expect(graphSelectionEdge(selection, "cccccccc")).toBe("bottom");
-    expect(graphSelectionEdge(selection, "dddddddd")).toBe("none");
+    expect(
+      runs.map((run) => ({ selected: run.selected, shas: run.commits.map((c) => c.sha) })),
+    ).toEqual([
+      { selected: false, shas: ["aaaaaaaa"] },
+      { selected: true, shas: ["bbbbbbbb", "cccccccc"] },
+      { selected: false, shas: ["dddddddd"] },
+    ]);
+  });
 
-    const single = resolveGraphSelection(COMMITS, "bbbbbbbb", "bbbbbbbb")!;
-    expect(graphSelectionEdge(single, "bbbbbbbb")).toBe("single");
+  it("keeps the whole window in one unselected run without a selection", () => {
+    const runs = partitionCommitRuns(COMMITS, null);
+
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.selected).toBe(false);
+    expect(runs[0]?.commits).toHaveLength(COMMITS.length);
   });
 });
