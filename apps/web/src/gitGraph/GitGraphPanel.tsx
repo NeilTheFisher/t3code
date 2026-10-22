@@ -17,16 +17,27 @@ import {
   useState,
 } from "react";
 
-import type { ContextMenuItem, EnvironmentId, VcsLogGraphResult } from "@t3tools/contracts";
+import {
+  AuthSourceControlWriteScope,
+  type ContextMenuItem,
+  type EnvironmentId,
+  type VcsLogGraphResult,
+} from "@t3tools/contracts";
+import {
+  isAtomCommandInterrupted,
+  squashAtomCommandFailure,
+} from "@t3tools/client-runtime/state/runtime";
 import * as DateTime from "effect/DateTime";
 import { readLocalApi } from "~/localApi";
 import { cn } from "~/lib/utils";
+import { useEnvironmentScope } from "~/state/session";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { vcsEnvironment } from "~/state/vcs";
 
 import { COMPOSER_MENTION_DRAG_TYPE } from "../components/chat/composerMentionDrag";
 import { PullRequestGlyph } from "../components/pullRequest/pullRequestIcons";
 import { Button } from "../components/ui/button";
+import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { commitDragText } from "./commitDrag";
 import { layoutGraph, type GraphRow } from "./graphLayout";
 import type { MockCommit, MockGraphData, MockThread, MockWorktree } from "./mockGraph";
@@ -572,6 +583,8 @@ export function GitGraphPanel(props: {
   const [notice, setNotice] = useState<string | null>(null);
   const noticeTimer = useRef<number | null>(null);
   const loadGraph = useAtomCommand(vcsEnvironment.logGraph, { reportFailure: false });
+  const switchRef = useAtomCommand(vcsEnvironment.switchRef, { reportFailure: false });
+  const canCheckout = useEnvironmentScope(props.environmentId, AuthSourceControlWriteScope);
   const loadGraphRef = useRef(loadGraph);
   loadGraphRef.current = loadGraph;
 
@@ -650,6 +663,7 @@ export function GitGraphPanel(props: {
     | "open-diff"
     | "copy-sha"
     | "copy-subject"
+    | "checkout"
     | "create-branch"
     | "rename-branch"
     | "cherry-pick"
@@ -679,12 +693,41 @@ export function GitGraphPanel(props: {
     showNotice(copied ? `${label} copied` : "Could not copy to the clipboard");
   };
 
+  const checkoutBranch = async (refName: string) => {
+    const cwd = props.cwd;
+    if (cwd === null) return;
+    const result = await switchRef({
+      environmentId: props.environmentId,
+      input: { cwd, refName },
+    });
+    if (result._tag === "Success") {
+      // The graph's HEAD mark and branch labels are read, not subscribed, so a
+      // successful checkout only becomes visible after an explicit reload.
+      showNotice(`Checked out ${result.value.refName ?? refName}`);
+      setReloadToken((token) => token + 1);
+      return;
+    }
+    if (isAtomCommandInterrupted(result)) return;
+    const failure = squashAtomCommandFailure(result);
+    toastManager.add(
+      stackedThreadToast({
+        type: "error",
+        title: `Could not check out ${refName}.`,
+        description: failure instanceof Error ? failure.message : "An error occurred.",
+      }),
+    );
+  };
+
   const openCommitMenu = async (commit: MockCommit, position: { x: number; y: number }) => {
     setSelectedSha(commit.sha);
     const api = readLocalApi();
     if (!api) return;
     const thread = commit.threadIds[0] ? threadsById.get(commit.threadIds[0]) : undefined;
     const branchRef = commit.refs.find((ref) => ref.kind === "branch");
+    // A remote tip checks out through its own ref; the server derives the local
+    // tracking branch, the same way the branch toolbar does.
+    const checkoutRef = branchRef ?? commit.refs.find((ref) => ref.kind === "remote");
+    const alreadyCheckedOut = checkoutRef !== undefined && checkoutRef.name === currentBranch;
     const items: ContextMenuItem<CommitMenuAction>[] = [
       { id: "open-diff", label: "Open diff" },
       { id: "copy-sha", label: "Copy SHA" },
@@ -695,15 +738,23 @@ export function GitGraphPanel(props: {
         label: "Filter by thread",
         separatorBefore: true,
       },
-      { id: "create-branch", label: "Create branch here", separatorBefore: true },
-      { id: "cherry-pick", label: "Cherry-pick onto current branch", separatorBefore: true },
+      {
+        id: "checkout",
+        disabled: checkoutRef === undefined || alreadyCheckedOut || !canCheckout,
+        label:
+          checkoutRef === undefined
+            ? "Checkout"
+            : alreadyCheckedOut
+              ? `${checkoutRef.name} is checked out`
+              : `Checkout ${checkoutRef.name}`,
+        separatorBefore: true,
+      },
+      { id: "create-branch", label: "Create branch here" },
     ];
     if (branchRef) {
-      items.splice(items.length - 1, 0, {
-        id: "rename-branch",
-        label: `Rename ${branchRef.name}…`,
-      });
+      items.push({ id: "rename-branch", label: `Rename ${branchRef.name}…` });
     }
+    items.push({ id: "cherry-pick", label: "Cherry-pick onto current branch" });
     const action = await api.contextMenu.show(items, position);
     switch (action) {
       case "open-diff":
@@ -717,6 +768,9 @@ export function GitGraphPanel(props: {
         break;
       case "filter-thread":
         if (thread) applyFilter(filterThreadId === thread.id ? null : thread.id);
+        break;
+      case "checkout":
+        if (checkoutRef) await checkoutBranch(checkoutRef.name);
         break;
       case "create-branch":
         showNotice("Create branch is not wired yet");
