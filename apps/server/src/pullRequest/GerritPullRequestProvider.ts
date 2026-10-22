@@ -45,12 +45,9 @@ const VERDICT_SCORE: Readonly<Record<PullRequestReviewVerdict, number>> = {
 };
 
 /**
- * What this build can do with a Gerrit change. Reads are complete — listing, detail, files,
- * comments, diff — and so are the writes Gerrit exposes: a cover comment, a Code-Review verdict,
- * submit, abandon, restore, rebase, and the work-in-progress flag (ready/draft), which no SSH verb
- * carries. The change description is editable through Gerrit's REST edit flow; Gerrit
- * has no reactions and cannot rewrite a remark, so those stay off rather than offering what would
- * fail.
+ * What this build can do with a Gerrit change: reads are complete, as are cover comments,
+ * Code-Review verdicts, submit/abandon/restore/rebase and the WIP flag no SSH verb carries.
+ * Gerrit has no reactions and cannot rewrite, so those stay off.
  */
 const CAPABILITIES: PullRequestCapabilities = {
   diff: true,
@@ -98,7 +95,7 @@ function toChangeRequest(change: GerritChange): ProviderChangeRequest {
     baseBranch: change.baseBranch,
     state: change.state,
     isDraft: change.isDraft,
-    mergeability: "unknown",
+    mergeability: change.mergeability,
     // Line counts are a separate read, which only the detail is worth spending on.
     additions: 0,
     deletions: 0,
@@ -139,6 +136,7 @@ function toSummary(change: GerritChange): ProviderChangeRequestSummary {
     baseBranch: change.baseBranch,
     state: change.state,
     isDraft: change.isDraft,
+    mergeability: change.mergeability,
     closedAt: change.closedAt,
     mergedAt: change.mergedAt,
     updatedAt: change.updatedAt,
@@ -411,11 +409,10 @@ export const make = Effect.gen(function* () {
     );
 
   /** The change's current patch set, which every write and the diff address. */
-  const loadPatchSet = (
+  const loadPatchSet = Effect.fn("GerritPullRequestProvider.loadPatchSet")(function* (
     input: { cwd: string; host: string; number: number; repository: string },
     operation: string,
-  ) =>
-    Effect.gen(function* () {
+  ) {
       const record = yield* readOne(
         {
           cwd: input.cwd,
@@ -484,12 +481,11 @@ export const make = Effect.gen(function* () {
       Effect.mapError(fail(operation)),
     );
 
-  const threadContext = (
+  const threadContext = Effect.fn("GerritPullRequestProvider.threadContext")(function* (
     input: { cwd: string; host: string; number: number },
     threadId: string,
     operation: string,
-  ) =>
-    Effect.gen(function* () {
+  ) {
       const target = yield* restTarget(input.cwd, input.host, operation);
       const comments = yield* rest
         .listComments({ ...target, change: input.number })
@@ -529,6 +525,7 @@ export const make = Effect.gen(function* () {
           search: listSearch(input.repository, input.state, input.involvement, input.query),
           limit: input.limit,
           start: input.cursor?.delivered ?? 0,
+          allApprovals: true,
         },
         "listChangeRequests",
       ).pipe(
@@ -556,6 +553,7 @@ export const make = Effect.gen(function* () {
           host: input.host,
           search: changeQuery(input.number, input.repository),
           limit: 1,
+          allApprovals: true,
         },
         "getChangeRequestSummary",
       ).pipe(
@@ -576,6 +574,7 @@ export const make = Effect.gen(function* () {
           host: input.host,
           search: changeQuery(input.number, input.repository),
           limit: 1,
+          allApprovals: true,
         },
         "getChangeRequestChecks",
       ).pipe(
@@ -610,8 +609,7 @@ export const make = Effect.gen(function* () {
         }),
       ),
 
-    getChangeRequestActivity: (input) =>
-      Effect.gen(function* () {
+    getChangeRequestActivity: Effect.fn("GerritPullRequestProvider.getChangeRequestActivity")(function* (input) {
         const record = yield* readOne(
           {
             cwd: input.cwd,
@@ -687,8 +685,7 @@ export const make = Effect.gen(function* () {
 
     getViewerPermissions: () => Effect.succeed(VIEWER_PERMISSIONS),
 
-    getDiff: (input) =>
-      Effect.gen(function* () {
+    getDiff: Effect.fn("GerritPullRequestProvider.getDiff")(function* (input) {
         const patchSet = yield* loadPatchSet(input, "getDiff");
         const remote = yield* resolveRemote(input.cwd, input.host, "getDiff");
         const revision = `refs/t3-gerrit/${input.number}/${patchSet.number}`;
@@ -710,8 +707,7 @@ export const make = Effect.gen(function* () {
         };
       }),
 
-    getDiffFileContents: (input) =>
-      Effect.gen(function* () {
+    getDiffFileContents: Effect.fn("GerritPullRequestProvider.getDiffFileContents")(function* (input) {
         const patchSet = yield* loadPatchSet(input, "getDiffFileContents");
         const remote = yield* resolveRemote(input.cwd, input.host, "getDiffFileContents");
         const revision = `refs/t3-gerrit/${input.number}/${patchSet.number}`;
@@ -740,8 +736,7 @@ export const make = Effect.gen(function* () {
         return { oldContents, newContents };
       }),
 
-    getFilesViewed: (input) =>
-      Effect.gen(function* () {
+    getFilesViewed: Effect.fn("GerritPullRequestProvider.getFilesViewed")(function* (input) {
         const target = yield* restTarget(input.cwd, input.host, "getFilesViewed");
         const files = yield* rest
           .listReviewedFiles({ ...target, change: input.number })
@@ -752,8 +747,7 @@ export const make = Effect.gen(function* () {
         };
       }),
 
-    setFilesViewed: (input) =>
-      Effect.gen(function* () {
+    setFilesViewed: Effect.fn("GerritPullRequestProvider.setFilesViewed")(function* (input) {
         const target = yield* restTarget(input.cwd, input.host, "setFilesViewed");
         for (const file of input.files) {
           yield* rest
@@ -767,8 +761,7 @@ export const make = Effect.gen(function* () {
         }
       }),
 
-    runAction: (input) =>
-      Effect.gen(function* () {
+    runAction: Effect.fn("GerritPullRequestProvider.runAction")(function* (input) {
         // Gerrit's WIP flag moves over REST; the SSH verbs below cannot carry it. Gerrit itself
         // refuses the call for anyone but the owner, a project owner or a site admin.
         if (input.action === "ready" || input.action === "draft") {
@@ -798,8 +791,7 @@ export const make = Effect.gen(function* () {
           .pipe(Effect.mapError(fail("runAction")));
       }),
 
-    updateChangeRequest: (input) =>
-      Effect.gen(function* () {
+    updateChangeRequest: Effect.fn("GerritPullRequestProvider.updateChangeRequest")(function* (input) {
         const record = yield* readOne(
           {
             cwd: input.cwd,
@@ -827,8 +819,7 @@ export const make = Effect.gen(function* () {
           .pipe(Effect.mapError(failRest("updateChangeRequest")));
       }),
 
-    comment: (input) =>
-      Effect.gen(function* () {
+    comment: Effect.fn("GerritPullRequestProvider.comment")(function* (input) {
         const patchSet = yield* loadPatchSet(input, "comment");
         yield* cli
           .review({
@@ -841,8 +832,7 @@ export const make = Effect.gen(function* () {
           .pipe(Effect.mapError(fail("comment")));
       }),
 
-    submitReview: (input) =>
-      Effect.gen(function* () {
+    submitReview: Effect.fn("GerritPullRequestProvider.submitReview")(function* (input) {
         const patchSet = yield* loadPatchSet(input, "submitReview");
         yield* cli
           .reviewJson({
@@ -862,8 +852,7 @@ export const make = Effect.gen(function* () {
     // Gerrit has no reactions and cannot rewrite a remark; those fail rather than being offered.
     // Replies, resolution and reviewers use Gerrit's REST API for the comment ids and account
     // search the SSH command line cannot carry.
-    replyToThread: (input) =>
-      Effect.gen(function* () {
+    replyToThread: Effect.fn("GerritPullRequestProvider.replyToThread")(function* (input) {
         const target = yield* restTarget(input.cwd, input.host, "replyToThread");
         const { root, latest } = yield* threadContext(input, input.threadId, "replyToThread");
         yield* rest
@@ -889,8 +878,7 @@ export const make = Effect.gen(function* () {
           .pipe(Effect.mapError(failRest("replyToThread")));
       }),
 
-    setThreadResolution: (input) =>
-      Effect.gen(function* () {
+    setThreadResolution: Effect.fn("GerritPullRequestProvider.setThreadResolution")(function* (input) {
         const target = yield* restTarget(input.cwd, input.host, "setThreadResolution");
         const { root, latest } = yield* threadContext(input, input.threadId, "setThreadResolution");
         yield* rest
@@ -915,8 +903,7 @@ export const make = Effect.gen(function* () {
           .pipe(Effect.mapError(failRest("setThreadResolution")));
       }),
 
-    listReviewerCandidates: (input) =>
-      Effect.gen(function* () {
+    listReviewerCandidates: Effect.fn("GerritPullRequestProvider.listReviewerCandidates")(function* (input) {
         const target = yield* restTarget(input.cwd, input.host, "listReviewerCandidates");
         const [accounts, reviewers] = yield* Effect.all(
           [
@@ -945,8 +932,7 @@ export const make = Effect.gen(function* () {
         };
       }),
 
-    setReviewerRequest: (input) =>
-      Effect.gen(function* () {
+    setReviewerRequest: Effect.fn("GerritPullRequestProvider.setReviewerRequest")(function* (input) {
         const target = yield* restTarget(input.cwd, input.host, "setReviewerRequest");
         for (const reviewer of input.reviewers) {
           yield* rest
