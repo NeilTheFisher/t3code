@@ -3,8 +3,8 @@ import { describe, expect, it } from "vite-plus/test";
 import { commitDragText } from "./commitDrag";
 
 describe("commit drag text", () => {
-  it("drags the full SHA when the commit has no thread", () => {
-    expect(commitDragText({ sha: "a".repeat(40), threads: [] })).toBe("a".repeat(40));
+  it("abbreviates the SHA in the text form", () => {
+    expect(commitDragText({ sha: "a".repeat(40), threads: [] })).toBe("a".repeat(8));
   });
 
   it("appends a thread link when the commit is attributed to one", () => {
@@ -13,7 +13,7 @@ describe("commit drag text", () => {
         sha: "b".repeat(40),
         threads: [{ id: "thread:project:1", title: "Git graph UI" }],
       }),
-    ).toBe(`${"b".repeat(40)} ([Git graph UI](t3-thread://v1/thread:project:1))`);
+    ).toBe(`${"b".repeat(8)} ([Git graph UI](t3-thread://v1/thread:project:1))`);
   });
 
   it("lists every attributed thread", () => {
@@ -25,6 +25,6 @@ describe("commit drag text", () => {
           { id: "two", title: "Two" },
         ],
       }),
-    ).toBe(`${"c".repeat(40)} ([One](t3-thread://v1/one), [Two](t3-thread://v1/two))`);
+    ).toBe(`${"c".repeat(8)} ([One](t3-thread://v1/one), [Two](t3-thread://v1/two))`);
   });
 });
