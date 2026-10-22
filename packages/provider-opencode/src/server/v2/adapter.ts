@@ -217,9 +217,9 @@ const usedTokensOf = (tokens: Tokens): number =>
   tokens.input + tokens.cache.read + tokens.cache.write + tokens.output;
 
 /**
- * One step's tokens as the live context size (#8144). OpenCode reports each
- * step's input as the whole conversation, so the latest step is the current
- * context; a turn's cumulative totals would over-count it.
+ * One step's tokens as the live context size. OpenCode reports each step's input as
+ * the whole conversation, so the latest step is the current context; cumulative
+ * turn totals would over-count it.
  */
 const stepTokenUsage = (tokens: Tokens, maxTokens: number | null, updatedAt: string) => ({
   usedTokens: usedTokensOf(tokens),
@@ -1409,8 +1409,8 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
     };
 
     /**
-     * Publishes the turn's live context size after a step, so the composer
-     * meter moves as the turn runs instead of only when it ends (#8144).
+     * Publishes the turn's live context size after a step, so the composer meter
+     * moves as the turn runs instead of only when it ends.
      */
     const emitLiveTurnUsage = Effect.fnUntraced(function* (state: ThreadState, turn: ActiveTurn) {
       const tokens = turn.lastStep;
