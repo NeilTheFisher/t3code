@@ -28,7 +28,10 @@ type PullRequestSpeedActionEntry = Pick<
   | "number"
   | "state"
   | "isDraft"
-> & { readonly stack?: object | undefined };
+> & {
+  readonly mergeability?: EnvironmentPullRequestEntry["mergeability"];
+  readonly stack?: object | undefined;
+};
 
 export interface PullRequestSpeedActionResult<Entry = EnvironmentPullRequestEntry> {
   readonly entry: Entry;

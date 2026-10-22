@@ -13,7 +13,12 @@ import { PullRequestGlyph } from "./pullRequestGlyphs";
 
 type ActionDetail = Pick<
   PullRequestDetail,
-  "state" | "isDraft" | "mergeability" | "autoMergeEnabled" | "workflowApprovalsRequired"
+  | "provider"
+  | "state"
+  | "isDraft"
+  | "mergeability"
+  | "autoMergeEnabled"
+  | "workflowApprovalsRequired"
 > & {
   readonly capabilities: Pick<
     PullRequestDetail["capabilities"],
@@ -107,7 +112,12 @@ export function canPerformPullRequestAction(pr: ActionDetail, action: PullReques
     case "draft":
       return !pr.isDraft;
     case "merge":
-      return !pr.isDraft && pr.mergeability !== "conflicting" && allowedMergeMethods(pr).length > 0;
+      return (
+        !pr.isDraft &&
+        pr.mergeability !== "conflicting" &&
+        (pr.provider !== "gerrit" || pr.mergeability === "mergeable") &&
+        allowedMergeMethods(pr).length > 0
+      );
     case "enable-auto-merge":
       return !pr.isDraft && pr.autoMergeEnabled === false && allowedMergeMethods(pr).length > 0;
     case "disable-auto-merge":
@@ -147,6 +157,8 @@ export function mergeSummary(
   if (pr.isDraft) return "Draft";
   if (pr.mergeability === "conflicting") return "Has conflicts";
   if (!connectionAllowsWrites) return "Read-only connection";
+  if (pr.provider === "gerrit" && pr.mergeability !== "mergeable")
+    return "Needs Code-Review +2 before submitting.";
   const allowed = allowedMergeMethods(pr);
   const method = pr.autoMergeMethod ?? (allowed.includes("squash") ? "squash" : allowed[0]);
   const methodLabel = method ? `${method[0]?.toUpperCase()}${method.slice(1)}` : "Merge";

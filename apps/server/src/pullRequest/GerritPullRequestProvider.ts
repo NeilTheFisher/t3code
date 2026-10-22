@@ -98,7 +98,7 @@ function toChangeRequest(change: GerritChange): ProviderChangeRequest {
     baseBranch: change.baseBranch,
     state: change.state,
     isDraft: change.isDraft,
-    mergeability: "unknown",
+    mergeability: change.mergeability,
     // Line counts are a separate read, which only the detail is worth spending on.
     additions: 0,
     deletions: 0,
@@ -139,6 +139,7 @@ function toSummary(change: GerritChange): ProviderChangeRequestSummary {
     baseBranch: change.baseBranch,
     state: change.state,
     isDraft: change.isDraft,
+    mergeability: change.mergeability,
     closedAt: change.closedAt,
     mergedAt: change.mergedAt,
     updatedAt: change.updatedAt,
@@ -529,6 +530,7 @@ export const make = Effect.gen(function* () {
           search: listSearch(input.repository, input.state, input.involvement, input.query),
           limit: input.limit,
           start: input.cursor?.delivered ?? 0,
+          allApprovals: true,
         },
         "listChangeRequests",
       ).pipe(
@@ -556,6 +558,7 @@ export const make = Effect.gen(function* () {
           host: input.host,
           search: changeQuery(input.number, input.repository),
           limit: 1,
+          allApprovals: true,
         },
         "getChangeRequestSummary",
       ).pipe(
@@ -576,6 +579,7 @@ export const make = Effect.gen(function* () {
           host: input.host,
           search: changeQuery(input.number, input.repository),
           limit: 1,
+          allApprovals: true,
         },
         "getChangeRequestChecks",
       ).pipe(
