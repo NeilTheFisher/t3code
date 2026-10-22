@@ -1,4 +1,4 @@
-import { PullRequestContextMetadata } from "@t3tools/contracts";
+import { CommitContextMetadata, PullRequestContextMetadata } from "@t3tools/contracts";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import { Option, Schema } from "effect";
 
@@ -10,8 +10,20 @@ export const COMPOSER_MENTION_DRAG_TYPE = "application/x-t3code-composer-mention
  */
 export const COMPOSER_PULL_REQUEST_DRAG_TYPE = "application/x-t3code-pull-request";
 
+/**
+ * Drag payload type carrying a commit, as JSON `CommitContextMetadata`. Set on
+ * drags that start on a git-graph row; the composer drops it as a commit chip.
+ */
+export const COMPOSER_COMMIT_DRAG_TYPE = "application/x-t3code-commit";
+
 const PullRequestDragPayload = Schema.fromJsonString(PullRequestContextMetadata);
 const decodePullRequestPayload = Schema.decodeUnknownOption(PullRequestDragPayload);
+
+const CommitDragPayload = Schema.fromJsonString(CommitContextMetadata);
+const decodeCommitPayload = Schema.decodeUnknownOption(CommitDragPayload);
+
+/** The `COMPOSER_COMMIT_DRAG_TYPE` data for a git-graph row's drag. */
+export const encodeCommitDragPayload = Schema.encodeSync(CommitDragPayload);
 
 /** The `COMPOSER_PULL_REQUEST_DRAG_TYPE` data for a pull request row's drag. */
 export const encodePullRequestDragPayload = Schema.encodeSync(PullRequestDragPayload);
@@ -26,7 +38,9 @@ export function composerMentionFromTreePath(treePath: string): string | null {
 
 export function dataTransferHasComposerMention(types: ReadonlyArray<string>): boolean {
   return (
-    types.includes(COMPOSER_MENTION_DRAG_TYPE) || types.includes(COMPOSER_PULL_REQUEST_DRAG_TYPE)
+    types.includes(COMPOSER_MENTION_DRAG_TYPE) ||
+    types.includes(COMPOSER_PULL_REQUEST_DRAG_TYPE) ||
+    types.includes(COMPOSER_COMMIT_DRAG_TYPE)
   );
 }
 
@@ -52,6 +66,7 @@ export interface ComposerMentionDragEvent {
 export interface ComposerMentionDropHost {
   insertMentionAtEnd(text: string): boolean;
   insertPullRequestAtEnd(pullRequest: PullRequestContextMetadata): boolean;
+  insertCommitAtEnd(commit: CommitContextMetadata): boolean;
   setDragActive(active: boolean): void;
   onInsertRejected(): void;
 }
@@ -102,6 +117,13 @@ export function makeComposerMentionDragHandlers(
           event.dataTransfer.getData(COMPOSER_PULL_REQUEST_DRAG_TYPE),
         );
         if (Option.isSome(pullRequest) && !host.insertPullRequestAtEnd(pullRequest.value)) {
+          host.onInsertRejected();
+        }
+        return;
+      }
+      if (event.dataTransfer.types.includes(COMPOSER_COMMIT_DRAG_TYPE)) {
+        const commit = decodeCommitPayload(event.dataTransfer.getData(COMPOSER_COMMIT_DRAG_TYPE));
+        if (Option.isSome(commit) && !host.insertCommitAtEnd(commit.value)) {
           host.onInsertRejected();
         }
         return;

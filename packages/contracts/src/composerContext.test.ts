@@ -120,6 +120,15 @@ const knownRecords: Record<(typeof COMPOSER_CONTEXT_KINDS)[number], Record<strin
     threadId: "thread-1",
     title: "Fix login flow",
   },
+  commit: {
+    ...base,
+    kind: "commit",
+    label: "abc12345 fix the thing",
+    sha: "abc1234567890abc1234567890abc1234567890a",
+    subject: "fix the thing",
+    repositoryPath: "/repos/example",
+    threadIds: ["thread-1"],
+  },
 };
 
 describe("ComposerContextRecord", () => {

@@ -245,6 +245,8 @@ import {
   composerContextImportLookupIds,
   isSameComposerContextPayload,
   uploadedAttachmentContextRecord,
+  commitContextRecord,
+  commitContextReference,
   fileContextReference,
   imageContextReference,
   previewAnnotationContextId,
@@ -2112,6 +2114,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const composerPreviewAnnotations = composerDraft.previewAnnotations;
   const composerReviewComments = composerDraft.reviewComments;
   const composerThreadContexts = attachmentDraft.threadContexts;
+  const composerCommitContexts = composerDraft.commitContexts;
   const {
     pendingSnapShotAnimations,
     pendingSnapShotIds,
@@ -2162,6 +2165,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     reviewComments: composerReviewComments,
     previewAnnotations: composerPreviewAnnotations,
     threadContexts: composerThreadContexts,
+    commitContexts: composerCommitContexts,
     images: composerImages,
     files: composerFiles,
     uploadsByImageId,
@@ -3018,6 +3022,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     (store) => store.addPreviewAnnotation,
   );
   const addComposerDraftThreadContexts = useComposerDraftStore((store) => store.addThreadContexts);
+  const addComposerDraftCommitContext = useComposerDraftStore((store) => store.addCommitContext);
   const setComposerDraftThreadContexts = useComposerDraftStore((store) => store.setThreadContexts);
   const buildContextClipboardFragment = (contextIds: ReadonlyArray<string>): string | null => {
     const wanted = new Set(contextIds);
@@ -3035,6 +3040,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         .filter((c) => wanted.has(terminalContextReference(c).contextId))
         .map(terminalContextRecord),
       ...composerThreadContexts.filter((record) => wanted.has(record.contextId)),
+      ...composerCommitContexts.filter((record) => wanted.has(record.contextId)),
       ...composerReviewComments
         .filter((c) => wanted.has(reviewCommentContextId(c.id)))
         .map(reviewCommentContextRecord),
@@ -5906,6 +5912,22 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       );
       if (inserted) {
         addComposerDraftReviewComment(composerDraftTarget, comment, { appendReference: false });
+      }
+      return inserted;
+    },
+    insertCommitAtEnd: (commit) => {
+      const record = commitContextRecord({
+        sha: commit.sha,
+        subject: commit.subject,
+        repositoryPath: commit.repositoryPath,
+        threadIds: commit.threadIds,
+      });
+      const inserted = insertComposerTextAtEndStable(
+        `${formatInlineContextReference(commitContextReference(record))} `,
+        { ensureLeadingBoundary: true },
+      );
+      if (inserted) {
+        addComposerDraftCommitContext(composerDraftTarget, record, { appendReference: false });
       }
       return inserted;
     },

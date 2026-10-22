@@ -1,6 +1,10 @@
 import ChatMarkdown from "./ChatMarkdown";
 import { ReadOnlySourcePreview } from "./files/AttachmentFilePreview";
-import type { PreviewAnnotationPayload, ThreadContextRecord } from "@t3tools/contracts";
+import type {
+  CommitContextRecord,
+  PreviewAnnotationPayload,
+  ThreadContextRecord,
+} from "@t3tools/contracts";
 import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments";
 import { videoMimeType } from "@t3tools/shared/video";
 import { MessageCircleIcon, MousePointerClickIcon } from "lucide-react";
@@ -31,6 +35,7 @@ import {
 import type { TerminalContextDraft } from "~/lib/terminalContext";
 import type { ReviewCommentContext } from "~/reviewCommentContext";
 import { ComposerPendingTerminalContextChip } from "./chat/ComposerPendingTerminalContexts";
+import { CommitContextChip } from "./CommitContextChip";
 import { ThreadContextChip } from "./ThreadContextChip";
 import {
   createContextPresentationRegistry,
@@ -58,7 +63,8 @@ export type ComposerDraftContextRecord =
     }
   | { kind: "image"; record: ComposerImageAttachment; upload?: AttachmentUploadState | undefined }
   | { kind: "file"; record: ComposerFileAttachment; upload?: AttachmentUploadState | undefined }
-  | { kind: "thread"; record: ThreadContextRecord };
+  | { kind: "thread"; record: ThreadContextRecord }
+  | { kind: "commit"; record: CommitContextRecord };
 
 export interface ComposerContextActions {
   environmentId: EnvironmentId | null;
@@ -97,6 +103,7 @@ export function composerContextRecordsFromDraft(input: {
   reviewComments?: ReadonlyArray<ReviewCommentContext>;
   previewAnnotations?: ReadonlyArray<PreviewAnnotationPayload>;
   threadContexts?: ReadonlyArray<ThreadContextRecord>;
+  commitContexts?: ReadonlyArray<CommitContextRecord>;
   images?: ReadonlyArray<ComposerImageAttachment>;
   files?: ReadonlyArray<ComposerFileAttachment>;
   uploadsByImageId?: Readonly<Record<string, AttachmentUploadState>>;
@@ -132,6 +139,9 @@ export function composerContextRecordsFromDraft(input: {
   }
   for (const record of input.threadContexts ?? []) {
     records.set(record.contextId, { kind: "thread", record });
+  }
+  for (const record of input.commitContexts ?? []) {
+    records.set(record.contextId, { kind: "commit", record });
   }
   return records;
 }
@@ -351,7 +361,15 @@ const composerContextPresentationRegistry = createContextPresentationRegistry<
   ComposerContextRenderContext,
   ReactElement
 >({
-  requiredKinds: ["image", "file", "terminal", "review-comment", "preview-annotation", "thread"],
+  requiredKinds: [
+    "image",
+    "file",
+    "terminal",
+    "review-comment",
+    "preview-annotation",
+    "thread",
+    "commit",
+  ],
   handlers: [
     {
       kind: "terminal",
@@ -443,6 +461,16 @@ const composerContextPresentationRegistry = createContextPresentationRegistry<
       render: (entry, context) =>
         entry.kind === "thread" ? (
           <ComposerThreadContextChip record={entry.record} />
+        ) : (
+          <UnresolvedContextChip label={context.label} />
+        ),
+    },
+    {
+      kind: "commit",
+      canRender: (entry) => entry.kind === "commit",
+      render: (entry, context) =>
+        entry.kind === "commit" ? (
+          <CommitContextChip record={entry.record} />
         ) : (
           <UnresolvedContextChip label={context.label} />
         ),

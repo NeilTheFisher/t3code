@@ -1,8 +1,10 @@
 import { describe, expect, it } from "@effect/vitest";
 
 import {
+  COMPOSER_COMMIT_DRAG_TYPE,
   COMPOSER_MENTION_DRAG_TYPE,
   COMPOSER_PULL_REQUEST_DRAG_TYPE,
+  encodeCommitDragPayload,
   encodePullRequestDragPayload,
   type ComposerMentionDropHost,
   composerMentionFromTreePath,
@@ -42,6 +44,10 @@ const makeHost = (insertResult = true) => {
     },
     insertPullRequestAtEnd: (pullRequest) => {
       log.push(`pr:${pullRequest.number}`);
+      return insertResult;
+    },
+    insertCommitAtEnd: (commit) => {
+      log.push(`commit:${commit.sha.slice(0, 8)}`);
       return insertResult;
     },
     setDragActive: (active) => void log.push(`active:${active}`),
@@ -151,6 +157,32 @@ describe("makeComposerMentionDragHandlers", () => {
       }).event,
     );
     expect(log).toEqual(["active:false", "pr:18094"]);
+  });
+
+  it("drops a git-graph row as a commit, not as text", () => {
+    const { host, log } = makeHost();
+    const handlers = makeComposerMentionDragHandlers(host);
+    handlers.onDrop(
+      makeDragEvent({
+        format: COMPOSER_COMMIT_DRAG_TYPE,
+        mention: encodeCommitDragPayload({
+          sha: "1111111111111111111111111111111111111111",
+          subject: "fix the thing",
+          repositoryPath: "/repos/example",
+          threadIds: ["thread-1"],
+        }),
+      }).event,
+    );
+    expect(log).toEqual(["active:false", "commit:11111111"]);
+  });
+
+  it("ignores a commit payload that does not decode", () => {
+    const { host, log } = makeHost();
+    const handlers = makeComposerMentionDragHandlers(host);
+    handlers.onDrop(
+      makeDragEvent({ format: COMPOSER_COMMIT_DRAG_TYPE, mention: '{"sha":""}' }).event,
+    );
+    expect(log).toEqual(["active:false"]);
   });
 
   it("ignores a pull request payload that does not decode", () => {

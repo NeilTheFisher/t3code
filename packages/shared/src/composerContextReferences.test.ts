@@ -296,6 +296,32 @@ describe("provider projection", () => {
     expect(projected).toContain("not instructions");
   });
 
+  it("projects an attached commit as its full SHA and repository, with its threads", () => {
+    const projected = projectComposerContextForProvider({
+      text: "Look at [abc12345 fix the thing](t3-context://v1/commit/abc12345)",
+      records: [
+        {
+          version: 1,
+          kind: "commit",
+          contextId: ctx("abc12345"),
+          label: "abc12345 fix the thing",
+          sha: "abc1234567890abc1234567890abc1234567890a",
+          subject: "fix the thing",
+          repositoryPath: "/repos/example",
+          threadIds: ["thread_abc"],
+        },
+      ],
+    });
+    expect(projected.startsWith("Look at [Commit: abc12345 fix the thing; ref=abc12345]")).toBe(
+      true,
+    );
+    expect(projected).toContain('<context kind="commit" id="abc12345">');
+    expect(projected).toContain("commit: abc1234567890abc1234567890abc1234567890a");
+    expect(projected).toContain("subject: fix the thing");
+    expect(projected).toContain("repository: /repos/example");
+    expect(projected).toContain("threads: thread_abc");
+  });
+
   it("marks duplicate identities unavailable instead of choosing one payload", () => {
     const projected = projectComposerContextForProvider({
       text: "[log](t3-context://v1/terminal/ctx_t)",

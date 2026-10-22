@@ -130,6 +130,7 @@ import { readProjectFileFresh } from "../files/projectFilesQueryState";
 import { PREFERRED_HIGHLIGHTER } from "../../lib/syntaxHighlighting";
 import ChatMarkdown, { ChatMarkdownAssetImage } from "../ChatMarkdown";
 import { T3Wordmark } from "../T3Wordmark";
+import { CommitContextChip } from "../CommitContextChip";
 import { ThreadContextChip } from "../ThreadContextChip";
 import {
   ArrowRightIcon,
@@ -4643,6 +4644,16 @@ const userMessageContextPresentationRegistry = createContextPresentationRegistry
       render: (record, context) =>
         record.kind === "thread" ? (
           <ThreadContextChip record={record} copyMarkdown={context.copyMarkdown} />
+        ) : (
+          <UnavailableUserMessageContextChip {...context} />
+        ),
+    },
+    {
+      kind: "commit",
+      canRender: (record) => record.kind === "commit",
+      render: (record, context) =>
+        record.kind === "commit" ? (
+          <CommitContextChip record={record} copyMarkdown={context.copyMarkdown} />
         ) : (
           <UnavailableUserMessageContextChip {...context} />
         ),

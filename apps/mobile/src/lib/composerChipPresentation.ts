@@ -40,6 +40,12 @@ const CONTEXT_CHIP_PRESENTATIONS = {
     symbol: "bubble.left.and.bubble.right",
     icon: "messages-square",
   },
+  commit: {
+    accent: "#00935c",
+    symbol: "arrow.triangle.branch",
+    // No bundled PNG for this kind; the symbol carries it.
+    icon: null,
+  },
 } as const satisfies Record<string, ContextChipPresentation>;
 
 export const UNAVAILABLE_CONTEXT_CHIP_PRESENTATION: ContextChipPresentation = {

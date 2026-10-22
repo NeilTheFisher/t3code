@@ -3,6 +3,7 @@ import {
   COMPOSER_CONTEXT_REVIEW_TEXT_MAX_CHARS,
 } from "@t3tools/contracts";
 import type {
+  CommitContextRecord,
   ComposerContextId,
   ComposerContextRecord,
   EnvironmentId,
@@ -168,6 +169,37 @@ export function threadContextRecord(ref: ScopedThreadRef, title: string): Thread
     environmentId: ref.environmentId,
     threadId: ref.threadId,
     title: label,
+  };
+}
+
+export function commitContextId(sha: string): ComposerContextId {
+  return toKindScopedComposerContextId("commit", sha);
+}
+
+export function commitContextReference(record: CommitContextRecord): ComposerContextReference {
+  return { kind: "commit", contextId: record.contextId, label: record.label };
+}
+
+/** The chip's label leads with the abbreviated sha; the record keeps the full one. */
+export function commitContextLabel(sha: string, subject: string): string {
+  return sanitizeComposerContextLabel(`${sha.slice(0, 8)} ${subject}`, "commit");
+}
+
+export function commitContextRecord(input: {
+  readonly sha: string;
+  readonly subject: string;
+  readonly repositoryPath: string;
+  readonly threadIds: ReadonlyArray<string>;
+}): CommitContextRecord {
+  return {
+    version: 1,
+    kind: "commit",
+    contextId: commitContextId(input.sha),
+    label: commitContextLabel(input.sha, input.subject),
+    sha: input.sha,
+    subject: input.subject,
+    repositoryPath: input.repositoryPath,
+    threadIds: [...input.threadIds],
   };
 }
 
