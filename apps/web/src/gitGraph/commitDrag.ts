@@ -1,3 +1,4 @@
+import { ThreadId } from "@t3tools/contracts";
 import { formatThreadLink } from "@t3tools/shared/threadLinks";
 
 export interface CommitDragThread {
@@ -6,15 +7,20 @@ export interface CommitDragThread {
 }
 
 /**
- * What a commit drag inserts into the composer: the full SHA, and a thread link
- * for every thread the commit is attributed to. The SHA stays first so a drag
- * that lands outside the composer still reads as a commit.
+ * The plain-text form of a commit drag, for drops that land outside the composer.
+ * The abbreviated SHA reads better as text; the composer gets the full one
+ * through the typed payload instead.
  */
 export function commitDragText(input: {
   readonly sha: string;
   readonly threads: ReadonlyArray<CommitDragThread>;
 }): string {
-  if (input.threads.length === 0) return input.sha;
-  const links = input.threads.map((thread) => formatThreadLink(thread.id, thread.title)).join(", ");
-  return `${input.sha} (${links})`;
+  const sha = input.sha.slice(0, 8);
+  if (input.threads.length === 0) return sha;
+  const links = input.threads
+    .map((thread) =>
+      formatThreadLink({ environmentId: null, threadId: ThreadId.make(thread.id) }, thread.title),
+    )
+    .join(", ");
+  return `${sha} (${links})`;
 }
