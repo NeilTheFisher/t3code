@@ -61,20 +61,29 @@ export function selectionDiffRange(selection: {
   };
 }
 
-/** Where a commit sits in the selected run, so only the run's edges are drawn. */
-export type GraphSelectionEdge = "none" | "single" | "top" | "middle" | "bottom";
+export interface GraphCommitRun<Commit extends GraphCommitIdentity> {
+  readonly selected: boolean;
+  readonly commits: ReadonlyArray<Commit>;
+}
 
-export function graphSelectionEdge(
-  selection: {
-    readonly shas: ReadonlySet<string>;
-    readonly top: GraphCommitIdentity;
-    readonly bottom: GraphCommitIdentity;
-  } | null,
-  sha: string,
-): GraphSelectionEdge {
-  if (selection === null || !selection.shas.has(sha)) return "none";
-  if (selection.top.sha === selection.bottom.sha) return "single";
-  if (sha === selection.top.sha) return "top";
-  if (sha === selection.bottom.sha) return "bottom";
-  return "middle";
+/**
+ * Splits the window into consecutive runs so the selected run can be wrapped in
+ * one outline that grows with the selection, instead of per-row edges that draw
+ * lines between the rows of the run.
+ */
+export function partitionCommitRuns<Commit extends GraphCommitIdentity>(
+  commits: ReadonlyArray<Commit>,
+  selection: { readonly shas: ReadonlySet<string> } | null,
+): ReadonlyArray<GraphCommitRun<Commit>> {
+  const runs: Array<{ selected: boolean; commits: Commit[] }> = [];
+  for (const commit of commits) {
+    const selected = selection?.shas.has(commit.sha) ?? false;
+    const last = runs[runs.length - 1];
+    if (last !== undefined && last.selected === selected) {
+      last.commits.push(commit);
+      continue;
+    }
+    runs.push({ selected, commits: [commit] });
+  }
+  return runs;
 }
