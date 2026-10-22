@@ -10,6 +10,7 @@ import {
   TriangleAlertIcon,
 } from "lucide-react";
 import {
+  Fragment,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
   useEffect,
@@ -45,11 +46,10 @@ import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { commitDragText } from "./commitDrag";
 import { layoutGraph, type GraphRow } from "./graphLayout";
 import {
-  graphSelectionEdge,
+  partitionCommitRuns,
   resolveGraphSelection,
   selectionDiffRange,
   shortSha,
-  type GraphSelectionEdge,
 } from "./graphSelection";
 import type { MockCommit, MockGraphData, MockThread, MockWorktree } from "./mockGraph";
 
@@ -59,22 +59,9 @@ const ROW_HEIGHT = 46;
 const LANE_WIDTH = 14;
 const LANE_INSET = 9;
 
-// Drawn as inset shadows rather than borders: a border changes the row's box
-// and would shift the whole graph sideways the moment a row is selected. Only
-// the run's outer edges get a line, so the outline grows as the selection grows.
-const SELECTION_EDGE_SHADOW: Record<Exclude<GraphSelectionEdge, "none">, string> = (() => {
-  const outline = "color-mix(in oklab, var(--primary) 60%, transparent)";
-  const left = `inset 2px 0 0 0 ${outline}`;
-  const right = `inset -2px 0 0 0 ${outline}`;
-  const top = `inset 0 2px 0 0 ${outline}`;
-  const bottom = `inset 0 -2px 0 0 ${outline}`;
-  return {
-    single: [top, bottom, left, right].join(", "),
-    top: [top, left, right].join(", "),
-    middle: [left, right].join(", "),
-    bottom: [bottom, left, right].join(", "),
-  };
-})();
+// The selected run is outlined as one block. An outline never affects layout, so
+// selecting a row cannot shift the graph sideways.
+const SELECTION_OUTLINE = "2px solid color-mix(in oklab, var(--primary) 60%, transparent)";
 
 const LANE_COLORS = [
   "oklch(0.63 0.09 250)",
@@ -343,7 +330,7 @@ function CommitRow(props: {
   row: GraphRow;
   laneCount: number;
   isTip: boolean;
-  selectionEdge: GraphSelectionEdge;
+  isSelected: boolean;
   isDimmed: boolean;
   threadsById: ReadonlyMap<string, MockThread>;
   threadColor: (id: string) => string;
@@ -359,7 +346,7 @@ function CommitRow(props: {
     row,
     laneCount,
     isTip,
-    selectionEdge,
+    isSelected,
     isDimmed,
     threadsById,
     threadColor,
@@ -379,7 +366,7 @@ function CommitRow(props: {
   return (
     <div
       role="option"
-      aria-selected={selectionEdge !== "none"}
+      aria-selected={isSelected}
       tabIndex={-1}
       data-sha={commit.sha}
       draggable
@@ -438,13 +425,10 @@ function CommitRow(props: {
       }}
       className={cn(
         "group relative flex cursor-default select-none items-stretch gap-1 pr-2",
-        selectionEdge === "none" ? "hover:bg-accent/35" : "bg-primary/10",
+        isSelected ? "bg-primary/10" : "hover:bg-accent/35",
         isDimmed && "opacity-35",
       )}
-      style={{
-        height: ROW_HEIGHT,
-        ...(selectionEdge === "none" ? {} : { boxShadow: SELECTION_EDGE_SHADOW[selectionEdge] }),
-      }}
+      style={{ height: ROW_HEIGHT }}
     >
       <div className="shrink-0 border-r border-border/40">
         <LaneGraph row={row} laneCount={laneCount} isTip={isTip} />
@@ -473,7 +457,7 @@ function CommitRow(props: {
           <span
             className={cn(
               "min-w-0 flex-1 truncate text-xs leading-4",
-              selectionEdge !== "none" ? "text-foreground" : "text-foreground/90",
+              isSelected ? "text-foreground" : "text-foreground/90",
             )}
           >
             {commit.subject}
@@ -1060,32 +1044,49 @@ export function GitGraphPanel(props: {
             }}
             className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable] focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:ring-inset focus-visible:outline-none"
           >
-            {visibleCommits.map((commit) => {
-              const row = rowBySha.get(commit.sha);
-              if (!row) return null;
-              const matchesFilter =
-                filterThreadId === null || commit.threadIds.includes(filterThreadId);
+            {partitionCommitRuns(visibleCommits, selection).map((run) => {
+              const rows = run.commits.map((commit) => {
+                const row = rowBySha.get(commit.sha);
+                if (!row) return null;
+                const matchesFilter =
+                  filterThreadId === null || commit.threadIds.includes(filterThreadId);
+                return (
+                  <CommitRow
+                    key={commit.sha}
+                    commit={commit}
+                    row={row}
+                    laneCount={layout.laneCount}
+                    isTip={tipShas.has(commit.sha)}
+                    isSelected={run.selected}
+                    isDimmed={!matchesFilter}
+                    threadsById={threadsById}
+                    threadColor={threadColor}
+                    onSelect={(event) =>
+                      selectCommit(commit.sha, event.shiftKey || event.metaKey || event.ctrlKey)
+                    }
+                    onOpenDiff={() => openSelectedDiff(commit)}
+                    repositoryPath={props.cwd}
+                    onFilterThread={(id) => applyFilter(filterThreadId === id ? null : id)}
+                    onOpenMenu={(commit, position) => {
+                      void openCommitMenu(commit, position);
+                    }}
+                  />
+                );
+              });
+              const first = run.commits[0];
+              if (!run.selected || first === undefined) {
+                return <Fragment key={`run:${first?.sha ?? "end"}`}>{rows}</Fragment>;
+              }
+              // One outline around the whole run, so it grows with the selection
+              // instead of drawing a line between every selected row.
               return (
-                <CommitRow
-                  key={commit.sha}
-                  commit={commit}
-                  row={row}
-                  laneCount={layout.laneCount}
-                  isTip={tipShas.has(commit.sha)}
-                  selectionEdge={graphSelectionEdge(selection, commit.sha)}
-                  isDimmed={!matchesFilter}
-                  threadsById={threadsById}
-                  threadColor={threadColor}
-                  onSelect={(event) =>
-                    selectCommit(commit.sha, event.shiftKey || event.metaKey || event.ctrlKey)
-                  }
-                  onOpenDiff={() => openSelectedDiff(commit)}
-                  repositoryPath={props.cwd}
-                  onFilterThread={(id) => applyFilter(filterThreadId === id ? null : id)}
-                  onOpenMenu={(commit, position) => {
-                    void openCommitMenu(commit, position);
-                  }}
-                />
+                <div
+                  key={`selected:${first.sha}`}
+                  className="bg-primary/10"
+                  style={{ outline: SELECTION_OUTLINE, outlineOffset: -2 }}
+                >
+                  {rows}
+                </div>
               );
             })}
             <div className="flex items-center gap-2 px-3 py-3 text-3xs text-muted-foreground/70">
