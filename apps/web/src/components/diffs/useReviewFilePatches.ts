@@ -193,6 +193,13 @@ function reviewFileQueries({
                 request: {
                   cwd,
                   ...(baseRef ? { baseRef } : {}),
+                  // A commit range has no merge base to resolve, so the file patch
+                  // must carry the range itself; its two ends are on the source.
+                  ...(source.kind === "commit-range" &&
+                  source.baseRef !== null &&
+                  source.headRef !== null
+                    ? { commitRange: { from: source.baseRef, to: source.headRef } }
+                    : {}),
                   ignoreWhitespace,
                   file: {
                     path: file.path,

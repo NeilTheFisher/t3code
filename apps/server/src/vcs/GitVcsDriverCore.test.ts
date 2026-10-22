@@ -2343,6 +2343,23 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         assert.include(range.sources[0]?.diff ?? "", "+one");
         assert.include(range.sources[0]?.diff ?? "", "+two");
 
+        // The diff panel fetches a single file's patch this way once a source is
+        // truncated, so the range has to survive alongside `file`.
+        const scoped = yield* driver.getReviewDiffPreview({
+          cwd,
+          commitRange: { from: `${third}^`, to: third },
+          file: { path: "a.txt", previousPath: null, sourceKind: "commit-range" },
+        });
+        assert.deepStrictEqual(
+          scoped.sources.map((source) => source.kind),
+          ["commit-range"],
+        );
+        assert.include(scoped.sources[0]?.diff ?? "", "+two");
+        assert.deepStrictEqual(
+          scoped.sources[0]?.files?.map((file) => file.path),
+          ["a.txt"],
+        );
+
         const contents = yield* driver.getReviewDiffFileContents({
           cwd,
           sourceKind: "commit-range",
@@ -3203,7 +3220,7 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
       }),
     );
 
-    it.effect("includes full file context in worktree and branch previews", () =>
+    it.effect("keeps worktree and branch previews to hunks, not whole files", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();
         const { initialBranch } = yield* initRepoWithCommit(cwd);
@@ -3232,10 +3249,19 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         const worktreeDiff = preview.sources.find((source) => source.kind === "working-tree")?.diff;
         const branchDiff = preview.sources.find((source) => source.kind === "branch-range")?.diff;
 
-        assert.include(worktreeDiff, "@@ -1,200 +1,200 @@");
-        assert.include(branchDiff, "@@ -1,200 +1,200 @@");
-        assert.include(worktreeDiff, " line 1");
-        assert.include(branchDiff, " line 200");
+        // Previews stay hunked: the Diff panel expands an unmodified region by
+        // fetching file contents on demand (`loadDiffFiles`), so shipping the
+        // whole file in the patch only makes every diff read as a full file.
+        assert.notInclude(worktreeDiff, "@@ -1,200 +1,200 @@");
+        assert.notInclude(branchDiff, "@@ -1,200 +1,200 @@");
+        assert.equal(worktreeDiff?.match(/^@@/gm)?.length, 1);
+        // The branch comparison reads against the working tree, so it carries
+        // both the committed and the uncommitted change, in separate hunks.
+        assert.equal(branchDiff?.match(/^@@/gm)?.length, 2);
+        assert.include(worktreeDiff, "+worktree change");
+        assert.include(branchDiff, "+branch change");
+        assert.notInclude(worktreeDiff, " line 1\n");
+        assert.notInclude(branchDiff, " line 200\n");
       }),
     );
   });
