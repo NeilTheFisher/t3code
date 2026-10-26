@@ -110,7 +110,15 @@ import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { resolveThreadReferenceCopyTarget } from "@t3tools/client-runtime/thread-reference";
 import { resolveTerminalSessionLabel } from "@t3tools/shared/terminalLabels";
 import { useAtomValue } from "@effect/atom-react";
-import { type SetStateAction, use, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  type SetStateAction,
+  use,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { BackgroundThreadContext } from "./chat/backgroundThread";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { assistantCitationFromLocation } from "../lib/assistantCitationNavigation";
@@ -562,6 +570,7 @@ export default function ChatView(props: ChatViewProps) {
     return ids;
   })();
   const settings = useEnvironmentSettings(environmentId);
+
   const clientSettingsHydrated = useClientSettingsHydrated();
   const timestampFormat = settings.timestampFormat;
   const navigate = useNavigate();
@@ -1435,7 +1444,7 @@ export default function ChatView(props: ChatViewProps) {
     phase === "running" || isSendBusy || isCompacting || runlessWorkStartedAt !== null;
   // Some providers (OpenCode 1.x) report live usage without a window size, so
   // fill maxTokens from the active model's provider metadata to draw the ring.
-  const activeModelContextWindowTokens = useMemo(() => {
+  const activeModelContextWindowTokens = (() => {
     if (selectedProviderEntry == null) return null;
     const slug = resolveSelectableModel(
       selectedProviderEntry.driverKind,
@@ -1446,23 +1455,16 @@ export default function ChatView(props: ChatViewProps) {
     return (
       selectedProviderEntry.models.find((model) => model.slug === slug)?.contextWindowTokens ?? null
     );
-  }, [activeThread?.modelSelection.model, reportedModelSelection, selectedProviderEntry]);
-  const activeContextWindow = useMemo(() => {
-    const liveUsage =
-      activeThreadLiveTokenUsage !== null &&
-      activeThreadLiveTokenUsage.maxTokens == null &&
-      activeModelContextWindowTokens !== null
-        ? { ...activeThreadLiveTokenUsage, maxTokens: activeModelContextWindowTokens }
-        : activeThreadLiveTokenUsage;
-    return deriveLatestContextWindowSnapshot(
-      serverVisibleTurnItems ?? [],
-      liveUsage,
-      activeProviderThread,
-    );
-  }, [
-    activeThreadLiveTokenUsage,
-    activeModelContextWindowTokens,
-    serverVisibleTurnItems,
+  })();
+  const activeContextWindowLiveUsage =
+    activeThreadLiveTokenUsage !== null &&
+    activeThreadLiveTokenUsage.maxTokens == null &&
+    activeModelContextWindowTokens !== null
+      ? { ...activeThreadLiveTokenUsage, maxTokens: activeModelContextWindowTokens }
+      : activeThreadLiveTokenUsage;
+  const activeContextWindow = deriveLatestContextWindowSnapshot(
+    serverVisibleTurnItems ?? [],
+    activeContextWindowLiveUsage,
     activeProviderThread,
   );
   const pendingBackgroundTasks = deriveThreadPendingBackgroundTasks(serverProjection);
@@ -1554,25 +1556,23 @@ export default function ChatView(props: ChatViewProps) {
         message,
       }) as const,
   );
-  const modelChangeNotices = useMemo(
-    () =>
-      serverProjection === null
-        ? []
-        : deriveModelChangeNotices(serverProjection.runs, (instanceId, model) => {
-            const provider = providerStatuses.find((status) => status.instanceId === instanceId);
-            const matched = provider?.models.find((candidate) => candidate.slug === model);
-            return matched ? getTriggerDisplayModelName(matched) : null;
-          }),
-    [serverProjection, providerStatuses],
-  );
-  const serverTimelineEntriesWithNotices = useMemo(
-    () => mergeModelChangeNotices(serverTimelineEntries, modelChangeNotices),
-    [serverTimelineEntries, modelChangeNotices],
+  // Notices are derived here rather than memoized: an explicit `useMemo` in this component
+  // re-enters the React Compiler's own cache and loops.
+  const modelChangeNotices =
+    serverProjection === null
+      ? []
+      : deriveModelChangeNotices(serverProjection.runs, (instanceId, model) => {
+          const provider = providerStatuses.find((status) => status.instanceId === instanceId);
+          const matched = provider?.models.find((candidate) => candidate.slug === model);
+          return matched ? getTriggerDisplayModelName(matched) : null;
+        });
+  const serverTimelineEntriesWithNotices = mergeModelChangeNotices(
+    serverTimelineEntries,
+    modelChangeNotices,
   );
   const timelineEntries = isServerThread ? serverTimelineEntriesWithNotices : draftTimelineEntries;
-  const timelineMessages = useMemo(
-    () => timelineEntries.flatMap((entry) => (entry.kind === "message" ? [entry.message] : [])),
-    [timelineEntries],
+  const timelineMessages = timelineEntries.flatMap((entry) =>
+    entry.kind === "message" ? [entry.message] : [],
   );
   const timelineEmpty = timelineEntries.length === 0 && !hasStreamedTimelineRows;
   const displayedTimelineKey = activeThreadKey ?? routeThreadKey;
@@ -2351,6 +2351,7 @@ export default function ChatView(props: ChatViewProps) {
     addDeviceSurfaceStable,
     addDiffSurfaceStable,
     addFilesSurfaceStable,
+    addGitGraphSurfaceStable,
     addPullRequestSurfaceStable,
     addPullRequestsSurfaceStable,
     closePreviewPanelStable,
@@ -2359,7 +2360,9 @@ export default function ChatView(props: ChatViewProps) {
     createBrowserSurfaceStable,
     moveRightPanelSurfaceStable,
     onOpenToolDiffStable,
+    onOpenCommitRangeDiffStable,
     onOpenTurnDiffStable,
+    onOpenWorkingTreeDiffStable,
     openChangesFromThreadPanelStable,
     openFileSurfaceStable,
     toggleRightPanelMaximizedStable,
@@ -3155,6 +3158,9 @@ export default function ChatView(props: ChatViewProps) {
       getShortcutContext={getShortcutContextStable}
       onSendAnnotation={sendPreviewAnnotationStable}
       onCloseSurface={closeRightPanelSurface}
+      onOpenCommitRangeDiff={onOpenCommitRangeDiffStable}
+      onOpenWorkingTreeDiff={onOpenWorkingTreeDiffStable}
+
       terminal={{
         launchContext: activeTerminalLaunchContext ?? null,
         keybindings,
@@ -3901,6 +3907,7 @@ export default function ChatView(props: ChatViewProps) {
           onAddBrowserInProfile={createBrowserSurfaceStable}
           onAddTerminal={addTerminalSurfaceStable}
           onAddDiff={addDiffSurfaceStable}
+          onAddGitGraph={addGitGraphSurfaceStable}
           onAddFiles={addFilesSurfaceStable}
           onAddPullRequest={addPullRequestSurfaceStable}
           onAddPullRequests={addPullRequestsSurfaceStable}
@@ -3908,6 +3915,7 @@ export default function ChatView(props: ChatViewProps) {
           browserAvailable={canOperatePreview && browserAvailable}
           terminalAvailable={activeProject !== null && canOperateTerminal}
           diffAvailable={isServerThread && isGitRepo}
+          gitGraphAvailable={activeProject !== null && isGitRepo}
           filesAvailable={activeProject !== null}
           pullRequestAvailable={pullRequestSurfaceAvailable}
           pullRequestsAvailable={pullRequestsSurfaceAvailable}

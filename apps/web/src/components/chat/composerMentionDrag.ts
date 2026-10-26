@@ -1,14 +1,31 @@
-import { PullRequestContextMetadata } from "@t3tools/contracts";
+import { CommitContextMetadata, PullRequestContextMetadata } from "@t3tools/contracts";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import { Option, Schema } from "effect";
 
 export const COMPOSER_MENTION_DRAG_TYPE = "application/x-t3code-composer-mention";
 
+/**
+ * Drag payload type carrying a pull request, as JSON `PullRequestContextMetadata`. Set on drags
+ * that start on a pull request row; the composer drops it as the same chip the `#` picker adds.
+ */
 export const COMPOSER_PULL_REQUEST_DRAG_TYPE = "application/x-t3code-pull-request";
+
+/**
+ * Drag payload type carrying a commit, as JSON `CommitContextMetadata`. Set on
+ * drags that start on a git-graph row; the composer drops it as a commit chip.
+ */
+export const COMPOSER_COMMIT_DRAG_TYPE = "application/x-t3code-commit";
 
 const PullRequestDragPayload = Schema.fromJsonString(PullRequestContextMetadata);
 const decodePullRequestPayload = Schema.decodeUnknownOption(PullRequestDragPayload);
 
+const CommitDragPayload = Schema.fromJsonString(CommitContextMetadata);
+const decodeCommitPayload = Schema.decodeUnknownOption(CommitDragPayload);
+
+/** The `COMPOSER_COMMIT_DRAG_TYPE` data for a git-graph row's drag. */
+export const encodeCommitDragPayload = Schema.encodeSync(CommitDragPayload);
+
+/** The `COMPOSER_PULL_REQUEST_DRAG_TYPE` data for a pull request row's drag. */
 export const encodePullRequestDragPayload = Schema.encodeSync(PullRequestDragPayload);
 
 export function composerMentionFromTreePath(treePath: string): string | null {
@@ -21,7 +38,9 @@ export function composerMentionFromTreePath(treePath: string): string | null {
 
 export function dataTransferHasComposerMention(types: ReadonlyArray<string>): boolean {
   return (
-    types.includes(COMPOSER_MENTION_DRAG_TYPE) || types.includes(COMPOSER_PULL_REQUEST_DRAG_TYPE)
+    types.includes(COMPOSER_MENTION_DRAG_TYPE) ||
+    types.includes(COMPOSER_PULL_REQUEST_DRAG_TYPE) ||
+    types.includes(COMPOSER_COMMIT_DRAG_TYPE)
   );
 }
 
@@ -38,10 +57,16 @@ interface ComposerMentionDragEvent {
   stopPropagation(): void;
 }
 
-/** Insertion focuses next frame; synchronous focus would overwrite the unreconciled mention. */
+/**
+ * Deliberately narrow: there is no way to focus the editor from here. Focusing
+ * it synchronously during the drop makes the not-yet-reconciled editor sync its
+ * stale empty state back over the inserted mention; the insert path already
+ * focuses on the next frame, after the editor has caught up.
+ */
 export interface ComposerMentionDropHost {
   insertMentionAtEnd(text: string): boolean;
   insertPullRequestAtEnd(pullRequest: PullRequestContextMetadata): boolean;
+  insertCommitAtEnd?(commit: CommitContextMetadata): boolean;
   setDragActive(active: boolean): void;
   onInsertRejected(): void;
 }
@@ -55,7 +80,9 @@ interface ComposerMentionDragHandlers {
 export function makeComposerMentionDragHandlers(
   host: ComposerMentionDropHost,
 ): ComposerMentionDragHandlers {
-  // Stop native propagation so the editor cannot process claimed drags.
+  // Claim the event for the composer: React's stopPropagation only halts the
+  // synthetic dispatch, so the native event must be stopped too or the
+  // editor's own DOM listeners still process the drag.
   const claim = (event: ComposerMentionDragEvent): boolean => {
     if (!dataTransferHasComposerMention(event.dataTransfer.types)) {
       return false;
@@ -75,7 +102,8 @@ export function makeComposerMentionDragHandlers(
       if (!claim(event)) {
         return;
       }
-      // Tree drags allow only "move"; other drop effects cancel delivery.
+      // The tree constrains its drags to effectAllowed "move" (pull request links allow
+      // anything); naming any other effect makes the browser cancel the drop without firing it.
       event.dataTransfer.dropEffect = "move";
       host.setDragActive(true);
     },
@@ -89,6 +117,14 @@ export function makeComposerMentionDragHandlers(
           event.dataTransfer.getData(COMPOSER_PULL_REQUEST_DRAG_TYPE),
         );
         if (Option.isSome(pullRequest) && !host.insertPullRequestAtEnd(pullRequest.value)) {
+          host.onInsertRejected();
+        }
+        return;
+      }
+      if (event.dataTransfer.types.includes(COMPOSER_COMMIT_DRAG_TYPE)) {
+        const commit = decodeCommitPayload(event.dataTransfer.getData(COMPOSER_COMMIT_DRAG_TYPE));
+        const insert = host.insertCommitAtEnd;
+        if (Option.isSome(commit) && (insert === undefined || !insert(commit.value))) {
           host.onInsertRejected();
         }
         return;

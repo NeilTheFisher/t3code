@@ -1,12 +1,12 @@
 import { secretSettingsFields } from "@t3tools/contracts";
 
-import { sourceControlDefinitions } from "./sourceControlDefinitions.ts";
+import { builtInSourceControlDefinitions } from "@t3tools/source-control-definitions/registry";
 
 export const SOURCE_CONTROL_HOST_SECRET_FIELDS: ReadonlyMap<
   string,
   ReadonlyArray<string>
 > = new Map(
-  sourceControlDefinitions.definitions.flatMap((definition) => {
+  builtInSourceControlDefinitions.definitions.flatMap((definition) => {
     const fields = definition.settings ? secretSettingsFields(definition.settings) : [];
     return fields.length > 0 ? [[definition.kind, fields] as const] : [];
   }),

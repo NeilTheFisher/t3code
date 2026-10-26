@@ -654,20 +654,6 @@ function ThreadSettingsSessionProvider(
     });
   };
 
-  const pressModel = (option: ModelOption) => {
-    void Haptics.selectionAsync();
-    if (isApplied(option) || option.key !== pendingModel?.key) {
-      setPendingPrompt(null);
-    }
-    setPendingModel((current) =>
-      pendingModelAfterPress({
-        current,
-        pressed: option,
-        pressedIsApplied: isApplied(option),
-        restoreSelection: props.restoreSelection,
-      }),
-    );
-  };
   const pressModel = useCallback(
     (option: ModelOption) => {
       if (props.serverConfig && props.hasStartedSession && props.selectedModel) {
@@ -683,15 +669,26 @@ function ThreadSettingsSessionProvider(
         }
       }
       void Haptics.selectionAsync();
+      if (isApplied(option) || option.key !== pendingModel?.key) {
+        setPendingPrompt(null);
+      }
       setPendingModel((current) =>
         pendingModelAfterPress({
           current,
           pressed: option,
           pressedIsApplied: isApplied(option),
+          restoreSelection: props.restoreSelection,
         }),
       );
     },
-    [isApplied, props.hasStartedSession, props.selectedModel, props.serverConfig],
+    [
+      isApplied,
+      pendingModel?.key,
+      props.hasStartedSession,
+      props.restoreSelection,
+      props.selectedModel,
+      props.serverConfig,
+    ],
   );
 
   const value = {

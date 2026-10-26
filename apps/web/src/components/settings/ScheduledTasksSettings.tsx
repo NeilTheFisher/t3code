@@ -392,7 +392,7 @@ export function ScheduledTasksSettings(target: {
     if (target.taskId === undefined) return;
     void navigate({
       to: "/settings/scheduled-tasks",
-      search: ({ taskId: _closed, ...rest }) => rest,
+      search: ({ taskId: _closed, ...rest }: { taskId?: string; [key: string]: unknown }) => rest,
       replace: true,
     });
   };

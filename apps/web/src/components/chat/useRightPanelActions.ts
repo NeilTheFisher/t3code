@@ -135,6 +135,11 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
     onDiffPanelOpen?.();
   };
   const addDiffSurfaceStable = useStableCallback(addDiffSurface);
+  const addGitGraphSurface = () => {
+    if (!activeThreadRef || !activeProject || !isGitRepo) return;
+    useRightPanelStore.getState().open(activeThreadRef, "git-graph");
+  };
+  const addGitGraphSurfaceStable = useStableCallback(addGitGraphSurface);
   const openChangesFromThreadPanel = () => {
     addDiffSurface();
   };
@@ -313,6 +318,28 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
     onDiffPanelOpen?.();
   });
   const onOpenTurnDiffStable = useStableCallback(onOpenTurnDiff);
+  // Same explicit-open bookkeeping as a turn diff: without it the diff panel's
+  // activation effect resets the scope to the branch and discards the range.
+  const onOpenCommitRangeDiff = (range: { from: string; to: string; label: string }) => {
+    if (!activeThreadRef) return;
+    const diffOpen =
+      selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, activeThreadRef) === "diff";
+    explicitDiffOpenRef.current = diffOpen ? null : activeThreadRef;
+    useDiffPanelStore.getState().selectCommitRange(activeThreadRef, range);
+    useRightPanelStore.getState().open(activeThreadRef, "diff");
+    onDiffPanelOpen?.();
+  };
+  const onOpenCommitRangeDiffStable = useStableCallback(onOpenCommitRangeDiff);
+  const onOpenWorkingTreeDiff = () => {
+    if (!activeThreadRef) return;
+    const diffOpen =
+      selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, activeThreadRef) === "diff";
+    explicitDiffOpenRef.current = diffOpen ? null : activeThreadRef;
+    useDiffPanelStore.getState().selectGitScope(activeThreadRef, "unstaged");
+    useRightPanelStore.getState().open(activeThreadRef, "diff");
+    onDiffPanelOpen?.();
+  };
+  const onOpenWorkingTreeDiffStable = useStableCallback(onOpenWorkingTreeDiff);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes to the preview action bus to toggle the preview panel
   useEffect(
     () =>
@@ -341,6 +368,7 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
     addDeviceSurfaceStable,
     addDiffSurfaceStable,
     addFilesSurfaceStable,
+    addGitGraphSurfaceStable,
     addPullRequestSurfaceStable,
     addPullRequestsSurfaceStable,
     closePreviewPanelStable,
@@ -349,7 +377,9 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
     createBrowserSurfaceStable,
     moveRightPanelSurfaceStable,
     onOpenToolDiffStable,
+    onOpenCommitRangeDiffStable,
     onOpenTurnDiffStable,
+    onOpenWorkingTreeDiffStable,
     onToggleDiffStable,
     openChangesFromThreadPanelStable,
     openFileSurfaceStable,

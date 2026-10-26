@@ -40,6 +40,20 @@ export const MERGE_METHODS = {
   rebase: { title: "Rebase and merge", description: "Add the commits without a merge commit." },
 } as const satisfies Record<PullRequestMergeMethod, { title: string; description: string }>;
 
+export const PR_ACTION_LABELS = {
+  merge: "Merge pull request",
+  ready: "Mark ready for review",
+  draft: "Convert to draft",
+  close: "Close pull request",
+  reopen: "Reopen pull request",
+  "update-branch": "Update branch",
+  "enable-auto-merge": "Enable auto-merge",
+  "disable-auto-merge": "Disable auto-merge",
+  revert: "Create revert pull request",
+  "delete-branch": "Delete branch",
+  "approve-workflows": "Approve workflows",
+} as const satisfies Record<PullRequestAction, string>;
+
 export function pullRequestActionLabel(
   action: PullRequestAction,
   terminology: ChangeRequestTerminology,

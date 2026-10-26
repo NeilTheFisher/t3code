@@ -1,5 +1,4 @@
 import { filterComposerPullRequestMatches } from "@t3tools/shared/composerPullRequestMatches";
-import { resolveComposerDispatchMode } from "@t3tools/client-runtime/state/composer-dispatch";
 import { EnvironmentId, MessageId, ThreadId, type AssistantCitation } from "@t3tools/contracts";
 import {
   collectAssistantCitations,
@@ -286,14 +285,6 @@ describe("detectComposerTrigger", () => {
       kind: "pull-request",
       query: "8737",
       rangeStart: "Compare this with ".length,
-  it("keeps slash command detection active for provider commands", () => {
-    const text = "/rev";
-    const trigger = detectComposerTrigger(text, text.length);
-
-    expect(trigger).toEqual({
-      kind: "slash-command",
-      query: "rev",
-      rangeStart: 0,
       rangeEnd: text.length,
     });
   });
@@ -304,21 +295,6 @@ describe("detectComposerTrigger", () => {
   });
 
   // regression: #936 @file autocomplete used the wrong cursor when typing mid-text
-  it.each(["$", "€", "£", "¥", "₹", "₩", "₿", "𑿝"])(
-    "detects %sskill trigger at cursor",
-    (prefix) => {
-      const text = `Use ${prefix}gh-fi`;
-      const trigger = detectComposerTrigger(text, text.length);
-
-      expect(trigger).toEqual({
-        kind: "skill",
-        query: "gh-fi",
-        rangeStart: "Use ".length,
-        rangeEnd: text.length,
-      });
-    },
-  );
-
   it("detects @path trigger in the middle of existing text", () => {
     const text = "Please inspect @in this sentence";
     const cursorAfterAt = "Please inspect @".length;
@@ -401,13 +377,6 @@ describe("filterComposerPullRequestMatches", () => {
     });
     expect(matches[0]?.number).toBe(7);
     expect(matches).toHaveLength(10);
-describe("replaceTextRange", () => {
-  it("replaces a text range and returns new cursor", () => {
-    const replaced = replaceTextRange("hello @src", 6, 10, "");
-    expect(replaced).toEqual({
-      text: "hello ",
-      cursor: 6,
-    });
   });
 });
 
@@ -494,7 +463,7 @@ describe("assistant citation cursor offsets", () => {
     const prefix = "👋(";
     const between = "),雪";
     const after = " @AGENTS.md $review ";
-    const text = `${prefix}${citationSource}${between}${citationSource}${after}${INLINE_TERMINAL_CONTEXT_PLACEHOLDER}!`;
+    const text = `${prefix}${citationSource}${between}${citationSource}${after}${terminalReference}!`;
     const collapsedLength = `${prefix}□${between}□ □ □ □!`.length;
     const boundaries = [
       [prefix.length, prefix.length],

@@ -46,6 +46,7 @@ import {
 import { cn } from "~/lib/utils";
 import { formatUpcomingTimestamp } from "../../timestampFormat";
 import { FetchedToolOutput, V2ItemInspector } from "./V2ItemInspector";
+import { InlineFileChangeDiffs } from "./InlineFileDiffs";
 import { SubagentNotificationLink } from "./V2LifecycleRow";
 import {
   TimelineRowCtx,
@@ -555,6 +556,16 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
               ) : null}
             </>
           )}
+        </WorkLogDetails>
+      ) : null}
+      {expanded && workEntry.fileChanges && workEntry.fileChanges.length > 0 ? (
+        <WorkLogDetails kind="panel">
+          <InlineFileChangeDiffs
+            changes={workEntry.fileChanges}
+            environmentId={ctx.activeThreadEnvironmentId}
+            workspaceRoot={workspaceRoot}
+            theme={ctx.resolvedTheme}
+          />
         </WorkLogDetails>
       ) : null}
     </WorkLogRow>

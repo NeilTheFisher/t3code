@@ -36,7 +36,7 @@ export type SettingsPath =
   | "/settings/maintenance"
   | "/settings/labs"
   | "/settings/about"
-  | "/settings/archived";
+  | "/settings/beta"
   | "/settings/archived"
   | "/settings/voice";
 

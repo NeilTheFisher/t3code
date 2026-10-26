@@ -1,3 +1,6 @@
+import type { RepositoryIdentity, SourceControlProviderInfo } from "@t3tools/contracts";
+import { SourceControlProviderKind } from "@t3tools/contracts";
+
 const SCP_SSH_REMOTE_PATTERN = /^[a-zA-Z0-9._-]+@([^:/]+):/;
 
 export function isSshRemoteUrl(remoteUrl: string): boolean {

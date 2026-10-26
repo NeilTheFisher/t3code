@@ -927,3 +927,28 @@ export class PullRequestOperationError extends Schema.TaggedError<PullRequestOpe
     return `Pull request operation ${this.operation} failed: ${this.detail}`;
   }
 }
+
+/**
+ * The host a change request is filed under: a Forgejo host is whatever its remote names, since
+ * that provider runs on any domain; everything else is the definition's own host.
+ */
+export function pullRequestHostOf(
+  identity:
+    | {
+        readonly canonicalKey?: string | undefined;
+        readonly locator?: { readonly remoteUrl: string } | undefined;
+      }
+    | null
+    | undefined,
+  kind: SourceControlProviderKind,
+): string {
+  if (kind === "forgejo") {
+    try {
+      const remote = new URL(identity?.locator?.remoteUrl ?? "");
+      if (remote.protocol === "http:" || remote.protocol === "https:")
+        return remote.host.toLowerCase();
+    } catch {}
+  }
+  const host = identity?.canonicalKey?.split("/")[0]?.trim();
+  return host === undefined || host.length === 0 ? kind : host.toLowerCase();
+}

@@ -920,9 +920,18 @@ export function mergeModelChangeNotices(
   return merged;
 }
 
+/**
+ * One entry per notice, kept across derivations: the timeline's row builder re-renders from a
+ * state update when its input arrays change identity, so a fresh entry object on every render
+ * would keep that loop alive.
+ */
+const modelChangeNoticeEntries = new Map<string, { entry: TimelineEntry; summary: string }>();
+
 /** Reuses the standalone `system_notice` work row so no new timeline kind is needed. */
 function modelChangeNoticeEntry(notice: ModelChangeNotice): TimelineEntry {
-  return {
+  const cached = modelChangeNoticeEntries.get(notice.id);
+  if (cached !== undefined && cached.summary === notice.summary) return cached.entry;
+  const entry: TimelineEntry = {
     id: notice.id,
     kind: "work",
     createdAt: notice.createdAt,
@@ -935,6 +944,8 @@ function modelChangeNoticeEntry(notice: ModelChangeNotice): TimelineEntry {
       itemType: "system_notice",
     },
   };
+  modelChangeNoticeEntries.set(notice.id, { entry, summary: notice.summary });
+  return entry;
 }
 
 type AttachmentResource = Extract<AssetResource, { readonly _tag: "attachment" }>;

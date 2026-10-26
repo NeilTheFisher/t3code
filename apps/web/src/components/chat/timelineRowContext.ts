@@ -56,6 +56,8 @@ export interface TimelineRowSharedState {
   threadRef: ScopedThreadRef | null;
   markdownCwd: string | undefined;
   resolvedTheme: "light" | "dark";
+  /** Read-aloud controls appear on assistant rows only when the user turned TTS on. */
+  ttsEnabled: boolean;
   workspaceRoot: string | undefined;
   skills: ReadonlyArray<ServerProviderSkill>;
   runs: ReadonlyArray<HandoffTimelineRun>;

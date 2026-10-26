@@ -170,7 +170,7 @@ export function deriveLatestContextWindowSnapshot(
  * unset, so they contribute nothing here.
  */
 function latestCompactionUsage(
-  entries: ReadonlyArray<{ readonly item: OrchestrationV2TurnItem }>,
+  entries: ReadonlyArray<{ readonly item: ThreadStructureTurnItem }>,
 ): {
   readonly usedTokens: number;
   readonly beforeTokenCount: number | null;

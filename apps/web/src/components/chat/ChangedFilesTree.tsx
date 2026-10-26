@@ -224,7 +224,7 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
   );
 });
 
-const ChangedFilesTree = memo(function ChangedFilesTree(props: {
+export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
   runId: RunId;
   files: ReadonlyArray<TurnDiffFileChange>;
   allDirectoriesExpanded: boolean;

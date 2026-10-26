@@ -47,6 +47,7 @@ import {
 import { formatComposerContextReference } from "@t3tools/shared/composerContextReferences";
 import { ContextChip, ContextChipLabel, type ContextChipKind } from "../ContextChip";
 import { createContextPresentationRegistry } from "../contextPresentationRegistry";
+import { CommitContextChip } from "../CommitContextChip";
 import type { ChatMarkdownContextReference } from "../ChatMarkdown";
 import {
   SkillChipPopover,
@@ -328,6 +329,16 @@ const userMessageContextPresentationRegistry = createContextPresentationRegistry
       render: (record, context) =>
         record.kind === "environment" ? (
           <EnvironmentContextChip record={record} copyMarkdown={context.copyMarkdown} />
+        ) : (
+          <UnavailableUserMessageContextChip {...context} />
+        ),
+    },
+    {
+      kind: "commit",
+      canRender: (record) => record.kind === "commit",
+      render: (record, context) =>
+        record.kind === "commit" ? (
+          <CommitContextChip record={record} copyMarkdown={context.copyMarkdown} />
         ) : (
           <UnavailableUserMessageContextChip {...context} />
         ),

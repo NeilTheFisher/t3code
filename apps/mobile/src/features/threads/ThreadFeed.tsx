@@ -164,7 +164,7 @@ import { getReviewSectionIdForCheckpoint } from "../review/reviewModel";
 import { setReviewSelectedSectionId } from "../review/reviewState";
 import { Menu } from "../../components/ui/Menu";
 import { MessageTtsButton } from "./MessageTtsButton";
-import { markdownToSpokenText } from "../../lib/spokenText";
+import { splitMarkdownBlocks } from "../../lib/spokenText";
 import { copyPromptLink } from "../prompt-links/prompt-link-actions";
 import { parseReviewCommentMessageSegments } from "../review/reviewCommentSelection";
 import {
@@ -1848,7 +1848,7 @@ function renderFeedEntry(
               messageId={message.id}
               threadId={props.threadId}
               environmentId={props.environmentId}
-              text={markdownToSpokenText(renderedText)}
+              blocks={splitMarkdownBlocks(renderedText)}
               tintColor={iconSubtleColor}
             />
             <CopyTextButton
