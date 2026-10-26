@@ -133,6 +133,7 @@ import {
   HtmlRenderTimelineRow,
   SentMessageTimelineRow,
   McpAppTimelineRow,
+  SpokenTimelineRow,
 } from "./TimelineAssistantRows";
 import { V2EventTimelineRow } from "./TimelineV2EventRow";
 import { startTimelinePositionRestore } from "./useTimelinePositionRestore";
@@ -238,6 +239,8 @@ interface MessagesTimelineProps {
   respondingRequestIds?: TimelineRowSharedState["respondingRequestIds"];
   canOperateThread?: boolean;
   onRespondToApproval?: TimelineRowSharedState["onRespondToApproval"];
+  /** Read-aloud is wired into the row components; the flag rides along for them. */
+  ttsEnabled?: boolean;
   citationRequest?: AssistantCitationRequest | null;
   citationHistory?: CitedHistory;
   onCiteAssistantText?: (
@@ -425,6 +428,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   activeThreadEnvironmentId,
   markdownCwd,
   resolvedTheme,
+  ttsEnabled = false,
   timestampFormat,
   workspaceRoot,
   skills = EMPTY_TIMELINE_SKILLS,
@@ -1137,6 +1141,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     threadRef: citationThreadRef,
     markdownCwd,
     resolvedTheme,
+    ttsEnabled: ttsEnabled === true,
     workspaceRoot,
     skills,
     runs,
@@ -1737,6 +1742,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       ) : null}
       {row.kind === "assistant-meta" ? <AssistantMetaTimelineRow row={row} /> : null}
       {row.kind === "proposed-plan" ? <ProposedPlanTimelineRow row={row} /> : null}
+      {row.kind === "spoken" ? <SpokenTimelineRow row={row} /> : null}
       {row.kind === "html-render" ? <HtmlRenderTimelineRow row={row} /> : null}
       {row.kind === "sent-message" ? <SentMessageTimelineRow row={row} /> : null}
       {row.kind === "viewed-images" ? <ViewedImagesTimelineRow row={row} /> : null}

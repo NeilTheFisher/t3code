@@ -1,4 +1,5 @@
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
+import { SourceControlProviderKind } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import {
   allowedMergeMethods,
@@ -6,7 +7,6 @@ import {
   changeRequestActionTitle,
   changeRequestHostLabel,
   changeRequestLabels,
-  mergeSummary,
   mergeUnavailableReason,
   pullRequestActionLabel,
   resolveMergeMethod,
@@ -35,6 +35,7 @@ type Detail = Parameters<typeof allowedMergeMethods>[0];
 
 function detail(overrides: Partial<Detail> = {}): Detail {
   return {
+    provider: SourceControlProviderKind.make("github"),
     state: "open",
     isDraft: false,
     mergeability: "mergeable",
@@ -43,6 +44,7 @@ function detail(overrides: Partial<Detail> = {}): Detail {
       actions: ALL_PR_ACTIONS,
       mergeMethods: ["merge", "squash", "rebase"],
       updateMethods: ["merge", "rebase"],
+      deleteBranch: true,
     },
     viewerPermissions: { actions: ALL_PR_ACTIONS, updateMethods: ["merge"] },
     mergeCapabilities: { merge: true, squash: true, rebase: false },

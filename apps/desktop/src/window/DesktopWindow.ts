@@ -291,7 +291,6 @@ export function isSameOriginRendererNavigation(input: {
   }
 }
 
-function isRetryableDevelopmentRendererLoadFailure(input: {
 export function isTrustedAudioPermissionRequest(input: {
   readonly applicationUrl: string;
   readonly requestingUrl: string;

@@ -180,6 +180,7 @@ export const unsetInheritedRepositoryEnv = (
   );
 
 const classifyNonZeroExit = (
+  command: string,
   stderr: string,
   classifyFailure: VcsProcessInput["classifyFailure"],
 ): VcsProcessExitFailureKind => {
@@ -361,7 +362,7 @@ export const make = Effect.gen(function* () {
     }
 
     if (!input.allowNonZeroExit && result.code !== 0) {
-      const failureKind = classifyNonZeroExit(result.stderr, input.classifyFailure);
+      const failureKind = classifyNonZeroExit(input.command, result.stderr, input.classifyFailure);
       const error = VcsProcessExitError.fromProcessExit(
         baseError,
         {
