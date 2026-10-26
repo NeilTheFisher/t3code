@@ -16,6 +16,8 @@ import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as PlatformError from "effect/PlatformError";
+import * as Cause from "effect/Cause";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
@@ -180,6 +182,9 @@ type TestClaudeCapabilities = {
   readonly models?: ReadonlyArray<ModelInfo>;
 };
 
+const noClaudeCapabilities = () =>
+  Effect.sync(() => undefined as TestClaudeCapabilities | undefined);
+
 function claudeCapabilities(overrides: Partial<TestClaudeCapabilities> = {}) {
   return () =>
     Effect.succeed({
@@ -268,23 +273,6 @@ function recordingMockSpawnerLayer(
   return { layer, commands };
 }
 
-function layerMockCommandSpawner(
-  handler: (
-    command: string,
-    args: ReadonlyArray<string>,
-  ) => { stdout: string; stderr: string; code: number },
-) {
-  return Layer.succeed(
-    ChildProcessSpawner.ChildProcessSpawner,
-    ChildProcessSpawner.make((command) => {
-      const cmd = command as unknown as {
-        command: string;
-        args: ReadonlyArray<string>;
-      };
-      return Effect.succeed(mockHandle(handler(cmd.command, cmd.args)));
-    }),
-  );
-}
 
 function layerFailingSpawner(description: string) {
   return Layer.succeed(
@@ -302,30 +290,6 @@ function layerFailingSpawner(description: string) {
   );
 }
 
-function layerHangingScopedSpawner(killCalls: Ref.Ref<number>) {
-  return Layer.succeed(
-    ChildProcessSpawner.ChildProcessSpawner,
-    ChildProcessSpawner.make(() =>
-      Effect.gen(function* () {
-        const handle = ChildProcessSpawner.makeHandle({
-          pid: ChildProcessSpawner.ProcessId(1),
-          exitCode: Effect.never,
-          isRunning: Effect.succeed(true),
-          kill: () => Ref.update(killCalls, (current) => current + 1),
-          unref: Effect.succeed(Effect.void),
-          stdin: Sink.drain,
-          stdout: Stream.never,
-          stderr: Stream.never,
-          all: Stream.never,
-          getInputFd: () => Sink.drain,
-          getOutputFd: () => Stream.empty,
-        });
-        yield* Effect.addFinalizer(() => handle.kill().pipe(Effect.ignore));
-        return handle;
-      }),
-    ),
-  );
-}
 
 const codexModelCapabilities = createModelCapabilities({
   optionDescriptors: [
@@ -359,6 +323,8 @@ function makeCodexProbeSnapshot(
       },
     ],
     skills: [],
+    // Usage is read only when the app server supports the native usage probe.
+    nativeUsage: true,
     ...input,
   };
 }
