@@ -59,6 +59,14 @@ export function mergeMethodKind(method: PullRequestMergeMethod | undefined) {
   return method === "fast-forward" ? "fastForward" : (method ?? "other");
 }
 
+/** The nouns the generic (non-Gerrit) change-request labels are written with. */
+const PULL_REQUEST_TERMINOLOGY: ChangeRequestTerminology = {
+  shortLabel: "PR",
+  shortLabelWithArticle: "a PR",
+  singular: "pull request",
+  plural: "pull requests",
+};
+
 export function pullRequestActionLabel(
   action: PullRequestAction,
   terminology: ChangeRequestTerminology,
@@ -251,13 +259,13 @@ export interface ChangeRequestLabels {
 }
 
 const DEFAULT_CHANGE_REQUEST_LABELS: ChangeRequestLabels = {
-  merge: PR_ACTION_LABELS.merge,
+  merge: pullRequestActionLabel("merge", PULL_REQUEST_TERMINOLOGY),
   mergeConfirm: "Merge pull request?",
-  close: PR_ACTION_LABELS.close,
+  close: pullRequestActionLabel("close", PULL_REQUEST_TERMINOLOGY),
   closeBody: "Close this pull request without merging its changes?",
-  reopen: PR_ACTION_LABELS.reopen,
-  revert: PR_ACTION_LABELS.revert,
-  updateBranch: PR_ACTION_LABELS["update-branch"],
+  reopen: pullRequestActionLabel("reopen", PULL_REQUEST_TERMINOLOGY),
+  revert: pullRequestActionLabel("revert", PULL_REQUEST_TERMINOLOGY),
+  updateBranch: pullRequestActionLabel("update-branch", PULL_REQUEST_TERMINOLOGY),
   explain: "Explain this PR",
   watch: "Watch PR",
 };
@@ -298,7 +306,7 @@ export function changeRequestActionTitle(
     case "revert":
       return labels.revert;
     default:
-      return PR_ACTION_LABELS[action];
+      return pullRequestActionLabel(action, PULL_REQUEST_TERMINOLOGY);
   }
 }
 
