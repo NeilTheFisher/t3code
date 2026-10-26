@@ -172,6 +172,8 @@ import {
 } from "~/lib/composerContextReferences";
 import {
   attachmentContextRecord,
+  commitContextRecord,
+  commitContextReference,
   uploadedAttachmentContextRecord,
   previewAnnotationContextId,
   previewAnnotationContextRecord,
@@ -2697,6 +2699,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   }, [composerDraftTarget, insertContextReferencesAtCaretStable, setContextInsertionHandler]);
 
   // Capture drops before the editor; mention handlers own native propagation and moves.
+  const addComposerDraftCommitContext = useComposerDraftStore((store) => store.addCommitContext);
   const composerMentionDragHandlers = makeComposerMentionDragHandlers({
     insertMentionAtEnd: (text) =>
       insertComposerTextAtEndStable(text, { ensureLeadingBoundary: true }),
@@ -2708,6 +2711,22 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       );
       if (inserted) {
         addComposerDraftReviewComment(composerDraftTarget, comment, { appendReference: false });
+      }
+      return inserted;
+    },
+    insertCommitAtEnd: (commit) => {
+      const record = commitContextRecord({
+        sha: commit.sha,
+        subject: commit.subject,
+        repositoryPath: commit.repositoryPath,
+        threadIds: commit.threadIds,
+      });
+      const inserted = insertComposerTextAtEndStable(
+        `${formatInlineContextReference(commitContextReference(record))} `,
+        { ensureLeadingBoundary: true },
+      );
+      if (inserted) {
+        addComposerDraftCommitContext(composerDraftTarget, record, { appendReference: false });
       }
       return inserted;
     },

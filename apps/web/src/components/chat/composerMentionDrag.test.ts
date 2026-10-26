@@ -1,8 +1,10 @@
 import { describe, expect, it } from "@effect/vitest";
 
 import {
+  COMPOSER_COMMIT_DRAG_TYPE,
   COMPOSER_MENTION_DRAG_TYPE,
   type ComposerMentionDropHost,
+  encodeCommitDragPayload,
   makeComposerMentionDragHandlers,
 } from "./composerMentionDrag.ts";
 
@@ -40,6 +42,10 @@ const makeHost = (insertResult = true) => {
       log.push(`pr:${pullRequest.number}`);
       return insertResult;
     },
+    insertCommitAtEnd: (commit) => {
+      log.push(`commit:${commit.sha}`);
+      return insertResult;
+    },
     setDragActive: (active) => void log.push(`active:${active}`),
     onInsertRejected: () => void log.push("rejected"),
   };
@@ -74,5 +80,29 @@ describe("makeComposerMentionDragHandlers", () => {
     const { event } = makeDragEvent();
     handlers.onDragOver(event);
     expect(event.dataTransfer.dropEffect).toBe("move");
+  });
+
+  it("drops a dragged commit as a commit chip", () => {
+    const { host, log } = makeHost();
+    const handlers = makeComposerMentionDragHandlers(host);
+    const payload = encodeCommitDragPayload({
+      sha: "0123456789abcdef0123456789abcdef01234567",
+      subject: "Add commit chips",
+      repositoryPath: "/work/repo",
+      threadIds: [],
+    });
+    const calls: Array<string> = [];
+    const event = {
+      dataTransfer: {
+        types: [COMPOSER_COMMIT_DRAG_TYPE],
+        getData: (requested: string) => (requested === COMPOSER_COMMIT_DRAG_TYPE ? payload : ""),
+        dropEffect: "none",
+      },
+      nativeEvent: { stopPropagation: () => void calls.push("nativeStopPropagation") },
+      preventDefault: () => void calls.push("preventDefault"),
+      stopPropagation: () => void calls.push("stopPropagation"),
+    };
+    handlers.onDrop(event);
+    expect(log).toEqual(["active:false", "commit:0123456789abcdef0123456789abcdef01234567"]);
   });
 });
