@@ -198,6 +198,7 @@ export function ThreadWorkspaceStrip(props: ThreadWorkspaceStripProps) {
                   <button
                     aria-label={`${workspace.name} workspace`}
                     aria-pressed={isActive}
+                    data-workspace-id={workspace.id}
                     className={cn(
                       ICON_BUTTON_CLASS,
                       isActive ? tint.active : cn(tint.resting, "ring-transparent"),

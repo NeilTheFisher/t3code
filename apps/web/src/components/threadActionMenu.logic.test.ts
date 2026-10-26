@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { buildThreadActionMenuItems, type ThreadActionMenuState } from "./threadActionMenu.logic";
+import {
+  buildBulkMoveToWorkspaceMenuItem,
+  buildThreadActionMenuItems,
+  threadActionRequiresOperate,
+  type ThreadActionMenuState,
+} from "./threadActionMenu.logic";
 
 const baseState: ThreadActionMenuState = {
   canOperate: true,
@@ -86,6 +91,8 @@ describe("buildThreadActionMenuItems", () => {
     });
     expect(items.find((item) => item.id === "archive")?.disabled).toBe(true);
     expect(items.find((item) => item.id === "turn-into-project")?.disabled).toBe(true);
+  });
+
   it("preserves local actions and restores mutations after a grant", () => {
     const denied = buildThreadActionMenuItems({ ...baseState, canOperate: false, branch: "main" });
     expect(denied.filter((item) => !item.disabled).map((item) => item.id)).toEqual([
@@ -119,6 +126,55 @@ describe("buildThreadActionMenuItems", () => {
       "archive",
       "delete",
     ]);
+  });
+
+  it("files threads into a workspace when the beta offers it", () => {
+    const menu = buildThreadActionMenuItems({
+      ...baseState,
+      workspaceMenu: {
+        workspaces: [
+          { id: "work", name: "Work" },
+          { id: "personal", name: "Personal" },
+        ],
+        assignedWorkspaceId: "personal",
+      },
+    });
+    const item = menu.find((candidate) => candidate.id === "move-to-workspace");
+    expect(item?.label).toBe("Move to workspace");
+    expect(item?.children?.map((child) => [child.id, child.label, child.checked])).toEqual([
+      ["move-to-workspace:work", "Work", false],
+      ["move-to-workspace:personal", "Personal", true],
+      ["move-to-workspace:none", "No workspace", false],
+    ]);
+    expect(threadActionRequiresOperate("move-to-workspace:work")).toBe(false);
+  });
+
+  it("files a multi-selection into one workspace and checks only a unanimous destination", () => {
+    const workspaces = [
+      { id: "work", name: "Work" },
+      { id: "personal", name: "Personal" },
+    ];
+    const item = buildBulkMoveToWorkspaceMenuItem({
+      workspaces,
+      selectedCount: 2,
+      assignedWorkspaceIds: ["work", "work"],
+    });
+    expect(item?.label).toBe("Move to workspace (2)");
+    expect(item?.children.map((child) => [child.id, child.checked])).toEqual([
+      ["move-to-workspace:work", true],
+      ["move-to-workspace:personal", false],
+      ["move-to-workspace:none", false],
+    ]);
+
+    const mixed = buildBulkMoveToWorkspaceMenuItem({
+      workspaces,
+      selectedCount: 2,
+      assignedWorkspaceIds: ["work", null],
+    });
+    expect(mixed?.children.every((child) => !child.checked)).toBe(true);
+    expect(
+      buildBulkMoveToWorkspaceMenuItem({ workspaces, selectedCount: 0, assignedWorkspaceIds: [] }),
+    ).toBeNull();
   });
 
   it("offers project filtering only for surfaces with a scoped thread list", () => {
