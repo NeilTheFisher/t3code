@@ -5,21 +5,38 @@ import { agentWorkingDirectories } from "@t3tools/client-runtime/workspace-basen
 import { T, useGT, useMessages } from "gt-react";
 import { use, useState } from "react";
 import { type ChatMessage } from "../../types";
+import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipeline";
+import { type RunId } from "@t3tools/contracts";
+import { canForkProjectedAssistantItem } from "@t3tools/client-runtime/state/thread-workflows";
+import { agentWorkingDirectories } from "@t3tools/client-runtime/workspace-basename-lookup";
+import { T, useGT, useMessages } from "gt-react";
+import { memo, use, useEffect, useState } from "react";
+import { type ChatMessage, type TurnDiffSummary } from "../../types";
 import ChatMarkdown from "../ChatMarkdown";
-import { GitForkIcon, ReplyIcon } from "lucide-react";
-import { captureAssistantMessageOpening } from "~/lib/assistantTextSelection";
-import { responseContextRecord } from "~/lib/composerContextRecords";
+import { GitForkIcon, PlayIcon, SquareIcon, Volume2Icon } from "lucide-react";
 import { Button } from "../ui/button";
 import { ProposedPlanCard } from "./ProposedPlanCard";
 import { HtmlRenderFrame } from "./HtmlRenderFrame";
 import { McpAppFrame } from "./McpAppFrame";
 import { readResponseSubagents, useAssistantMessageText } from "../../state/entities";
+import { checkpointFileTotals } from "@t3tools/client-runtime/state/thread-checkpoints";
+import { ChangedFilesCard } from "./ChangedFilesTree";
+import { useFileContextMenuHandler } from "../../fileContextMenu";
+import { useAssistantMessageText, useProject, useThreadShell } from "../../state/entities";
 import { MessageCopyButton } from "./MessageCopyButton";
+import { MessagePlayButton } from "./MessagePlayButton";
+import { useTtsPlayer, stopPlayback } from "../../hooks/useTtsPlayer";
+import { useClientSettings } from "../../hooks/useSettings";
+import { useAudioPlayerStore } from "../../audioPlayerStore";
+import { clearSpokenQueue, enqueueSpoken } from "../../spokenPlaybackQueue";
+import { MessageId } from "@t3tools/contracts";
 import { AssistantCitationSource } from "./AssistantCitationSource";
-import { resolveAssistantMessageCopyState } from "./MessagesTimeline.logic";
+import {
+  resolveAssistantMessageCopyState,
+  resolveAssistantMessagePlayState,
+} from "./MessagesTimeline.logic";
 import { cn } from "~/lib/utils";
 import { formatChatTimestampTooltip, formatDayAwareTimestamp } from "../../timestampFormat";
-import { readThreadTurnItems } from "../../state/entities";
 import { useV2ItemSupport } from "../../state/v2ItemSupport";
 import { TimelineRowCtx, TimelineRowActivityCtx, type TimelineRow } from "./timelineRowContext";
 import { MESSAGE_HEADING_LEVEL, MessageAuthorHeading } from "./TimelineRowParts";
@@ -53,11 +70,6 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
               text={messageText}
               renderInsights
               cwd={ctx.markdownCwd}
-              agentDirectories={() =>
-                ctx.threadRef && row.projectedItem
-                  ? agentWorkingDirectories(readThreadTurnItems(ctx.threadRef), row.projectedItem)
-                  : []
-              }
               threadRef={ctx.threadRef ?? undefined}
               isStreaming={Boolean(row.message.streaming)}
               streamingId={row.message.id}
@@ -75,6 +87,14 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
             <AssistantStatusBadge status="interrupted" />
           </div>
         ) : null}
+        {ctx.onOpenTurnDiff ? (
+          <AssistantChangedFilesSection
+            turnSummary={row.assistantTurnDiffSummary}
+            routeThreadKey={ctx.routeThreadKey}
+            resolvedTheme={ctx.resolvedTheme}
+            onOpenTurnDiff={ctx.onOpenTurnDiff}
+          />
+        ) : null}
         {row.showAssistantMeta ? (
           <AssistantMessageMeta
             className="mt-1.5"
@@ -86,41 +106,6 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
         ) : null}
       </div>
     </>
-  );
-}
-
-/** Text an agent sent with `send_to_user`, shown as its own words. */
-export function SentMessageTimelineRow({
-  row,
-}: {
-  row: Extract<TimelineRow, { kind: "sent-message" }>;
-}) {
-  const ctx = use(TimelineRowCtx);
-
-  return (
-    <div className="min-w-0 px-1 py-0.5">
-      <MessageAuthorHeading>T3 Code</MessageAuthorHeading>
-      {/* Sent messages have no message id; citations name their turn item instead. */}
-      <AssistantCitationSource
-        messageId={MessageId.make(row.id)}
-        {...(ctx.threadRef ? { threadRef: ctx.threadRef } : {})}
-        itemKey={row.id}
-        request={ctx.citationRequest}
-        listRef={ctx.listRef}
-      >
-        <ChatMarkdown
-          text={row.text}
-          cwd={ctx.markdownCwd}
-          threadRef={ctx.threadRef ?? undefined}
-          lineBreaks={shouldPreserveAssistantLineBreaks(row.text)}
-          skills={ctx.skills}
-          headingLevelOffset={MESSAGE_HEADING_LEVEL}
-          onUseArtifactTemplate={ctx.onUseArtifactTemplate}
-          onRunShellCommand={ctx.onRunShellCommand}
-          onImageExpand={ctx.onImageExpand}
-        />
-      </AssistantCitationSource>
-    </div>
   );
 }
 
@@ -222,7 +207,9 @@ function AssistantMessageMeta({
       )}
     >
       {projectedItem && projectedItem.item.status !== "completed" ? (
-        <AssistantStatusBadge status={projectedItem.item.status} />
+        <span className="rounded-full border border-border/70 px-1.5 py-0.5 font-mono text-3xs text-muted-foreground">
+          {projectedItem.item.status}
+        </span>
       ) : null}
       <AssistantCopyButton
         message={message}
@@ -231,9 +218,6 @@ function AssistantMessageMeta({
       />
       {projectedItem?.item.type === "assistant_message" ? (
         <AssistantForkButton projectedItem={projectedItem} />
-      ) : null}
-      {!message.streaming && projectedItem ? (
-        <AssistantReplyButton message={message} itemId={projectedItem.sourceItemId} />
       ) : null}
       {!message.streaming && (
         <SharedTooltipTrigger
@@ -313,17 +297,34 @@ function AssistantCopyButton({
   showCopyButton: boolean;
   streaming: boolean;
 }) {
-  const assistantCopyState = resolveAssistantMessageCopyState({
+  const ctx = use(TimelineRowCtx);
+  const source = {
     text: message.text ?? null,
     showCopyButton,
     streaming,
-  });
+  };
+  const assistantCopyState = resolveAssistantMessageCopyState(source);
+  const playState = { visible: false, text: null } as { visible: boolean; text: string | null };
 
-  if (!assistantCopyState.visible) {
+  if (!assistantCopyState.visible && !playState.visible) {
     return null;
   }
 
-  return <MessageCopyButton text={assistantCopyState.text ?? ""} variant="ghost" />;
+  return (
+    <>
+      {playState.visible ? (
+        <MessagePlayButton
+          messageId={message.id}
+          text={playState.text ?? ""}
+          threadRef={ctx.threadRef}
+          variant="ghost"
+        />
+      ) : null}
+      {assistantCopyState.visible ? (
+        <MessageCopyButton text={assistantCopyState.text ?? ""} variant="ghost" />
+      ) : null}
+    </>
+  );
 }
 
 export function ProposedPlanTimelineRow({
@@ -390,6 +391,162 @@ export function McpAppTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "
         awaitingUser={awaitingUser}
         onFullscreenChange={(fullscreen) => ctx.onAppFullscreenChange(row.id, fullscreen)}
       />
+    </div>
+  );
+}
+
+/** Subscribes directly to the UI state store for expand/collapse state,
+ *  so toggling re-renders only this component — not the entire list. */
+const AssistantChangedFilesSection = memo(function AssistantChangedFilesSection({
+  turnSummary,
+  routeThreadKey,
+  resolvedTheme,
+  onOpenTurnDiff,
+}: {
+  turnSummary: TurnDiffSummary | undefined;
+  routeThreadKey: string;
+  resolvedTheme: "light" | "dark";
+  displayThreadKey?: string;
+  onOpenTurnDiff: (runId: RunId, filePath?: string) => void;
+}) {
+  if (!turnSummary) return null;
+  const checkpointFiles = turnSummary.files;
+  if (checkpointFiles.length === 0) return null;
+
+  return (
+    <AssistantChangedFilesSectionInner
+      turnSummary={turnSummary}
+      checkpointFiles={checkpointFiles}
+      routeThreadKey={routeThreadKey}
+      resolvedTheme={resolvedTheme}
+      onOpenTurnDiff={onOpenTurnDiff}
+    />
+  );
+});
+
+function AssistantChangedFilesSectionInner({
+  turnSummary,
+  checkpointFiles,
+  routeThreadKey,
+  resolvedTheme,
+  onOpenTurnDiff,
+}: {
+  turnSummary: TurnDiffSummary;
+  checkpointFiles: TurnDiffSummary["files"];
+  routeThreadKey: string;
+  resolvedTheme: "light" | "dark";
+  displayThreadKey?: string;
+  onOpenTurnDiff: (runId: RunId, filePath?: string) => void;
+}) {
+  const ctx = use(TimelineRowCtx);
+  const persistedExpanded = useUiStateStore(
+    (store) => store.threadChangedFilesExpandedById[routeThreadKey]?.[turnSummary.runId],
+  );
+  const setExpanded = useUiStateStore((store) => store.setThreadChangedFilesExpanded);
+  const allDirectoriesExpanded = persistedExpanded ?? false;
+
+  const thread = useThreadShell(ctx.threadRef);
+  const activeProject = useProject(
+    thread && thread.projectId
+      ? { environmentId: thread.environmentId, projectId: thread.projectId }
+      : null,
+  );
+  const onFileContextMenu = useFileContextMenuHandler(ctx.activeThreadEnvironmentId);
+
+  return (
+    <ChangedFilesCard
+      runId={turnSummary.runId}
+      files={checkpointFiles}
+      totals={checkpointFileTotals(turnSummary)}
+      allDirectoriesExpanded={allDirectoriesExpanded}
+      resolvedTheme={resolvedTheme}
+      onToggleAllDirectories={() =>
+        setExpanded(routeThreadKey, turnSummary.runId, !allDirectoriesExpanded)
+      }
+      onOpenTurnDiff={onOpenTurnDiff}
+      onFileContextMenu={(filePath, event) =>
+        onFileContextMenu(
+          {
+            environmentId: ctx.activeThreadEnvironmentId,
+            filePath,
+            workspaceRoot: ctx.workspaceRoot,
+            repositoryRoot:
+              thread?.worktreePath == null
+                ? activeProject?.repositoryIdentity?.rootPath
+                : undefined,
+          },
+          event,
+        )
+      }
+    />
+  );
+}
+
+/**
+ * A tool that asked the client to read something out — the assistant's own spoken line or a
+ * message it chose to narrate. Autoplay speaks each one once; the queue dedupes by entry id, so a
+ * remount never repeats it.
+ */
+export function SpokenTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "spoken" }> }) {
+  const { play } = useTtsPlayer();
+  const tts = useClientSettings((settings) => settings.tts);
+  const status = useAudioPlayerStore((state) => state.status);
+  const playingId = useAudioPlayerStore((state) => state.playingMessageId);
+  const [expanded, setExpanded] = useState(false);
+  const id = MessageId.make(`spoken:${row.id}`);
+  const isActive = status !== "idle" && playingId === id;
+
+  useEffect(() => {
+    if (!tts.enabled || tts.autoplay === false) return;
+    enqueueSpoken(
+      { id: row.id, text: row.speak.text },
+      { voice: tts.voice, serverUrl: tts.serverUrl, speed: row.speak.speed },
+      row.speak.interrupt === true,
+    );
+  }, [
+    row.id,
+    row.speak.text,
+    row.speak.interrupt,
+    tts.enabled,
+    tts.autoplay,
+    tts.voice,
+    tts.serverUrl,
+  ]);
+
+  return (
+    <div className="flex items-start gap-2 rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+      <Volume2Icon className="mt-0.5 size-3.5 shrink-0" />
+      {/* Click to expand the full utterance; the text stays selectable so it can be
+          cited like any assistant text (data-assistant-citation-source). No
+          `role="button"`: that is an excluded ancestor for citation selection. */}
+      <div
+        data-assistant-citation-source={id}
+        className={cn("min-w-0 flex-1 cursor-pointer text-left", !expanded && "truncate")}
+        onClick={() => {
+          // A drag-select is a citation, not a toggle.
+          if (window.getSelection()?.isCollapsed === false) return;
+          setExpanded((value) => !value);
+        }}
+      >
+        {row.speak.text}
+      </div>
+      <Button
+        aria-label={isActive ? "Stop playback" : "Play aloud"}
+        size="icon-xs"
+        variant="ghost"
+        onClick={() => {
+          if (isActive) {
+            stopPlayback();
+            return;
+          }
+          clearSpokenQueue();
+          void play(id, row.speak.text, null).catch(() => {
+            // Error surfaced via audioPlayerStore.
+          });
+        }}
+      >
+        {isActive ? <SquareIcon className="size-3.5" /> : <PlayIcon className="size-3.5" />}
+      </Button>
     </div>
   );
 }
