@@ -5,6 +5,7 @@ import {
 import { RefreshIcon } from "~/components/ui/refresh-icon";
 import { Spinner } from "~/components/ui/spinner";
 import { useShortcutModifierState } from "~/shortcutModifierState";
+import { PullRequestSpeedModeProvider } from "~/components/pullRequest/PullRequestSpeedActions";
 import type { PullRequestSpeedActionResult } from "~/components/pullRequest/PullRequestSpeedActions";
 import { usePullRequestCloseBatch } from "~/components/pullRequest/usePullRequestActions";
 import { SidebarPointerSensor } from "~/components/Sidebar.pointer";
@@ -337,9 +338,6 @@ export const Route = createFileRoute("/_chat/pull-requests")({
 
 function PullRequestsRouteView() {
   useEscapeToGoBack();
-  const modifiers = useShortcutModifierState(true);
-  const speedMode =
-    modifiers.shiftKey && !modifiers.metaKey && !modifiers.ctrlKey && !modifiers.altKey;
   const search = Route.useSearch();
   const sort = search.sort ?? "ready";
   const statsPolicy: PullRequestStatsPolicy =
@@ -1269,6 +1267,7 @@ function PullRequestsRouteView() {
       value={search.q ?? ""}
       busy={typedQuery.length > 0 && (!querySettled || showingCarried)}
       onChange={(query) => updateListScope({ q: query || undefined })}
+      onSubmit={(query) => updateListScope({ q: query.trim() || undefined })}
     />
   );
   const panelToggleControls = (
@@ -1347,47 +1346,48 @@ function PullRequestsRouteView() {
           onLoadMore={loadMore}
         />
       ) : (
-        <div className={cn("space-y-3", closeSweepKeys.size > 0 && "**:pointer-events-none")}>
-          {displayGroups.map((group) => (
-            <div key={group.key} className="space-y-0.5">
-              {group.label ? <PullRequestGroupHeader group={group} /> : null}
-              {group.entries.map((entry) => {
-                const entryKey = pullRequestEntryKey(entry);
-                return (
-                  <PullRequestRow
-                    key={entryKey}
-                    statsKey={entryKey}
-                    statsRef={registerStatsRow}
-                    entry={entry}
-                    showProjectTitle
-                    showProvider={showProvider}
-                    {...(capableEnvironments.length > 1 &&
-                    environmentLabels.get(entry.environmentId) !== undefined
-                      ? { environmentLabel: environmentLabels.get(entry.environmentId)! }
-                      : {})}
-                    matchedElsewhere={
-                      typedParsed.text.length > 0 &&
-                      scorePullRequestMatch(entry, typedParsed.text) <= MATCHED_ELSEWHERE_SCORE
-                    }
-                    selected={
-                      selected?.environmentId === entry.environmentId &&
-                      selected.repository === entry.repository &&
-                      selected.host?.toLowerCase() === entry.host.toLowerCase() &&
-                      selected.number === entry.number
-                    }
-                    onSelect={selectEntry}
-                    speedMode={speedMode}
-                    hostActions={hostActionsOf(entry)}
-                    onActed={onSpeedAction}
-                    closing={closingKeys.has(entryKey)}
-                    sweeping={closeSweepKeys.has(entryKey)}
-                    onCloseSweepStart={startCloseSweep}
-                  />
-                );
-              })}
-            </div>
-          ))}
-        </div>
+        <PullRequestSpeedModeProvider>
+          <div className={cn("space-y-3", closeSweepKeys.size > 0 && "**:pointer-events-none")}>
+            {displayGroups.map((group) => (
+              <div key={group.key} className="space-y-0.5">
+                {group.label ? <PullRequestGroupHeader group={group} /> : null}
+                {group.entries.map((entry) => {
+                  const entryKey = pullRequestEntryKey(entry);
+                  return (
+                    <PullRequestRow
+                      key={entryKey}
+                      statsKey={entryKey}
+                      statsRef={registerStatsRow}
+                      entry={entry}
+                      showProjectTitle
+                      showProvider={showProvider}
+                      {...(capableEnvironments.length > 1 &&
+                      environmentLabels.get(entry.environmentId) !== undefined
+                        ? { environmentLabel: environmentLabels.get(entry.environmentId)! }
+                        : {})}
+                      matchedElsewhere={
+                        typedParsed.text.length > 0 &&
+                        scorePullRequestMatch(entry, typedParsed.text) <= MATCHED_ELSEWHERE_SCORE
+                      }
+                      selected={
+                        selected?.environmentId === entry.environmentId &&
+                        selected.repository === entry.repository &&
+                        selected.host?.toLowerCase() === entry.host.toLowerCase() &&
+                        selected.number === entry.number
+                      }
+                      onSelect={selectEntry}
+                      hostActions={hostActionsOf(entry)}
+                      onActed={onSpeedAction}
+                      closing={closingKeys.has(entryKey)}
+                      sweeping={closeSweepKeys.has(entryKey)}
+                      onCloseSweepStart={startCloseSweep}
+                    />
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </PullRequestSpeedModeProvider>
       )}
 
       {listQuery.error && shownCount > 0 ? (
@@ -1455,9 +1455,18 @@ function PullRequestsRouteView() {
       onChange={(next) => updateListScope({ sort: next })}
     />
   );
+  const filterOptionScope = environmentQueries.map(({ environmentId, projectIds }) => ({
+    environmentId,
+    input: {
+      ...(scopedProjectId ? { projectId: scopedProjectId } : {}),
+      ...(projectIds ? { projectIds } : {}),
+      ...(search.host ? { host: search.host } : {}),
+    },
+  }));
   const filtersMenu = (
     <PullRequestFiltersMenuInSidebarOrder
       onOpenChange={setFiltersOpen}
+      optionScope={filterOptionScope}
       state={search.state}
       stateOptions={STATE_TABS}
       onState={(state) => updateListScope({ state })}

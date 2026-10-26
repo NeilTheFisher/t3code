@@ -1,14 +1,26 @@
 import { EnvironmentId, MessageId, ThreadId, type AssistantCitation } from "@t3tools/contracts";
 import { serializeAssistantCitation } from "@t3tools/shared/assistantCitations";
-import { formatComposerContextReference } from "@t3tools/shared/composerContextReferences";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  collectComposerPromptInlineTokens,
   selectionTouchesMentionBoundary,
   splitPromptIntoComposerSegments,
 } from "./composer-editor-mentions";
-import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "./lib/terminalContext";
+import { formatTerminalContextReference } from "./lib/terminalContext";
+
+const terminalReference = formatTerminalContextReference({
+  id: "ctx-1",
+  terminalLabel: "Terminal 1",
+  lineStart: 3,
+  lineEnd: 4,
+});
+const terminalSegment = {
+  type: "context-reference" as const,
+  kind: "terminal",
+  contextId: "terminal_ctx-1",
+  label: "Terminal 1 lines 3-4",
+  source: terminalReference,
+};
 
 const citation: AssistantCitation = {
   version: 1,
@@ -118,13 +130,17 @@ describe("splitPromptIntoComposerSegments", () => {
     },
   );
 
-  it("parses citations alongside file mentions, skills, and terminal contexts", () => {
+  it("parses citations alongside file mentions, skills, and context references", () => {
     const source = serializeAssistantCitation(citation);
+    const reference = formatTerminalContextReference({
+      id: "ctx-1",
+      terminalLabel: "Terminal 1",
+      lineStart: 3,
+      lineEnd: 4,
+    });
 
     expect(
-      splitPromptIntoComposerSegments(
-        `@AGENTS.md ${source}\n$review ${INLINE_TERMINAL_CONTEXT_PLACEHOLDER}${source}`,
-      ),
+      splitPromptIntoComposerSegments(`@AGENTS.md ${source}\n$review ${reference}${source}`),
     ).toEqual([
       { type: "mention", path: "AGENTS.md", source: "@AGENTS.md" },
       { type: "text", text: " " },
@@ -132,7 +148,13 @@ describe("splitPromptIntoComposerSegments", () => {
       { type: "text", text: "\n" },
       { type: "skill", name: "review", source: "$review" },
       { type: "text", text: " " },
-      { type: "terminal-context", context: null },
+      {
+        type: "context-reference",
+        kind: "terminal",
+        contextId: "terminal_ctx-1",
+        label: "Terminal 1 lines 3-4",
+        source: reference,
+      },
       { type: "citation", citation, source },
     ]);
   });
@@ -211,102 +233,14 @@ describe("splitPromptIntoComposerSegments", () => {
   });
 
   it("keeps context references at their prompt positions", () => {
-  it("does not convert an incomplete trailing skill token", () => {
-    expect(splitPromptIntoComposerSegments("Use $review-follow-up")).toEqual([
-      { type: "text", text: "Use $review-follow-up" },
-    ]);
-  });
-
-  it("keeps inline terminal context placeholders at their prompt positions", () => {
     expect(
-      splitPromptIntoComposerSegments(
-        `Inspect ${INLINE_TERMINAL_CONTEXT_PLACEHOLDER}@AGENTS.md please`,
-      ),
+      splitPromptIntoComposerSegments(`Inspect ${terminalReference} @AGENTS.md please`),
     ).toEqual([
       { type: "text", text: "Inspect " },
-      { type: "terminal-context", context: null },
-      { type: "mention", path: "AGENTS.md", source: "@AGENTS.md" },
-      { type: "text", text: " please" },
-    ]);
-  });
-
-  it("preserves consecutive terminal context placeholders without dropping positions", () => {
-    expect(
-      splitPromptIntoComposerSegments(
-        `${INLINE_TERMINAL_CONTEXT_PLACEHOLDER}${INLINE_TERMINAL_CONTEXT_PLACEHOLDER}tail`,
-      ),
-    ).toEqual([
-      { type: "terminal-context", context: null },
-      { type: "terminal-context", context: null },
-      { type: "text", text: "tail" },
-    ]);
-  });
-
-  it("splits inline context references into context-reference segments", () => {
-    const source = formatComposerContextReference({
-      kind: "file",
-      contextId: "file_abc" as never,
-      label: "src/app.ts",
-    });
-
-    expect(splitPromptIntoComposerSegments(`Inspect ${source} please`)).toEqual([
-      { type: "text", text: "Inspect " },
-      {
-        type: "context-reference",
-        kind: "file",
-        contextId: "file_abc",
-        label: "src/app.ts",
-        source,
-      },
-      { type: "text", text: " please" },
-    ]);
-  });
-
-  it("collects context references alongside citations and inline tokens", () => {
-    const source = formatComposerContextReference({
-      kind: "terminal",
-      contextId: "terminal_1" as never,
-      label: "build 4-9",
-    });
-    const tokens = collectComposerPromptInlineTokens(`${source} @AGENTS.md `);
-    expect(tokens.some((token) => token.type === "context-reference")).toBe(true);
-    expect(tokens.some((token) => token.type === "mention")).toBe(true);
-  });
-
-  it("keeps context references alongside terminal placeholders", () => {
-    const source = formatComposerContextReference({
-      kind: "review-comment",
-      contextId: "review-comment_1" as never,
-      label: "nit",
-    });
-
-    expect(
-      splitPromptIntoComposerSegments(`${INLINE_TERMINAL_CONTEXT_PLACEHOLDER}${source}tail`),
-    ).toEqual([
-      { type: "terminal-context", context: null },
-      {
-        type: "context-reference",
-        kind: "review-comment",
-        contextId: "review-comment_1",
-        label: "nit",
-        source,
-      },
-      { type: "text", text: "tail" },
-    ]);
-  });
-
-  it("keeps skill parsing alongside mentions and terminal placeholders", () => {
-    expect(
-      splitPromptIntoComposerSegments(
-        `Inspect ${INLINE_TERMINAL_CONTEXT_PLACEHOLDER}$review-follow-up after @AGENTS.md `,
-      ),
-    ).toEqual([
-      { type: "text", text: "Inspect " },
-      { type: "terminal-context", context: null },
-      { type: "skill", name: "review-follow-up", source: "$review-follow-up" },
-      { type: "text", text: " after " },
-      { type: "mention", path: "AGENTS.md", source: "@AGENTS.md" },
+      terminalSegment,
       { type: "text", text: " " },
+      { type: "mention", path: "AGENTS.md", source: "@AGENTS.md" },
+      { type: "text", text: " please" },
     ]);
   });
 });
@@ -339,17 +273,6 @@ describe("selectionTouchesMentionBoundary", () => {
   });
 
   // regression: #2625 mentions with spaces are quoted; selection checks must span the quotes
-  it("returns true when selection includes whitespace after a mention following a terminal placeholder", () => {
-    const prompt = `${INLINE_TERMINAL_CONTEXT_PLACEHOLDER}@AGENTS.md there`;
-    expect(
-      selectionTouchesMentionBoundary(
-        prompt,
-        `${INLINE_TERMINAL_CONTEXT_PLACEHOLDER}@AGENTS.md`.length,
-        prompt.length,
-      ),
-    ).toBe(true);
-  });
-
   it("returns true when selection includes whitespace after a quoted mention", () => {
     expect(
       selectionTouchesMentionBoundary(

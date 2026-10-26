@@ -1,0 +1,8 @@
+import { c as e } from "./search-BrluOr7L.js";
+var t = e(`circle-arrow-up`, [
+  [`circle`, { cx: `12`, cy: `12`, r: `10`, key: `1mglay` }],
+  [`path`, { d: `m16 12-4-4-4 4`, key: `177agl` }],
+  [`path`, { d: `M12 16V8`, key: `1sbj14` }],
+]);
+export { t };
+//# sourceMappingURL=circle-arrow-up-BMHSZICI.js.map
