@@ -176,6 +176,7 @@ import { cn } from "~/lib/utils";
 import { ProjectEnvironmentBadge } from "./ProjectEnvironmentBadge";
 import { ProjectRowActions } from "./ProjectComboboxRow";
 import {
+  buildBulkMoveToWorkspaceMenuItem,
   buildDraftActionMenuItems,
   buildThreadActionMenuItems,
   threadActionRequiresOperate,
@@ -216,6 +217,7 @@ import {
   type SidebarListItem,
   type SidebarSection,
 } from "./Sidebar.logic";
+import { isSidebarSubagentThread } from "./Sidebar.logic";
 import {
   createSidebarCollisionDetection,
   createSidebarSortingStrategy,
@@ -256,6 +258,16 @@ import {
 } from "./ui/combobox";
 import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
+import { ThreadWorkspaceStrip } from "./sidebar/ThreadWorkspaceStrip";
+import type { SidebarThreadWorkspace } from "@t3tools/contracts";
+import {
+  countThreadWorkspaceAttention,
+  filterThreadsByWorkspace,
+  resolveAssignedWorkspaceId,
+  threadNeedsWorkspaceAttention,
+  type ThreadWorkspaceAssignments,
+} from "./sidebar/threadWorkspaces";
+import { useThreadWorkspaces } from "../hooks/useThreadWorkspaces";
 import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
 import { TooltipProvider } from "./ui/tooltip";
 import {
@@ -353,6 +365,12 @@ type SidebarOptimisticDrop = {
   readonly assignedKeys: ReadonlyMap<string, string>;
 };
 
+type WorkspaceFilter = {
+  readonly assignments: ThreadWorkspaceAssignments;
+  readonly workspaces: ReadonlyArray<SidebarThreadWorkspace>;
+  readonly activeWorkspaceId: string | null;
+};
+
 interface SidebarThreadPartitionInput {
   readonly threads: readonly EnvironmentThreadShell[];
   readonly scopedProjectKeys: ReadonlySet<string> | null;
@@ -364,6 +382,7 @@ interface SidebarThreadPartitionInput {
   readonly workingShelfEnabled: boolean;
   /** Boring mode: folders list active threads by the user's latest message. */
   readonly sortActiveBySend: boolean;
+  readonly workspaceFilter: WorkspaceFilter | null;
   // Snooze wakes, the queued-turn grace and the Working shelf's exit grace depend
   // on the clock, so the minute tick, the precise snooze-wake tick and the inbox
   // tracker's expiry version are inputs: a new key repartitions.
@@ -433,6 +452,7 @@ function useSidebarThreads(input: {
   readonly folderGroups: readonly SidebarProjectSnapshot[] | null;
   // Keeps folders with no active threads, so a project the user filtered to or pinned can start one.
   readonly keepEmptyFolders: (group: SidebarProjectSnapshot) => boolean;
+  readonly workspaceFilter: WorkspaceFilter | null;
 }) {
   const {
     projectScopeKey,
@@ -445,6 +465,7 @@ function useSidebarThreads(input: {
     routeRowThreadKey,
     folderGroups,
     keepEmptyFolders: keepEmpty,
+    workspaceFilter,
   } = input;
   // Folders already separate the work, so boring mode has no Working shelf.
   const workingShelfEnabled =
@@ -493,6 +514,7 @@ function useSidebarThreads(input: {
     optimisticDrop,
     workingShelfEnabled,
     sortActiveBySend: folderGroups !== null,
+    workspaceFilter,
     clockKey: `${nowMinute}:${snoozeWakeClock}:${inboxReturnsVersion}`,
   });
 
@@ -630,7 +652,15 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
     sortActiveBySend,
   } = input;
   const preciseNow = new Date().toISOString();
-  const visible = filterSidebarV2VisibleThreads(threads, scopedProjectKeys, delegatedUnderParent);
+  const visibleInScope = filterSidebarV2VisibleThreads(
+    threads,
+    scopedProjectKeys,
+    delegatedUnderParent,
+  );
+  const visible =
+    input.workspaceFilter === null
+      ? visibleInScope
+      : filterThreadsByWorkspace(visibleInScope, input.workspaceFilter);
   const inboxObservation = inboxReturns.observe(workingShelfEnabled ? threads : null);
   const pinned: EnvironmentThreadShell[] = [];
   const active: EnvironmentThreadShell[] = [];
@@ -1307,6 +1337,26 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     },
   );
 
+  const threadWorkspaces = useThreadWorkspaces();
+  const threadWorkspacesRef = useRef(threadWorkspaces);
+  useEffect(() => {
+    threadWorkspacesRef.current = threadWorkspaces;
+  }, [threadWorkspaces]);
+  const workspaceFilter = threadWorkspaces.enabled
+    ? {
+        assignments: threadWorkspaces.assignments,
+        workspaces: threadWorkspaces.workspaces,
+        activeWorkspaceId: threadWorkspaces.activeWorkspaceId,
+      }
+    : null;
+  const [dragOverWorkspaceId, setDragOverWorkspaceId] = useState<string | null>(null);
+  const workspaceIconElementsRef = useRef(new Map<string, HTMLButtonElement>());
+  const registerWorkspaceIconElement = useStableCallback(
+    (workspaceId: string, element: HTMLButtonElement | null) => {
+      if (element === null) workspaceIconElementsRef.current.delete(workspaceId);
+      else workspaceIconElementsRef.current.set(workspaceId, element);
+    },
+  );
   const {
     workingShelfEnabled,
     pinnedThreads,
@@ -1349,6 +1399,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     serverConfigs,
     connectedEnvironmentIds,
     optimisticDrop,
+    workspaceFilter,
     threads: listedThreads,
     delegatedUnderParent,
     routeRowThreadKey,
@@ -1361,6 +1412,17 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     keepEmptyFolders: (group) =>
       scopedProjectGroups.length > 0 || (group.pinned && !group.archived),
   });
+
+  const workspaceAttention = threadWorkspaces.enabled
+    ? countThreadWorkspaceAttention(
+        threads.filter((thread) => thread.archivedAt === null && !isSidebarSubagentThread(thread)),
+        {
+          assignments: threadWorkspaces.assignments,
+          workspaces: threadWorkspaces.workspaces,
+          needsAttention: threadNeedsWorkspaceAttention,
+        },
+      )
+    : { byWorkspace: new Map<string, number>(), total: 0 };
 
   // Ranked across environments as the palette ranks them, so one
   // environment's list does not sit above another's better matches; rows
@@ -2034,7 +2096,24 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     previousShelfExpansionKeyRef.current = shelfExpansionKey;
     listMotionRef.current?.update(listMotionPass.animate && shelvesUnchanged);
   }, [listMotionPass, shelfExpansionKey]);
+  // Workspace icons sit outside the sortable list, so a drop on one is found by hit-testing the
+  // pointer rather than by an `over` id dnd-kit knows about.
+  const workspaceIdAtPointer = (event: DragOverEvent | DragEndEvent): string | null => {
+    if (!threadWorkspacesRef.current.enabled) return null;
+    const activator = event.activatorEvent;
+    if (!("clientX" in activator) || typeof activator.clientX !== "number") return null;
+    const clientY =
+      "clientY" in activator && typeof activator.clientY === "number" ? activator.clientY : null;
+    if (clientY === null) return null;
+    const clientX = activator.clientX + event.delta.x + 0;
+    const clientYAtPointer = clientY + event.delta.y;
+    const element = document
+      .elementFromPoint(clientX, clientYAtPointer)
+      ?.closest<HTMLElement>("[data-workspace-id]");
+    return element?.dataset.workspaceId ?? null;
+  };
   const handleThreadDragOver = (event: DragOverEvent) => {
+    setDragOverWorkspaceId(workspaceIdAtPointer(event));
     const target = event.over
       ? resolveSidebarDropTarget(sidebarListItems, String(event.active.id), String(event.over.id))
       : null;
@@ -2104,6 +2183,16 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     );
   })();
   const handleThreadDragEnd = (event: DragEndEvent) => {
+    const droppedWorkspaceId = workspaceIdAtPointer(event);
+    setDragOverWorkspaceId(null);
+    if (droppedWorkspaceId !== null) {
+      const activeKey = String(event.active.id);
+      const selection = useThreadSelectionStore.getState().selectedThreadKeys;
+      const threadKeys =
+        selection.has(activeKey) && selection.size > 1 ? [...selection] : [activeKey];
+      threadWorkspacesRef.current.assignThreads(threadKeys, droppedWorkspaceId);
+      return;
+    }
     if (projectFolders !== null) return;
     const activeKey = String(event.active.id);
     const activeSection = sectionByThreadKey.get(activeKey);
@@ -2344,6 +2433,21 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
         timestampFormat,
         selectedThreads[0]!.environmentId,
       );
+      const bulkWorkspaceMenu = (() => {
+        const workspaces = threadWorkspacesRef.current;
+        if (!workspaces.enabled) return null;
+        return buildBulkMoveToWorkspaceMenuItem({
+          workspaces: workspaces.workspaces,
+          selectedCount: selectedThreads.length,
+          assignedWorkspaceIds: selectedThreads.map((thread) =>
+            resolveAssignedWorkspaceId(
+              workspaces.assignments,
+              scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+              workspaces.workspaces,
+            ),
+          ),
+        });
+      })();
       const clicked = await settlePromise(() =>
         api.contextMenu.show(
           [
@@ -2378,6 +2482,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                   },
                 ]
               : []),
+            ...(bulkWorkspaceMenu ? [bulkWorkspaceMenu] : []),
             ...(titleRegenerationMenuItem
               ? [
                   {
@@ -2416,6 +2521,15 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
               : selectedThreads;
       if (clicked.value === "settle" && actionTargets.length === 0) return;
       if (clicked.value !== "mark-unread" && !checkThreadOperations(actionTargets)) return;
+      if (clicked.value?.startsWith("move-to-workspace:")) {
+        const targetId = clicked.value.slice("move-to-workspace:".length);
+        threadWorkspacesRef.current.assignThreads(
+          threadKeys,
+          targetId === "none" ? null : targetId,
+        );
+        clearSelection();
+        return;
+      }
       if (clicked.value?.startsWith("snooze:")) {
         const preset =
           clicked.value === "snooze:custom"
@@ -2685,6 +2799,21 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
               ),
               canTurnIntoProject: canTurnThreadIntoProject(threadRef),
               canRename: !fromSearch,
+              workspaceMenu: (() => {
+                const workspaces = threadWorkspacesRef.current;
+                if (!workspaces.enabled) return null;
+                return {
+                  workspaces: workspaces.workspaces.map((workspace) => ({
+                    id: workspace.id,
+                    name: workspace.name,
+                  })),
+                  assignedWorkspaceId: resolveAssignedWorkspaceId(
+                    workspaces.assignments,
+                    threadKey,
+                    workspaces.workspaces,
+                  ),
+                };
+              })(),
               supports: {
                 settlement: configLoaded,
                 autoSettleOptOut: supportsAutoSettleOptOut,
@@ -2700,6 +2829,14 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
         );
         if (clicked._tag === "Failure" || clicked.value === null) return;
         if (threadActionRequiresOperate(clicked.value) && !checkThreadOperations([thread])) return;
+        if (clicked.value?.startsWith("move-to-workspace:")) {
+          const targetId = clicked.value.slice("move-to-workspace:".length);
+          threadWorkspacesRef.current.assignThreads(
+            [threadKey],
+            targetId === "none" ? null : targetId,
+          );
+          return;
+        }
         if (clicked.value?.startsWith("snooze:")) {
           const preset =
             clicked.value === "snooze:custom"
@@ -3722,7 +3859,26 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           ) : null}
         </SidebarGroup>
       </SidebarContent>
-      <SidebarChromeFooter />
+      <SidebarChromeFooter
+        workspacesSlot={
+          threadWorkspaces.enabled ? (
+            <ThreadWorkspaceStrip
+              activeWorkspaceId={threadWorkspaces.activeWorkspaceId}
+              attentionByWorkspace={workspaceAttention.byWorkspace}
+              attentionTotal={workspaceAttention.total}
+              dragOverWorkspaceId={dragOverWorkspaceId}
+              onCreate={() => threadWorkspaces.createWorkspace("Workspace")}
+              onDelete={(workspaceId) => threadWorkspaces.deleteWorkspace(workspaceId)}
+              onSelect={(workspaceId) => threadWorkspaces.setActiveWorkspaceId(workspaceId)}
+              onUpdate={(workspaceId, patch) =>
+                threadWorkspaces.updateWorkspace(workspaceId, patch)
+              }
+              registerIconElement={registerWorkspaceIconElement}
+              workspaces={threadWorkspaces.workspaces}
+            />
+          ) : null
+        }
+      />
     </SidebarFolderDrop>
   );
 }

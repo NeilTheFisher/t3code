@@ -5,6 +5,7 @@ import { formatProviderSkillDisplayName } from "@t3tools/shared/inlineSkills";
 import { fileBasename } from "@t3tools/shared/path";
 import {
   CircleDashedIcon,
+  GitCommitHorizontalIcon,
   ImageIcon,
   MessageCircleIcon,
   MessagesSquareIcon,
@@ -16,6 +17,7 @@ import {
 import type { ReactElement } from "react";
 
 import { splitPromptIntoComposerSegments } from "~/composer-editor-mentions";
+import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "~/lib/terminalContext";
 import { composerFileNeedsReattach } from "~/composerDraftStore";
 import type {
   ComposerDraftContextRecord,
@@ -34,6 +36,7 @@ const CONTEXT_REFERENCE_ICONS: Record<
   (label: string, theme: Theme) => ReactElement
 > = {
   image: () => <ImageIcon />,
+  commit: () => <GitCommitHorizontalIcon />,
   file: (label, theme) => <PierreEntryIcon pathValue={label} kind="file" theme={theme} />,
   terminal: () => <TerminalIcon />,
   "preview-annotation": () => <MousePointerClickIcon />,
@@ -67,7 +70,13 @@ export function CollapsedComposerPromptPreview(props: {
   let offset = 0;
   return splitPromptIntoComposerSegments(props.prompt).map((segment) => {
     const key = offset;
-    offset += segment.type === "text" ? segment.text.length : segment.source.length;
+    // The terminal placeholder stands for a chip, not for text the segment carries.
+    offset +=
+      segment.type === "text"
+        ? segment.text.length
+        : segment.type === "terminal-context"
+          ? INLINE_TERMINAL_CONTEXT_PLACEHOLDER.length
+          : segment.source.length;
     switch (segment.type) {
       case "text":
         return segment.text;
@@ -110,6 +119,16 @@ export function CollapsedComposerPromptPreview(props: {
           />
         );
       }
+      // The editor's terminal chip carries a hover tooltip; the collapsed row stays inert.
+      case "terminal-context":
+        return segment.context ? (
+          <ContextChipShell
+            key={key}
+            kind="terminal"
+            icon={<TerminalIcon />}
+            label={segment.context.terminalLabel}
+          />
+        ) : null;
       case "skill": {
         const skill = props.skills.find(
           (candidate) => candidate.name === segment.name && isProviderSkillUserInvocable(candidate),
