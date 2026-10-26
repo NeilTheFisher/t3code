@@ -133,6 +133,7 @@ import {
 import {
   releaseAttachmentUpload,
   releaseDraftAttachment,
+  retryAttachmentUpload,
   startAttachmentUpload,
   useAttachmentUploadStore,
 } from "../../lib/attachmentUploadQueue";

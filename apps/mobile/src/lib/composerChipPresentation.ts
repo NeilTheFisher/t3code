@@ -49,8 +49,7 @@ const CONTEXT_CHIP_PRESENTATIONS = {
   response: { accent: "#7f8793", icon: null },
   commit: {
     accent: "#00935c",
-    symbol: "arrow.triangle.branch",
-    // No bundled PNG for this kind; the symbol carries it.
+    // No bundled PNG for this kind.
     icon: null,
   },
 } as const satisfies Record<string, ContextChipPresentation>;

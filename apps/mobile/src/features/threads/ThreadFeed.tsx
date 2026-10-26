@@ -189,7 +189,7 @@ import { useAndroidControlSizing } from "../../components/ui/useAndroidControlSi
 import { useBarInset, useContentTopInset } from "../../components/ui/useBarInset";
 
 import { MessageTtsButton } from "./MessageTtsButton";
-import { markdownToSpokenText } from "../../lib/spokenText";
+import { splitMarkdownBlocks } from "../../lib/spokenText";
 import { copyPromptLink } from "../prompt-links/prompt-link-actions";
 import { parseReviewCommentMessageSegments } from "../review/reviewCommentSelection";
 import {
@@ -2424,7 +2424,7 @@ function renderFeedEntry(
               messageId={message.id}
               threadId={props.threadId}
               environmentId={props.environmentId}
-              text={markdownToSpokenText(renderedText)}
+              blocks={splitMarkdownBlocks(renderedText)}
               tintColor={iconSubtleColor}
             />
             <CopyTextButton
