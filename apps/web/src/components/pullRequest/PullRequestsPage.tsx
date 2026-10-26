@@ -1492,6 +1492,7 @@ export function PullRequestsPage() {
             onAddBrowserInProfile={() => undefined}
             onAddTerminal={() => undefined}
             onAddDiff={() => undefined}
+            onAddGitGraph={() => undefined}
             onAddFiles={() => undefined}
             onAddPullRequest={() => undefined}
             onAddPullRequests={() => undefined}
@@ -1499,6 +1500,7 @@ export function PullRequestsPage() {
             browserAvailable={false}
             terminalAvailable={false}
             diffAvailable={false}
+            gitGraphAvailable={false}
             filesAvailable={false}
             pullRequestAvailable={false}
             pullRequestsAvailable={false}

@@ -10,13 +10,13 @@ import * as Effect from "effect/Effect";
 
 import { resolveSettingsSecrets } from "../secrets/settingsSecretValue.ts";
 
-import { sourceControlDefinitions } from "./sourceControlDefinitions.ts";
+import { builtInSourceControlDefinitions } from "@t3tools/source-control-definitions/registry";
 
 export const SOURCE_CONTROL_HOST_SECRET_FIELDS: ReadonlyMap<
   string,
   ReadonlyArray<string>
 > = new Map(
-  sourceControlDefinitions.definitions.flatMap((definition) => {
+  builtInSourceControlDefinitions.definitions.flatMap((definition) => {
     const fields = definition.settings ? secretSettingsFields(definition.settings) : [];
     return fields.length > 0 ? [[definition.kind, fields] as const] : [];
   }),
@@ -68,7 +68,7 @@ export function writeSecretFieldValues(
 type SourceControlHostsSettings = Readonly<Record<string, Readonly<Record<string, unknown>>>>;
 
 const hostSettingsSchemas = new Map(
-  sourceControlDefinitions.definitions.flatMap((definition) =>
+  builtInSourceControlDefinitions.definitions.flatMap((definition) =>
     definition.settings ? [[definition.kind as string, definition.settings] as const] : [],
   ),
 );
