@@ -6,11 +6,14 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
-import type { ScopedThreadRef, RunId } from "@t3tools/contracts";
+import { scopedThreadKey } from "@t3tools/client-runtime/environment";
+import type { ReviewDiffPreviewSourceKind, ScopedThreadRef, RunId } from "@t3tools/contracts";
 import {
   ArrowRightIcon,
   CheckIcon,
   ChevronDownIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
   Columns2Icon,
   FlaskConicalOffIcon,
   FolderTreeIcon,
@@ -30,6 +33,7 @@ import { openDiffFilePrimaryAction } from "../diffFileActions";
 import { toolCallDiff } from "../lib/toolCallDiff";
 import { useCheckpointDiff, useTurnItemDetail } from "~/state/queries";
 import { revisionedQuery } from "~/state/revisionedQuery";
+import { submodulePointerChanges } from "~/lib/submodulePointerChanges";
 import { cn } from "~/lib/utils";
 import {
   resolveToolCallDiffTarget,
@@ -275,6 +279,9 @@ export default function DiffPanel({
       : null,
   );
   const toolCallItem = toolCallDetail.data?.item;
+  const diffHistory = useDiffPanelStore((state) =>
+    routeThreadRef ? (state.historyByThreadKey[scopedThreadKey(routeThreadRef)] ?? null) : null,
+  );
   const isGitRepo = gitStatusQuery.data?.isRepo ?? true;
   const turnDiffSummaries = useThreadCheckpointSummaries(routeThreadRef);
   const orderedTurnDiffSummaries = turnDiffSummaries.toSorted((left, right) => {
@@ -296,6 +303,8 @@ export default function DiffPanel({
   const selectedRunId = diffSelection.kind === "turn" ? diffSelection.turnId : null;
   const selectedGitScope = diffSelection.kind === "unstaged" ? "unstaged" : "branch";
   const selectedBaseRef = diffSelection.kind === "branch" ? diffSelection.baseRef : null;
+  const selectedCommitRange = diffSelection.kind === "commit-range" ? diffSelection : null;
+  const selectedSubmodule = diffSelection.kind === "submodule" ? diffSelection : null;
   const selectedFilePath = diffSelection.kind === "turn" ? diffSelection.filePath : null;
   const selectedFileRevealRequestId =
     diffSelection.kind === "turn" ? diffSelection.revealRequestId : 0;
@@ -306,31 +315,41 @@ export default function DiffPanel({
         orderedTurnDiffSummaries[0]);
   const selectedCheckpointTurnCount = selectedTurn?.checkpointTurnCount;
   const latestTurn = orderedTurnDiffSummaries[0];
-  const selectedScopeLabel = toolCallSelection
-    ? "Tool call"
-    : selectedRunId === null
-      ? selectedGitScope === "unstaged"
-        ? "Uncommitted"
-        : "Changes"
-      : selectedTurn?.runId === latestTurn?.runId
-        ? "Latest turn"
-        : `Turn ${selectedCheckpointTurnCount ?? "?"}`;
+  const selectedScopeLabel = (() => {
+    if (toolCallSelection !== null) return "Tool call";
+    if (selectedSubmodule !== null) return selectedSubmodule.label;
+    if (selectedCommitRange !== null) return selectedCommitRange.label;
+    if (selectedRunId === null) {
+      return selectedGitScope === "unstaged" ? "Uncommitted" : "Changes";
+    }
+    return selectedTurn?.runId === latestTurn?.runId
+      ? "Latest turn"
+      : `Turn ${selectedCheckpointTurnCount ?? "?"}`;
+  })();
   const reviewSectionId = toolCallSelection
     ? `tool-call:${toolCallSelection.threadId}:${toolCallSelection.itemId}`
-    : selectedTurn
-      ? `turn:${selectedTurn.runId}`
-      : selectedGitScope;
+    : selectedSubmodule
+    ? `submodule:${selectedSubmodule.path}:${selectedSubmodule.from}..${selectedSubmodule.to}`
+    : selectedCommitRange
+      ? `commit:${selectedCommitRange.from}..${selectedCommitRange.to}`
+      : selectedTurn
+        ? `turn:${selectedTurn.runId}`
+        : selectedGitScope;
   const collapseScopeKey = routeThreadRef
     ? `${routeThreadRef.environmentId}:${routeThreadRef.threadId}:${reviewSectionId}`
     : null;
   const codeViewMountKey = `${collapseScopeKey ?? reviewSectionId}:${codeViewRevision}`;
   const reviewSectionTitle = toolCallSelection
     ? "Tool call"
-    : selectedTurn
-      ? `Turn ${selectedCheckpointTurnCount ?? "?"}`
-      : selectedGitScope === "unstaged"
-        ? "Uncommitted"
-        : "Changes";
+    : selectedSubmodule
+      ? selectedSubmodule.label
+    : selectedCommitRange
+      ? selectedCommitRange.label
+      : selectedTurn
+        ? `Turn ${selectedCheckpointTurnCount ?? "?"}`
+        : selectedGitScope === "unstaged"
+          ? "Uncommitted"
+          : "Changes";
   const selectedCheckpointRange =
     typeof selectedCheckpointTurnCount === "number"
       ? {
@@ -354,6 +373,18 @@ export default function DiffPanel({
       ? {
           cwd: activeCwd,
           ...(selectedBaseRef ? { baseRef: selectedBaseRef } : {}),
+          ...(selectedCommitRange
+            ? { commitRange: { from: selectedCommitRange.from, to: selectedCommitRange.to } }
+            : {}),
+          ...(selectedSubmodule
+            ? {
+                submodule: {
+                  path: selectedSubmodule.path,
+                  from: selectedSubmodule.from,
+                  to: selectedSubmodule.to,
+                },
+              }
+            : {}),
           ignoreWhitespace: diffIgnoreWhitespace,
         }
       : undefined;
@@ -376,9 +407,36 @@ export default function DiffPanel({
     ? `${routeThreadRef.environmentId}:${routeThreadRef.threadId}`
     : null;
 
+  const selectedGitSourceKind: ReviewDiffPreviewSourceKind = selectedSubmodule
+    ? "submodule-range"
+    : selectedCommitRange
+      ? "commit-range"
+      : selectedGitScope === "unstaged"
+        ? "working-tree"
+        : "branch-range";
   const selectedGitSource = branchDiffPreview.data?.sources.find(
-    (source) => source.kind === (selectedGitScope === "unstaged" ? "working-tree" : "branch-range"),
+    (source) => source.kind === selectedGitSourceKind,
   );
+
+  // A gitlink change records two revisions the parent repository cannot show;
+  // the row offers the submodule's own diff instead.
+  const submodulePointers = new Map(
+    submodulePointerChanges(selectedGitSource?.diff ?? "").map((pointer) => [
+      pointer.path,
+      pointer,
+    ]),
+  );
+  const selectSubmodulePointer = (pointer: {
+    readonly path: string;
+    readonly from: string;
+    readonly to: string;
+  }) => {
+    if (!routeThreadRef) return;
+    useDiffPanelStore.getState().selectSubmodule(routeThreadRef, {
+      ...pointer,
+      label: `${pointer.path} ${pointer.from.slice(0, 8)}..${pointer.to.slice(0, 8)}`,
+    });
+  };
   const refreshPreviewQuery = branchDiffPreview.refresh;
   const refreshDiffFromUserAction = refreshPreviewQuery;
 
@@ -447,6 +505,7 @@ export default function DiffPanel({
           sourceKind: selectedGitSource.kind,
           baseRef: selectedGitSource.baseRef,
           headRef: selectedGitSource.headRef,
+          ...(selectedSubmodule ? { submodulePath: selectedSubmodule.path } : {}),
           cacheKey: selectedGitSource.diffHash,
         })
       : undefined;
@@ -513,6 +572,7 @@ export default function DiffPanel({
     cwd: branchDiffPreview.data?.cwd,
     source: lazySource,
     baseRef: lazySource?.baseRef ?? selectedBaseRef,
+    ...(selectedSubmodule ? { submodulePath: selectedSubmodule.path } : {}),
     ignoreWhitespace: diffIgnoreWhitespace,
     theme: resolvedTheme,
     previewInput: branchDiffPreviewInput,
@@ -695,11 +755,15 @@ export default function DiffPanel({
   const selectedTurnValue = selectedTurn ? `turn:${selectedTurn.runId}` : "";
   const selectedScopeValue = toolCallSelection
     ? ""
-    : selectedRunId === null
-      ? selectedGitScope
-      : selectedTurn?.runId === latestTurn?.runId
-        ? "latest"
-        : selectedTurnValue;
+    : selectedSubmodule
+      ? "submodule-range"
+    : selectedCommitRange
+      ? "commit-range"
+      : selectedRunId === null
+        ? selectedGitScope
+        : selectedTurn?.runId === latestTurn?.runId
+          ? "latest"
+          : selectedTurnValue;
   const selectScopeValue = (value: string) => {
     if (value === "unstaged" || value === "branch") {
       selectGitScope(value);
@@ -726,6 +790,16 @@ export default function DiffPanel({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
             <DropdownMenuRadioGroup value={selectedScopeValue} onValueChange={selectScopeValue}>
+              {selectedCommitRange ? (
+                <DropdownMenuRadioItem value="commit-range" closeOnClick>
+                  <span>{selectedCommitRange.label}</span>
+                </DropdownMenuRadioItem>
+              ) : null}
+              {selectedSubmodule ? (
+                <DropdownMenuRadioItem value="submodule-range" closeOnClick>
+                  <span>{selectedSubmodule.label}</span>
+                </DropdownMenuRadioItem>
+              ) : null}
               <DropdownMenuRadioItem value="branch" closeOnClick>
                 <span>Changes</span>
               </DropdownMenuRadioItem>
@@ -1054,7 +1128,39 @@ export default function DiffPanel({
   );
 
   return (
-    <DiffPanelShell mode={mode} header={headerRow}>
+    <DiffPanelShell
+      mode={mode}
+      nav={
+        <div className="flex min-w-0 flex-1 items-center gap-0.5">
+          <Button
+            size="icon-tiny"
+            variant="ghost"
+            aria-label="Back to the previous diff"
+            disabled={!diffHistory || diffHistory.index <= 0}
+            onClick={() => {
+              if (routeThreadRef) useDiffPanelStore.getState().goBack(routeThreadRef);
+            }}
+          >
+            <ChevronLeftIcon />
+          </Button>
+          <Button
+            size="icon-tiny"
+            variant="ghost"
+            aria-label="Forward to the next diff"
+            disabled={!diffHistory || diffHistory.index >= diffHistory.entries.length - 1}
+            onClick={() => {
+              if (routeThreadRef) useDiffPanelStore.getState().goForward(routeThreadRef);
+            }}
+          >
+            <ChevronRightIcon />
+          </Button>
+          <span className="min-w-0 truncate pl-1 text-2xs text-muted-foreground">
+            {selectedScopeLabel}
+          </span>
+        </div>
+      }
+      header={headerRow}
+    >
       {!activeThread ? (
         <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
           Select a thread to inspect turn diffs.
@@ -1203,14 +1309,33 @@ export default function DiffPanel({
                     renderHeaderFilenameSuffix={(fileDiff) => {
                       const path = resolveFileDiffPath(fileDiff);
                       const state = fileStates.get(path);
+                      const pointer = submodulePointers.get(path);
                       return (
-                        <DiffFileHeaderSuffix
-                          filePath={path}
-                          hasStat={fileStats.has(path)}
-                          error={state?.error ?? false}
-                          truncated={state?.truncated ?? false}
-                          onRetry={retry}
-                        />
+                        <>
+                          {/* The submodule action sits at the row's own height, so it
+                              reads as an action on that file rather than on the diff. */}
+                          {pointer && selectedSubmodule === null ? (
+                            <Button
+                              size="micro"
+                              variant="ghost"
+                              className="-my-px"
+                              aria-label={`Show ${pointer.path} submodule changes`}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                selectSubmodulePointer(pointer);
+                              }}
+                            >
+                              Submodule changes
+                            </Button>
+                          ) : null}
+                          <DiffFileHeaderSuffix
+                            filePath={path}
+                            hasStat={fileStats.has(path)}
+                            error={state?.error ?? false}
+                            truncated={state?.truncated ?? false}
+                            onRetry={retry}
+                          />
+                        </>
                       );
                     }}
                     {...(lazySource
