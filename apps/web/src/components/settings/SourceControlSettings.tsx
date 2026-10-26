@@ -35,6 +35,7 @@ import { SourceControlAccountSettings } from "./SourceControlAccountSettings";
 import { SourceControlAppSignInSettings } from "./SourceControlAppSignInSettings";
 import { SourceControlTokenSettings } from "./SourceControlTokenSettings";
 import { RedactedSensitiveText } from "./RedactedSensitiveText";
+import { GerritCredentialsSettings } from "./GerritCredentialsSettings";
 import { SourceControlWritingSettingsSection } from "./SourceControlWritingSettings";
 import {
   SettingsPageContainer,
@@ -415,6 +416,17 @@ export function SourceControlSettingsPanel() {
     discovery.refresh();
   };
   const hostSettingsPanel = (item: SourceControlProviderDiscoveryItem) => {
+    if (item.kind === "gerrit" && environmentId !== null) {
+      return (
+        <SettingsSearchTarget id={searchableSetting("gerrit-credentials").id}>
+          <GerritCredentialsSettings
+            key={`gerrit-${environmentId}`}
+            environmentId={environmentId}
+            onSaved={handleScan}
+          />
+        </SettingsSearchTarget>
+      );
+    }
     const definition = sourceControlClients.find(item.kind);
     if (!definition?.settings || environmentId === null) return undefined;
     const { credentials } = definition;

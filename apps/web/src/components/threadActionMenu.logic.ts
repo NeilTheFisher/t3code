@@ -3,6 +3,8 @@ import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled"
 
 export type ThreadActionMenuId =
   | "find"
+  | "move-to-workspace"
+  | `move-to-workspace:${string}`
   | "new-thread-on-branch"
   | "filter-by-project"
   | "turn-into-project"
@@ -91,6 +93,11 @@ export interface ThreadActionMenuState {
     readonly pinning: boolean;
     readonly titleRegeneration: boolean;
   };
+  /** Null (or omitted) when the workspaces beta is off, so the menu stays unchanged. */
+  readonly workspaceMenu?: {
+    readonly workspaces: ReadonlyArray<{ readonly id: string; readonly name: string }>;
+    readonly assignedWorkspaceId: string | null;
+  } | null;
   readonly snoozePresets: ReadonlyArray<SnoozePreset>;
   /** Guest links need their own grant, so the caller checks it instead of `canOperate`. */
   readonly canShareWithGuest?: boolean;
@@ -100,6 +107,8 @@ export interface ThreadActionMenuState {
 
 /** Local navigation, read markers, and copying remain available to read-only clients. */
 export function threadActionRequiresOperate(action: ThreadActionMenuId): boolean {
+  // Workspaces are a client-local grouping, so read-only clients can still file threads.
+  if (action === "move-to-workspace" || action.startsWith("move-to-workspace:")) return false;
   return ![
     "find",
     "new-thread-on-branch",
@@ -200,6 +209,28 @@ export function buildThreadActionMenuItems(
             label: "Turn into project",
             icon: "folder-plus",
             disabled: state.isRunning,
+          },
+        ]
+      : []),
+    ...(state.workspaceMenu
+      ? [
+          {
+            id: "move-to-workspace" as const,
+            label: "Move to workspace",
+            icon: "folder-tree",
+            children: [
+              ...state.workspaceMenu.workspaces.map((workspace) => ({
+                id: `move-to-workspace:${workspace.id}` as const,
+                label: workspace.name,
+                checked: state.workspaceMenu?.assignedWorkspaceId === workspace.id,
+              })),
+              {
+                id: "move-to-workspace:none" as const,
+                label: "No workspace",
+                checked: state.workspaceMenu.assignedWorkspaceId === null,
+                separatorBefore: true,
+              },
+            ],
           },
         ]
       : []),

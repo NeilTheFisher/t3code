@@ -1,3 +1,6 @@
+import type { RepositoryIdentity, SourceControlProviderInfo } from "@t3tools/contracts";
+import { SourceControlProviderKind } from "@t3tools/contracts";
+
 const SCP_SSH_REMOTE_PATTERN = /^[a-zA-Z0-9._-]+@([^:/]+):/;
 // Git reads `host:path` as SSH too, leaving the user to ssh config. A single letter is a Windows
 // drive and `::` names a remote helper.
