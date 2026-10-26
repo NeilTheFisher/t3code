@@ -1,20 +1,15 @@
-import {
-  EnvironmentId,
-  ProviderDriverKind,
-  ProviderInstanceId,
-  ProviderTurnId,
-  ThreadId,
-  type OrchestrationV2TurnItem,
-  type WorktreeSetupSnapshot,
-} from "@t3tools/contracts";
-import { serializeAssistantCitation } from "@t3tools/shared/assistantCitations";
+import { ThreadId, type WorktreeSetupSnapshot } from "@t3tools/contracts";
 import {
   CheckpointRef,
   NodeId,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  ProviderTurnId,
   RunAttemptId,
   TurnItemId,
   RuntimeRequestId,
   type OrchestrationV2ProjectedTurnItem,
+  type OrchestrationV2TurnItem,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import {
@@ -23,348 +18,23 @@ import {
   workEntryDisplayIndicatesToolFailure,
   type TimelineEntry,
 } from "../../session-logic";
-import {
-  makeStreamingTimelineFixture,
-  makeStreamingWorkTimelineFixture,
-  withStreamedText,
-} from "../../test-fixtures";
+import { makeStreamingTimelineFixture } from "../../test-fixtures";
 import type { TurnDiffSummary } from "../../types";
 import { describe, expect, it } from "vite-plus/test";
-import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipeline";
-import { MessageId, RunId } from "@t3tools/contracts";
+import { EnvironmentId, MessageId, RunId } from "@t3tools/contracts";
+import { serializeAssistantCitation } from "@t3tools/shared/assistantCitations";
 import {
   computeStableMessagesTimelineRows,
   deriveMessagesTimelineRows,
   timelineTurnFoldRunIdsByEntryId,
   liveAnswerPreview,
   deriveMessagesTimelineRowsWithState,
-  isTimelineMinimapTurnVisible,
-  resolveAssistantMessageCopyState,
-  liveWorkEntryLabel,
-  resolveTimelineIsAtEnd,
-  isTimelineMinimapRowVisible,
-  resolveTimelineMinimapCurrentIndex,
-  resolveTimelineMinimapVisibleRange,
-  resolveTimelineMinimapHasPersistentGutter,
-  resolveTimelineMinimapHeightStyle,
-  resolveTimelineMinimapHitStripWidth,
-  resolveTimelineMinimapIndexFromPointer,
-  resolveTimelineMinimapInteractiveWidth,
-  resolveTimelineMinimapNavigationInteractive,
-  resolveTimelineMinimapTopPercent,
-  resolveWorkGroupScrollIndex,
   shouldCollapseUserMessage,
-  shouldFollowWorkGroupAppend,
+  resolveAssistantMessageCopyState,
   type MessagesTimelineRow,
   workEntryDisplayLabel,
   workEntryReadOutput,
 } from "./MessagesTimeline.logic";
-import { workEntryIconName } from "./TimelineWorkEntryRow.logic";
-import type { WorkLogEntry } from "../../session-logic";
-
-describe("expanded tool group scrolling", () => {
-  const entries = [{ id: "first" }, { id: "second" }];
-
-  it("follows appended calls only at the hard end", () => {
-    const appended = [...entries, { id: "third" }];
-    expect(shouldFollowWorkGroupAppend(entries, appended, 0)).toBe(true);
-    expect(shouldFollowWorkGroupAppend(entries, appended, 0.5)).toBe(true);
-    expect(shouldFollowWorkGroupAppend(entries, appended, 1)).toBe(true);
-    expect(shouldFollowWorkGroupAppend(entries, appended, 1.01)).toBe(false);
-    expect(shouldFollowWorkGroupAppend(entries, appended, 10)).toBe(false);
-    expect(shouldFollowWorkGroupAppend(entries, appended, Infinity)).toBe(false);
-  });
-
-  it("does not follow output updates, prepends, or replacements", () => {
-    expect(
-      shouldFollowWorkGroupAppend(
-        entries,
-        entries.map((entry) => ({ ...entry })),
-        0,
-      ),
-    ).toBe(false);
-    expect(shouldFollowWorkGroupAppend(entries, [{ id: "older" }, ...entries], 0)).toBe(false);
-    expect(
-      shouldFollowWorkGroupAppend(
-        entries,
-        [{ id: "replacement" }, entries[1]!, { id: "third" }],
-        0,
-      ),
-    ).toBe(false);
-    expect(shouldFollowWorkGroupAppend([], entries, 0)).toBe(false);
-  });
-
-  it("restores the visible tool and its offset inside expanded output", () => {
-    const anchor = { entryId: "second", offset: 120 };
-    expect(resolveWorkGroupScrollIndex(entries, anchor)).toEqual({ index: 1, viewOffset: -120 });
-    expect(resolveWorkGroupScrollIndex([{ id: "older" }, ...entries], anchor)).toEqual({
-      index: 2,
-      viewOffset: -120,
-    });
-  });
-
-  it("starts normally when the saved tool no longer exists", () => {
-    expect(resolveWorkGroupScrollIndex(entries, undefined)).toBeUndefined();
-    expect(
-      resolveWorkGroupScrollIndex(entries, { entryId: "removed", offset: 120 }),
-    ).toBeUndefined();
-  });
-});
-
-describe("work entry labels", () => {
-  const entry = {
-    id: "tool-1",
-    createdAt: "2026-09-01T12:00:00Z",
-    label: "Tool call",
-    tone: "tool" as const,
-  };
-
-  it("previews reasoning in the live row and falls back to a short label while empty", () => {
-    const thought = {
-      ...entry,
-      itemType: "reasoning" as const,
-      tone: "thinking" as const,
-      detail: "Check **ordering** first.",
-      toolLifecycleStatus: "inProgress" as const,
-    };
-    expect(liveWorkEntryLabel(thought, undefined, true)).toBe(thought.detail);
-    expect(
-      liveWorkEntryLabel(
-        { ...thought, detail: "First paragraph.\n\nSecond paragraph." },
-        undefined,
-        true,
-      ),
-    ).toBe("First paragraph. Second paragraph.");
-    expect(liveWorkEntryLabel({ ...thought, detail: "  " }, undefined, true)).toBe("Thinking");
-    expect(
-      liveWorkEntryLabel(
-        { ...thought, detail: "", toolLifecycleStatus: "completed" },
-        undefined,
-        false,
-      ),
-    ).toBe("Thought");
-    expect(
-      liveWorkEntryLabel({ ...thought, toolLifecycleStatus: "completed" }, undefined, false),
-    ).toBe(thought.detail);
-    expect(workEntryDisplayLabel(thought, undefined)).toBe(thought.detail);
-    expect(workEntryIsVisibleInGroup(thought)).toBe(true);
-    expect(workEntryIsVisibleInGroup({ ...thought, toolLifecycleStatus: "completed" })).toBe(true);
-    expect(workEntryIsVisibleInGroup({ ...thought, detail: "  " })).toBe(false);
-  });
-
-  it.each([
-    ["inProgress", "Clicking in the preview browser"],
-    ["completed", "Clicked in the preview browser"],
-    ["failed", "Failed to click in the preview browser"],
-    ["declined", "Declined to click in the preview browser"],
-    ["stopped", "Stopped clicking in the preview browser"],
-  ] as const)("uses the same friendly %s label in both views", (toolLifecycleStatus, label) => {
-    const browserEntry = {
-      ...entry,
-      toolTitle: "T3-code.preview_click",
-      detail: '{"ok":true}',
-      toolLifecycleStatus,
-    };
-    expect(liveWorkEntryLabel(browserEntry, undefined, toolLifecycleStatus === "inProgress")).toBe(
-      label,
-    );
-    expect(workEntryDisplayLabel(browserEntry, undefined)).toBe(label);
-  });
-
-  it("uses the active summary state for legacy tools without a lifecycle status", () => {
-    const browserEntry = { ...entry, toolTitle: "T3-code.preview_click" };
-    expect(liveWorkEntryLabel(browserEntry, undefined, true)).toBe(
-      "Clicking in the preview browser",
-    );
-    expect(liveWorkEntryLabel(browserEntry, undefined, false)).toBe(
-      "Clicked in the preview browser",
-    );
-  });
-
-  it("keeps the latest live activity in the present tense after the call completes", () => {
-    const browserEntry = {
-      ...entry,
-      toolTitle: "T3-code.preview_click",
-      toolLifecycleStatus: "completed" as const,
-    };
-    expect(liveWorkEntryLabel(browserEntry, undefined, true)).toBe(
-      "Clicking in the preview browser",
-    );
-    expect(liveWorkEntryLabel(browserEntry, undefined, false)).toBe(
-      "Clicked in the preview browser",
-    );
-  });
-
-  it("labels file reads with the path and never the file body", () => {
-    const readEntry = {
-      ...entry,
-      itemType: "dynamic_tool" as const,
-      toolTitle: "Read",
-      label: "Read",
-      detail: "---\nname: env\n---\n cons t x = 1",
-      toolData: { input: { file_path: "src/env.ts" } },
-      structuredPayload: {
-        type: "dynamic_tool",
-        toolName: "Read",
-        input: { file_path: "src/env.ts" },
-      } as NonNullable<WorkLogEntry["structuredPayload"]>,
-    };
-    expect(workEntryDisplayLabel(readEntry, undefined)).toBe("Read src/env.ts");
-    expect(workEntryReadOutput(readEntry, undefined)).toBe("src/env.ts");
-    expect(workEntryReadOutput(readEntry, "/workspace/ohseearr")).toBe(
-      "/workspace/ohseearr/src/env.ts",
-    );
-    expect(
-      workEntryReadOutput(
-        {
-          structuredPayload: {
-            type: "dynamic_tool",
-            toolName: "Read",
-            input: {},
-          } as NonNullable<WorkLogEntry["structuredPayload"]>,
-          toolData: { locations: [{ path: "src/from-location.ts" }] },
-        },
-        "/workspace/ohseearr",
-      ),
-    ).toBe("/workspace/ohseearr/src/from-location.ts");
-    expect(workEntryReadOutput({ detail: "---", toolData: {} }, undefined)).toBeNull();
-  });
-
-  it("labels Claude Grep from structured input instead of a generic tool heading", () => {
-    expect(
-      workEntryDisplayLabel(
-        {
-          ...entry,
-          itemType: "dynamic_tool",
-          toolTitle: "Grep",
-          label: "Grep",
-          toolData: { input: { pattern: "TODO", path: "apps/web" } },
-          structuredPayload: {
-            type: "dynamic_tool",
-            toolName: "Grep",
-            input: { pattern: "TODO", path: "apps/web" },
-          } as NonNullable<WorkLogEntry["structuredPayload"]>,
-        },
-        undefined,
-      ),
-    ).toBe("Searched TODO in web");
-  });
-
-  it("labels file searches with the adapter title and its search target", () => {
-    expect(
-      workEntryDisplayLabel(
-        {
-          ...entry,
-          itemType: "file_search",
-          label: "Searched TODO in web",
-          toolTitle: "Searched TODO in web",
-          detail: "TODO",
-          toolData: { type: "file_search", pattern: "TODO" },
-        },
-        undefined,
-      ),
-    ).toBe("Searched TODO in web");
-  });
-
-  it("keeps a multi-line approval prompt as its label", () => {
-    const prompt = "Allow this command?\nrm -rf dist";
-    expect(
-      workEntryDisplayLabel(
-        { ...entry, itemType: "approval_request", requestKind: "command", detail: prompt },
-        undefined,
-      ),
-    ).toBe(prompt);
-  });
-
-  it("keeps custom titles and output for unrecognized tools", () => {
-    const unknownEntry = { ...entry, toolTitle: "mcp__github__search_issues" };
-    expect(liveWorkEntryLabel(unknownEntry, undefined, true)).toBe("Mcp__github__search_issues");
-    expect(workEntryDisplayLabel({ ...unknownEntry, detail: "Found 3 issues" }, undefined)).toBe(
-      "Found 3 issues",
-    );
-  });
-
-  it("keeps command summaries compact without replacing the full command in expanded rows", () => {
-    const commandEntry = { ...entry, command: "vp test run", detail: "All tests passed" };
-    expect(liveWorkEntryLabel(commandEntry, undefined, true)).toBe("Running vp");
-    expect(liveWorkEntryLabel(commandEntry, undefined, false)).toBe("Ran vp");
-    expect(workEntryDisplayLabel(commandEntry, undefined)).toBe("vp test run");
-  });
-
-  it("summarizes the program inside a shell wrapper while preserving the expanded command", () => {
-    const command = "/bin/zsh -lc 'vp test run apps/web/src/session-logic.test.ts'";
-    const commandEntry = { ...entry, command };
-    expect(liveWorkEntryLabel(commandEntry, undefined, true)).toBe("Running vp");
-    expect(liveWorkEntryLabel(commandEntry, undefined, false)).toBe("Ran vp");
-    expect(workEntryDisplayLabel(commandEntry, undefined)).toBe(
-      "vp test run apps/web/src/session-logic.test.ts",
-    );
-    expect(commandEntry.command).toBe(command);
-  });
-
-  it.each([
-    ["inProgress", "Running vp", "Running vp"],
-    ["completed", "Running vp", "Ran vp"],
-    ["failed", "Failed vp", "Failed vp"],
-    ["declined", "Declined vp", "Declined vp"],
-    ["stopped", "Stopped vp", "Stopped vp"],
-  ] as const)(
-    "uses present tense for a live %s command and the outcome once it is no longer live",
-    (toolLifecycleStatus, liveLabel, settledLabel) => {
-      const commandEntry = {
-        ...entry,
-        command: "/bin/bash -lc 'vp test run'",
-        toolLifecycleStatus,
-      };
-      expect(liveWorkEntryLabel(commandEntry, undefined, true)).toBe(liveLabel);
-      expect(liveWorkEntryLabel(commandEntry, undefined, false)).toBe(settledLabel);
-    },
-  );
-
-  it.each([
-    ["preview_click", "Clicked in the preview browser"],
-    ["task_status", "Got delegated task status"],
-  ] as const)(
-    "renders a settled legacy %s call directly with its completed presentation",
-    (tool, label) => {
-      const rows = deriveMessagesTimelineRows({
-        timelineEntries: [
-          {
-            id: "browser-entry",
-            kind: "work",
-            createdAt: entry.createdAt,
-            entry: {
-              ...entry,
-              itemType: "dynamic_tool",
-              toolData: { server: "t3-code", tool },
-            },
-          },
-        ],
-        isWorking: false,
-        activeTurnStartedAt: null,
-        turnDiffSummaries: [],
-        supportsConversationRollback: false,
-      });
-      const directRow = rows.find((row) => row.kind === "work");
-      expect(directRow).toMatchObject({
-        groupedEntries: [expect.objectContaining({ id: "tool-1" })],
-        isExpandedToolGroup: false,
-        displayLabel: label,
-      });
-    },
-  );
-});
-
-describe("shouldPreserveAssistantLineBreaks", () => {
-  it("preserves Claude insight formatting without changing regular markdown", () => {
-    expect(
-      shouldPreserveAssistantLineBreaks(
-        "★ Insight ─────────────────\\nFirst observation\\nSecond observation\\n─────────────────",
-      ),
-    ).toBe(true);
-    expect(shouldPreserveAssistantLineBreaks("A normal\\nmarkdown paragraph")).toBe(false);
-  });
-});
 
 describe("resolveAssistantMessageCopyState", () => {
   it("copies the rendered representation of Codex directives", () => {
@@ -604,34 +274,32 @@ describe("deriveMessagesTimelineRows", () => {
   });
 
   it("recovers the failed Sky call stored as a generic js integration", () => {
-  it("shows the CUA action title for a retained tool item", () => {
     const fixture = makeStreamingTimelineFixture();
     const source = fixture.visibleTurnItems.find((row) => row.item.type === "dynamic_tool")!;
     if (source.item.type !== "dynamic_tool") throw new Error("Expected tool fixture");
     const item = {
       ...source.item,
-      title: null,
-      toolName: "cua_repl.js",
-      input: { code: "await game.getAXStateAndScreenshot();", title: "Inspect Saga music screen" },
+      type: "dynamic_tool" as const,
+      status: "failed" as const,
+      title: "js",
+      toolName: "node_repl.js",
+      toolSource: { key: "mcp:node_repl", name: "node repl", kind: "integration" as const },
+      input: {
+        title: "Restrict the breakpoint to Git actions",
+        code: "await sky.type_text({app:'T3 Code (Nightly)',text:'debug(ga.run)'});",
+      },
     };
     const entries = deriveTimelineEntriesFromVisibleTurnItems({
       visibleTurnItems: [{ ...source, item }],
       optimisticMessages: [],
     });
-    const work = entries.find((entry) => entry.kind === "work");
-    expect(work?.kind === "work" && workEntryDisplayLabel(work.entry, undefined)).toBe(
-      "Inspect Saga music screen",
+    const entry = entries.find((row) => row.kind === "work");
+    expect(entry?.kind === "work" && workEntryDisplayLabel(entry.entry, undefined)).toBe(
+      "Restrict the breakpoint to Git actions",
     );
-    const rows = deriveMessagesTimelineRows({
-      timelineEntries: entries,
-      isWorking: false,
-      runningRunId: fixture.runId,
-      activeTurnStartedAt: fixture.time(0),
-      turnDiffSummaries: [],
-      supportsConversationRollback: false,
-    });
-    expect(rows.find((row) => row.kind === "work")).toMatchObject({
-      displayLabel: "Inspect Saga music screen",
+    expect(entry?.kind === "work" && entry.entry).toMatchObject({
+      toolSurface: "computer",
+      toolSource: { key: "computer-use", kind: "computer" },
     });
   });
 
@@ -843,49 +511,6 @@ describe("deriveMessagesTimelineRows", () => {
         (row) => row.kind === "work" && row.groupedEntries.includes(notice.entry),
       );
       expect(row).toMatchObject({ kind: "work", groupedEntries: [notice.entry] });
-    },
-  );
-
-  it.each(["info", "warning", "error", undefined] as const)(
-    "renders %s notices with compatible severity",
-    (level) => {
-      const fixture = makeStreamingTimelineFixture();
-      const message = "TPS 227.1 tok/s · TTFT 3.4s";
-      const id = TurnItemId.make("info-notice");
-      const [notice] = deriveTimelineEntriesFromVisibleTurnItems({
-        visibleTurnItems: [
-          {
-            ...fixture.visibleTurnItems[0]!,
-            sourceItemId: id,
-            item: {
-              id,
-              threadId: fixture.threadId,
-              runId: fixture.runId,
-              nodeId: null,
-              providerThreadId: null,
-              providerTurnId: null,
-              nativeItemRef: null,
-              parentItemId: null,
-              ordinal: 1,
-              startedAt: DateTime.makeUnsafe(fixture.time(1)),
-              completedAt: DateTime.makeUnsafe(fixture.time(1)),
-              updatedAt: DateTime.makeUnsafe(fixture.time(1)),
-              type: "system_notice",
-              message,
-              ...(level === undefined ? {} : { level }),
-              title: message,
-              status: "completed",
-            },
-          },
-        ],
-        optimisticMessages: [],
-      });
-      if (notice?.kind !== "work") throw new Error("Expected a notice work entry");
-      expect(notice.entry.sourceActivityKind).toBe(
-        level === "info" ? undefined : "runtime.warning",
-      );
-      expect(workEntryIconName(notice.entry)).toBe(level === "info" ? "zap" : "circle-alert");
-      expect(workEntryDisplayLabel(notice.entry, undefined)).toBe(message);
     },
   );
 
@@ -2240,6 +1865,60 @@ describe("deriveMessagesTimelineRows", () => {
       expect.objectContaining({ entry: expect.objectContaining({ id: "new-work" }) }),
     ]);
     expect(rows.some((row) => row.kind === "thinking")).toBe(false);
+  });
+
+  it("carries the latest thought on the live row while a later tool runs", () => {
+    type WorkEntry = Extract<
+      Parameters<typeof deriveMessagesTimelineRows>[0]["timelineEntries"][number],
+      { kind: "work" }
+    >;
+    const work = (
+      id: string,
+      at: string,
+      fields: Omit<WorkEntry["entry"], "id" | "createdAt" | "runId" | "label">,
+    ): WorkEntry => ({
+      id: `${id}-entry`,
+      kind: "work",
+      createdAt: at,
+      entry: { id, createdAt: at, runId: "turn-1" as never, label: id, ...fields },
+    });
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        work("old-thought", "2026-01-01T00:00:01Z", {
+          itemType: "reasoning",
+          detail: "First idea.",
+          tone: "thinking" as const,
+          toolLifecycleStatus: "completed" as const,
+        }),
+        work("new-thought", "2026-01-01T00:00:02Z", {
+          itemType: "reasoning",
+          detail: "Found the cause.",
+          tone: "thinking" as const,
+          toolLifecycleStatus: "completed" as const,
+        }),
+        work("running-command", "2026-01-01T00:00:03Z", {
+          command: "rg cause",
+          requestKind: "command",
+          tone: "tool" as const,
+          toolLifecycleStatus: "inProgress" as const,
+        }),
+      ],
+      latestRun: {
+        runId: "turn-1" as never,
+        status: "running",
+        startedAt: "2026-01-01T00:00:00Z",
+        completedAt: null,
+      },
+      isWorking: true,
+      activeTurnStartedAt: "2026-01-01T00:00:00Z",
+      turnDiffSummaries: [],
+      supportsConversationRollback: false,
+    });
+
+    expect(rows.find((row) => row.kind === "work-live")).toMatchObject({
+      entry: { id: "running-command" },
+      thought: { id: "new-thought" },
+    });
   });
 
   it("keeps an actually running tool in the shared activity row", () => {
@@ -4215,220 +3894,6 @@ describe("streaming v2 row projection", () => {
       })),
     });
   });
-
-  it.each(["reasoning", "proposed_plan"] as const)(
-    "keeps every row not holding streaming %s text when it changes",
-    (kind) => {
-      const source = makeStreamingWorkTimelineFixture(kind);
-      const rowsInput = (timelineEntries: ReadonlyArray<TimelineEntry>) => ({
-        timelineEntries,
-        latestRun: {
-          runId: source.runId,
-          status: "running" as const,
-          startedAt: source.time(5),
-          completedAt: null,
-        },
-        runningRunId: source.runId,
-        isWorking: true,
-        activeTurnStartedAt: source.time(5),
-        turnDiffSummaries: [],
-        supportsConversationRollback: true,
-      });
-      let timelineInput = {
-        visibleTurnItems: withStreamedText(
-          source.visibleTurnItems,
-          source.streamingItemId,
-          "Let",
-          source.time(20),
-        ),
-        optimisticMessages: [],
-      };
-      let timeline = deriveTimelineEntriesFromVisibleTurnItemsWithState(timelineInput);
-      let projection = deriveMessagesTimelineRowsWithState(rowsInput(timeline.entries));
-      for (const [step, text] of ["Let me", "Let me check the tests"].entries()) {
-        timelineInput = {
-          visibleTurnItems: withStreamedText(
-            timelineInput.visibleTurnItems,
-            source.streamingItemId,
-            text,
-            source.time(21 + step),
-          ),
-          optimisticMessages: [],
-        };
-        const previous = projection;
-        timeline = deriveTimelineEntriesFromVisibleTurnItemsWithState(timelineInput, timeline);
-        projection = deriveMessagesTimelineRowsWithState(rowsInput(timeline.entries), previous);
-        expect(projection.rows).toEqual(
-          deriveMessagesTimelineRows(
-            rowsInput(deriveTimelineEntriesFromVisibleTurnItems(timelineInput)),
-          ),
-        );
-        expect(projection.rows).toHaveLength(previous.rows.length);
-        for (const [index, row] of previous.rows.entries()) {
-          const holdsItem =
-            row.id === source.streamingItemId ||
-            ((row.kind === "work" || row.kind === "work-live") &&
-              row.groupedEntries.some((entry) => entry.id === source.streamingItemId));
-          if (!holdsItem) expect(projection.rows[index]).toBe(row);
-        }
-      }
-    },
-  );
-
-  it.each(["reasoning", "proposed_plan"] as const)(
-    "matches a full derivation when streaming %s text turns blank or completes",
-    (kind) => {
-      const source = makeStreamingWorkTimelineFixture(kind);
-      const rowsInput = (timelineEntries: ReadonlyArray<TimelineEntry>) => ({
-        timelineEntries,
-        latestRun: {
-          runId: source.runId,
-          status: "running" as const,
-          startedAt: source.time(5),
-          completedAt: null,
-        },
-        runningRunId: source.runId,
-        isWorking: true,
-        activeTurnStartedAt: source.time(5),
-        turnDiffSummaries: [],
-        supportsConversationRollback: true,
-      });
-      let visibleTurnItems = source.visibleTurnItems;
-      let timeline = deriveTimelineEntriesFromVisibleTurnItemsWithState({
-        visibleTurnItems,
-        optimisticMessages: [],
-      });
-      let projection = deriveMessagesTimelineRowsWithState(rowsInput(timeline.entries));
-      const steps = [
-        ...["Let", " ", "Let me"].map(
-          (text, step) => (rows: typeof visibleTurnItems) =>
-            withStreamedText(rows, source.streamingItemId, text, source.time(20 + step)),
-        ),
-        (rows: typeof visibleTurnItems) =>
-          rows.map((row) =>
-            row.item.id === source.streamingItemId &&
-            (row.item.type === "reasoning" || row.item.type === "proposed_plan")
-              ? {
-                  ...row,
-                  item: {
-                    ...row.item,
-                    status: "completed" as const,
-                    streaming: false,
-                    completedAt: DateTime.makeUnsafe(source.time(30)),
-                    updatedAt: DateTime.makeUnsafe(source.time(30)),
-                  },
-                }
-              : row,
-          ),
-      ];
-      for (const step of steps) {
-        visibleTurnItems = step(visibleTurnItems);
-        const timelineInput = { visibleTurnItems, optimisticMessages: [] };
-        timeline = deriveTimelineEntriesFromVisibleTurnItemsWithState(timelineInput, timeline);
-        expect(timeline.entries).toEqual(deriveTimelineEntriesFromVisibleTurnItems(timelineInput));
-        projection = deriveMessagesTimelineRowsWithState(rowsInput(timeline.entries), projection);
-        expect(projection.rows).toEqual(
-          deriveMessagesTimelineRows(
-            rowsInput(deriveTimelineEntriesFromVisibleTurnItems(timelineInput)),
-          ),
-        );
-      }
-    },
-  );
-
-  it.each([
-    "expanded live group",
-    "expanded live group followed by a hidden tool",
-    "thinking superseded by a running tool",
-    "settled turn",
-  ] as const)("matches a full derivation when streaming thinking sits in a %s", (scenario) => {
-    const source = makeStreamingWorkTimelineFixture("reasoning");
-    const running = scenario !== "settled turn";
-    const hiddenTool = scenario === "expanded live group followed by a hidden tool";
-    const rowsInput = (
-      timelineEntries: ReadonlyArray<TimelineEntry>,
-      expandedWorkGroupIds?: ReadonlySet<string>,
-    ) => ({
-      timelineEntries,
-      latestRun: {
-        runId: source.runId,
-        status: running ? ("running" as const) : ("completed" as const),
-        startedAt: source.time(5),
-        completedAt: running ? null : source.time(40),
-      },
-      runningRunId: running ? source.runId : null,
-      isWorking: running,
-      activeTurnStartedAt: source.time(5),
-      turnDiffSummaries: [],
-      supportsConversationRollback: true,
-      ...(expandedWorkGroupIds ? { expandedWorkGroupIds } : {}),
-      ...(running ? {} : { expandedRunIds: new Set([source.runId]) }),
-      ...(hiddenTool ? { toolCallVisibility: "hideAll" as const } : {}),
-    });
-    const tool = source.visibleTurnItems.find((row) => row.item.id === "live-work")!;
-    const laterTool = (status: "running" | "completed") => ({
-      ...tool,
-      position: source.visibleTurnItems.length,
-      sourceItemId: TurnItemId.make("live-later-tool"),
-      item: {
-        ...tool.item,
-        id: TurnItemId.make("live-later-tool"),
-        ordinal: 8,
-        status,
-        ...(status === "running" ? { completedAt: null } : {}),
-      },
-    });
-    let visibleTurnItems =
-      scenario === "thinking superseded by a running tool" || hiddenTool
-        ? [...source.visibleTurnItems, laterTool(hiddenTool ? "completed" : "running")]
-        : // Alone in a settled group, the thought's text becomes the group summary.
-          source.visibleTurnItems.filter((row) => running || row !== tool);
-    visibleTurnItems = withStreamedText(
-      visibleTurnItems,
-      source.streamingItemId,
-      "Let",
-      source.time(20),
-    );
-    let timeline = deriveTimelineEntriesFromVisibleTurnItemsWithState({
-      visibleTurnItems,
-      optimisticMessages: [],
-    });
-    const liveRow = deriveMessagesTimelineRows(rowsInput(timeline.entries)).find(
-      (row) => row.kind === "work-live",
-    );
-    const expanded =
-      scenario.startsWith("expanded live group") && liveRow?.kind === "work-live"
-        ? new Set([liveRow.groupId])
-        : undefined;
-    let projection = deriveMessagesTimelineRowsWithState(rowsInput(timeline.entries, expanded));
-    for (const [step, text] of ["Let me", "Let me check the tests"].entries()) {
-      visibleTurnItems = withStreamedText(
-        visibleTurnItems,
-        source.streamingItemId,
-        text,
-        source.time(21 + step),
-      );
-      const timelineInput = { visibleTurnItems, optimisticMessages: [] };
-      const previous = projection;
-      timeline = deriveTimelineEntriesFromVisibleTurnItemsWithState(timelineInput, timeline);
-      projection = deriveMessagesTimelineRowsWithState(
-        rowsInput(timeline.entries, expanded),
-        previous,
-      );
-      expect(projection.rows).toEqual(
-        deriveMessagesTimelineRows(
-          rowsInput(deriveTimelineEntriesFromVisibleTurnItems(timelineInput), expanded),
-        ),
-      );
-      if (!running) continue;
-      for (const [index, row] of previous.rows.entries()) {
-        const holdsItem =
-          (row.kind === "work" || row.kind === "work-live") &&
-          row.groupedEntries.some((entry) => entry.id === source.streamingItemId);
-        if (!holdsItem) expect(projection.rows[index]).toBe(row);
-      }
-    }
-  });
 });
 
 describe("linked timeline resources", () => {
@@ -5208,113 +4673,6 @@ describe("live subagents after their parent turn settles", () => {
   });
 });
 
-describe("parent run waiting on foreground subagents", () => {
-  const runId = RunId.make("parent-run");
-  const threadId = ThreadId.make("parent-thread");
-  const at = (second: number) =>
-    DateTime.makeUnsafe(`2026-10-06T10:00:${String(second).padStart(2, "0")}Z`);
-  const base = (id: string, second: number) => ({
-    id: TurnItemId.make(id),
-    threadId,
-    runId,
-    nodeId: null,
-    providerThreadId: null,
-    providerTurnId: ProviderTurnId.make("parent-provider-turn"),
-    nativeItemRef: null,
-    parentItemId: null,
-    ordinal: second,
-    title: null,
-    startedAt: at(second),
-    completedAt: at(second),
-    updatedAt: at(second),
-  });
-  const child = (id: string, second: number): OrchestrationV2TurnItem => ({
-    ...base(id, second),
-    status: "running",
-    completedAt: null,
-    type: "subagent",
-    subagentId: NodeId.make(id),
-    origin: "provider_native",
-    driver: ProviderDriverKind.make("opencode"),
-    providerInstanceId: ProviderInstanceId.make("opencode"),
-    childThreadId: null,
-    prompt: `Read ${id}`,
-    result: null,
-  });
-
-  const liveRow = (later: ReadonlyArray<OrchestrationV2TurnItem>, toolCallVisibility?: "hideAll") =>
-    deriveMessagesTimelineRows({
-      timelineEntries: deriveTimelineEntriesFromVisibleTurnItems({
-        visibleTurnItems: (
-          [
-            {
-              ...base("user", 0),
-              status: "completed",
-              type: "user_message",
-              messageId: MessageId.make("user"),
-              createdBy: "user",
-              creationSource: "web",
-              inputIntent: "turn_start",
-              text: "Research these in parallel",
-              attachments: [],
-            },
-            {
-              ...base("assistant", 1),
-              status: "completed",
-              type: "assistant_message",
-              messageId: MessageId.make("assistant"),
-              text: "Dispatching three subagents.",
-              streaming: false,
-            },
-            child("a", 2),
-            { ...child("b", 3), status: "completed", completedAt: at(3) },
-            child("c", 4),
-            ...later,
-          ] satisfies OrchestrationV2TurnItem[]
-        ).map((item) => ({
-          position: item.ordinal,
-          visibility: "local" as const,
-          sourceThreadId: threadId,
-          sourceItemId: item.id,
-          item,
-        })),
-        optimisticMessages: [],
-      }),
-      latestRun: {
-        runId,
-        status: "running",
-        startedAt: DateTime.formatIso(at(0)),
-        completedAt: null,
-      },
-      isWorking: true,
-      activeTurnStartedAt: DateTime.formatIso(at(0)),
-      turnDiffSummaries: [],
-      supportsConversationRollback: false,
-      ...(toolCallVisibility ? { toolCallVisibility } : {}),
-    }).find((row) => row.id === "live-activity-row");
-  const thinking = {
-    kind: "thinking",
-    id: "live-activity-row",
-    createdAt: DateTime.formatIso(at(0)),
-  };
-
-  it("names the running children while the open run has done nothing since launching them", () => {
-    expect(liveRow([])).toEqual({ ...thinking, label: "Waiting on 2 subagents" });
-    expect(liveRow([], "hideAll")).toEqual({ ...thinking, label: "Waiting on 2 subagents" });
-  });
-
-  it("keeps Thinking when a hidden newer parent command follows the children", () => {
-    const command: OrchestrationV2TurnItem = {
-      ...base("command", 5),
-      status: "running",
-      completedAt: null,
-      type: "command_execution",
-      input: "sleep 5",
-    };
-    expect(liveRow([command], "hideAll")).toEqual(thinking);
-  });
-});
-
 describe("subagent continued by a later turn", () => {
   const threadId = ThreadId.make("parent-thread");
   const run1 = RunId.make("run-1");
@@ -5423,14 +4781,27 @@ describe("subagent continued by a later turn", () => {
   });
 });
 
-describe("isTimelineMinimapTurnVisible", () => {
-  it("keeps a turn lit while only its reply is on screen", () => {
-    // Turn rows 10..499, viewport inside the reply.
-    expect(isTimelineMinimapTurnVisible(10, 500, 200, 210)).toBe(true);
-    expect(isTimelineMinimapTurnVisible(500, undefined, 600, 610)).toBe(true);
-    expect(isTimelineMinimapTurnVisible(500, undefined, 200, 210)).toBe(false);
-    expect(isTimelineMinimapTurnVisible(10, 500, 500, 510)).toBe(false);
-    expect(isTimelineMinimapTurnVisible(10, 500, null, null)).toBe(false);
+describe("shouldCollapseUserMessage", () => {
+  it("measures a quote by its card, not its encoded link", () => {
+    const quote = "A long assistant paragraph that the user quoted. ".repeat(40);
+    const source = {
+      version: 1 as const,
+      environmentId: EnvironmentId.make("environment"),
+      threadId: ThreadId.make("thread"),
+      messageId: MessageId.make("source"),
+      text: quote,
+      start: 0,
+      end: quote.length,
+      prefix: "",
+      suffix: "",
+    };
+    const citation = serializeAssistantCitation({ ...source, comment: "Why does this matter?" });
+    const bare = serializeAssistantCitation(source);
+
+    expect(shouldCollapseUserMessage(`${citation} Can you expand on this?`)).toBe(false);
+    expect(shouldCollapseUserMessage(`${citation} ${"More text. ".repeat(60)}`)).toBe(true);
+    expect(shouldCollapseUserMessage(bare.repeat(2))).toBe(false);
+    expect(shouldCollapseUserMessage(bare.repeat(10))).toBe(true);
   });
 });
 

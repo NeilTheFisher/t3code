@@ -5,6 +5,7 @@ import type {
   ChangeRequestTerminology,
   SourceControlDefinition,
 } from "@t3tools/client-runtime/source-control-clients";
+import { GerritIcon } from "./components/Icons";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 import { SourceControlIconArtwork } from "./components/SourceControlIconArtwork";
 
