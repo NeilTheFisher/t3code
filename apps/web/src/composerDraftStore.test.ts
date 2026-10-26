@@ -36,6 +36,7 @@ import {
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
+import { commitContextRecord } from "./lib/composerContextRecords";
 
 const CODEX_INSTANCE = ProviderInstanceId.make("codex");
 const CODEX_SECONDARY_INSTANCE = ProviderInstanceId.make("codex_secondary");
@@ -2257,6 +2258,28 @@ describe("composerDraftStore inline context references", () => {
     expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.prompt).toBe(`look ${reviewLink} `);
     store.removeReviewComment(threadRef, "rc-1");
     expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.prompt).toBe("look");
+  });
+
+  it("adds a commit chip with its inline reference and replaces it in place", () => {
+    const store = useComposerDraftStore.getState();
+    const commit = commitContextRecord({
+      sha: "0123456789abcdef0123456789abcdef01234567",
+      subject: "Add commit chips",
+      repositoryPath: "/work/repo",
+      threadIds: [],
+    });
+    store.setPrompt(threadRef, "look");
+    store.addCommitContext(threadRef, commit);
+    const added = draftFor(threadId, TEST_ENVIRONMENT_ID);
+    expect(added?.commitContexts).toEqual([commit]);
+    expect(added?.prompt).toContain("t3-context://v1/commit/");
+    expect(added?.prompt.startsWith("look ")).toBe(true);
+
+    store.addCommitContext(threadRef, { ...commit, subject: "Reworded" });
+    const replaced = draftFor(threadId, TEST_ENVIRONMENT_ID);
+    expect(replaced?.commitContexts).toHaveLength(1);
+    expect(replaced?.commitContexts?.[0]?.subject).toBe("Reworded");
+    expect(replaced?.prompt).toBe(added?.prompt);
   });
 
   it("keeps bulk-set review records and their inline references in sync", () => {

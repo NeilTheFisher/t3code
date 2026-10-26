@@ -164,6 +164,7 @@ import { getReviewSectionIdForCheckpoint } from "../review/reviewModel";
 import { setReviewSelectedSectionId } from "../review/reviewState";
 import { Menu } from "../../components/ui/Menu";
 import { MessageTtsButton } from "./MessageTtsButton";
+import { seekToBlock, useThreadTtsNarration } from "./messageTtsPlayback";
 import { splitMarkdownBlocks } from "../../lib/spokenText";
 import { copyPromptLink } from "../prompt-links/prompt-link-actions";
 import { parseReviewCommentMessageSegments } from "../review/reviewCommentSelection";
@@ -943,6 +944,68 @@ const AssistantMarkdownContent = memo(function AssistantMarkdownContent(props: {
   });
 });
 
+/**
+ * Assistant message body. While the message is being narrated it is split into
+ * its top-level markdown blocks: the block under the playback head is
+ * highlighted and tapping any block seeks the narration to it. Otherwise it
+ * renders exactly as before through `AssistantMarkdownContent`.
+ */
+const NarratedAssistantBody = memo(function NarratedAssistantBody(props: {
+  readonly markdown: string;
+  readonly blocks: ReadonlyArray<string>;
+  readonly isNarrating: boolean;
+  readonly activeBlock: number | null;
+  readonly environmentId: EnvironmentId;
+  readonly markdownStyles: MarkdownStyleSet;
+  readonly linkHandlers: MarkdownLinkHandlers;
+  readonly onUseArtifactTemplate?: ((template: CodexArtifactTemplate) => void) | undefined;
+  readonly renderImage: MarkdownImageRenderer;
+  readonly skills?: ReadonlyArray<SelectableMarkdownSkill> | undefined;
+}) {
+  if (!props.isNarrating) {
+    return (
+      <AssistantMarkdownContent
+        markdown={props.markdown}
+        environmentId={props.environmentId}
+        markdownStyles={props.markdownStyles}
+        linkHandlers={props.linkHandlers}
+        onUseArtifactTemplate={props.onUseArtifactTemplate}
+        renderImage={props.renderImage}
+        skills={props.skills}
+      />
+    );
+  }
+  return (
+    <View>
+      {props.blocks.map((block, index) => {
+        const active = index === props.activeBlock;
+        // Tapping a paragraph or list item seeks to it — no separate control.
+        // The wrapper adds no padding, so narration never shifts the layout; it
+        // only tints the block under the playback head.
+        return (
+          <Pressable
+            key={`narrate-block:${index}`}
+            accessibilityRole="button"
+            accessibilityLabel="Seek narration to this section"
+            onPress={() => seekToBlock(index)}
+            className={cn("-mx-2 rounded-md px-2", active && "bg-primary/10")}
+          >
+            <AssistantMarkdownContent
+              markdown={block}
+              environmentId={props.environmentId}
+              markdownStyles={props.markdownStyles}
+              linkHandlers={props.linkHandlers}
+              onUseArtifactTemplate={props.onUseArtifactTemplate}
+              renderImage={props.renderImage}
+              skills={props.skills}
+            />
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+});
+
 function useMarkdownStyles(): MarkdownStyleSets {
   const { appearance } = useAppearancePreferences();
   const nativeMarkdownTypography = resolveNativeMarkdownTypography(appearance.baseFontSize);
@@ -1315,6 +1378,10 @@ function renderFeedEntry(
     readonly terminalAssistantMessageIds: ReadonlySet<string>;
     readonly unsettledTurnId: RunId | null;
     readonly compactionLabelsByEntryId: ReadonlyMap<string, { title: string; compacting: string }>;
+    /** Message being narrated in this thread, if any. */
+    readonly narratingMessageId: string | null;
+    /** Markdown block under the narration playback head, in that message. */
+    readonly activeBlock: number | null;
     readonly failedRunIds: ReadonlySet<RunId>;
     readonly onCopyWorkRow: (rowId: string, value: string) => void;
     readonly onToggleWorkGroup: (groupId: string, anchorKey?: string) => void;
@@ -1819,8 +1886,11 @@ function renderFeedEntry(
       >
         {renderedText.trim().length > 0 ? (
           <MarkdownImageAvailableWidthContext value={props.markdownContentWidth}>
-            <AssistantMarkdownContent
+            <NarratedAssistantBody
               markdown={renderedText}
+              blocks={splitMarkdownBlocks(renderedText)}
+              isNarrating={props.narratingMessageId === message.id}
+              activeBlock={props.narratingMessageId === message.id ? props.activeBlock : null}
               environmentId={props.environmentId}
               markdownStyles={styles}
               linkHandlers={props.markdownLinkHandlers}
@@ -2187,6 +2257,10 @@ export const ThreadFeed = memo(function ThreadFeed({
     },
     [navigation, props.environmentId, props.threadId],
   );
+  // State-only: re-renders the feed when the narration head crosses a block, not on every tick.
+  const narration = useThreadTtsNarration(props.threadId);
+  const narratingMessageId = narration?.messageId ?? null;
+  const narrationBlock = narration?.activeBlock ?? null;
   const { themeAppearance } = useAppearancePreferences();
   const copyFeedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const disclosureSettleFrameRef = useRef<number | null>(null);
@@ -2720,6 +2794,8 @@ export const ThreadFeed = memo(function ThreadFeed({
     contentWidth,
     skills: props.skills,
     workflowOpening,
+    narratingMessageId,
+    narrationBlock,
   };
   const reportHeaderMaterialVisibility = (visible: boolean) => {
     if (headerMaterialVisibleRef.current === visible) {
@@ -3160,6 +3236,8 @@ export const ThreadFeed = memo(function ThreadFeed({
             terminalAssistantMessageIds,
             unsettledTurnId,
             compactionLabelsByEntryId,
+            narratingMessageId,
+            activeBlock: narrationBlock,
             failedRunIds,
             onCopyWorkRow,
             onToggleWorkGroup,

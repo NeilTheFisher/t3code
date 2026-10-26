@@ -66,7 +66,7 @@ interface ComposerMentionDragEvent {
 export interface ComposerMentionDropHost {
   insertMentionAtEnd(text: string): boolean;
   insertPullRequestAtEnd(pullRequest: PullRequestContextMetadata): boolean;
-  insertCommitAtEnd?(commit: CommitContextMetadata): boolean;
+  insertCommitAtEnd(commit: CommitContextMetadata): boolean;
   setDragActive(active: boolean): void;
   onInsertRejected(): void;
 }
@@ -123,8 +123,7 @@ export function makeComposerMentionDragHandlers(
       }
       if (event.dataTransfer.types.includes(COMPOSER_COMMIT_DRAG_TYPE)) {
         const commit = decodeCommitPayload(event.dataTransfer.getData(COMPOSER_COMMIT_DRAG_TYPE));
-        const insert = host.insertCommitAtEnd;
-        if (Option.isSome(commit) && (insert === undefined || !insert(commit.value))) {
+        if (Option.isSome(commit) && !host.insertCommitAtEnd(commit.value)) {
           host.onInsertRejected();
         }
         return;

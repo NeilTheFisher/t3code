@@ -220,7 +220,7 @@ function AssistantCopyButton({
     streaming,
   };
   const assistantCopyState = resolveAssistantMessageCopyState(source);
-  const playState = { visible: false, text: null } as { visible: boolean; text: string | null };
+  const playState = resolveAssistantMessagePlayState({ ...source, ttsEnabled: ctx.ttsEnabled });
 
   if (!assistantCopyState.visible && !playState.visible) {
     return null;

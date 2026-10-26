@@ -1,6 +1,49 @@
 import type { ContextMenuItem } from "@t3tools/contracts";
 import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled";
 
+/**
+ * "Move to workspace" over a multi-selection. Checked only when every selected thread already sits
+ * in that workspace, so a mixed selection reads as no single destination.
+ */
+export function buildBulkMoveToWorkspaceMenuItem(input: {
+  readonly workspaces: ReadonlyArray<{ readonly id: string; readonly name: string }>;
+  /** One entry per selected thread: its workspace id, or null when unfiled. */
+  readonly assignedWorkspaceIds: ReadonlyArray<string | null>;
+  readonly selectedCount: number;
+}): {
+  readonly id: "move-to-workspace";
+  readonly label: string;
+  readonly children: ReadonlyArray<{
+    readonly id: string;
+    readonly label: string;
+    readonly checked: boolean;
+    readonly separatorBefore?: true;
+  }>;
+} | null {
+  const { workspaces, assignedWorkspaceIds, selectedCount } = input;
+  if (workspaces.length === 0 || selectedCount === 0) return null;
+  const allIn = (workspaceId: string | null) =>
+    assignedWorkspaceIds.length === selectedCount &&
+    assignedWorkspaceIds.every((entry) => entry === workspaceId);
+  return {
+    id: "move-to-workspace",
+    label: `Move to workspace (${selectedCount})`,
+    children: [
+      ...workspaces.map((workspace) => ({
+        id: `move-to-workspace:${workspace.id}`,
+        label: workspace.name,
+        checked: allIn(workspace.id),
+      })),
+      {
+        id: "move-to-workspace:none",
+        label: "No workspace",
+        checked: allIn(null),
+        separatorBefore: true as const,
+      },
+    ],
+  };
+}
+
 export type ThreadActionMenuId =
   | "move-to-workspace"
   | `move-to-workspace:${string}`
