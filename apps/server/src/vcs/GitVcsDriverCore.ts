@@ -4263,8 +4263,6 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         { concurrency: "unbounded" },
       );
 
-      // A remote ref maps to the local branch of the same name and nothing else: a
-      // differently named branch that tracks it is a different branch.
       const remoteBranchTarget =
         remoteExists && !localInputExists
           ? deriveLocalBranchNameFromRemoteRef(input.refName)
@@ -4276,33 +4274,9 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           `refs/heads/${remoteBranchTarget}`,
         ));
 
-      // A picker can hold a branch that was deleted locally after it was listed;
-      // recreate it from the remote rather than failing the checkout. A commit hash
-      // names no branch, so there is nothing to recreate for it.
-      const isObjectId = /^[0-9a-f]{7,64}$/i.test(input.refName);
-      const remoteFallback =
-        localInputExists || remoteBranchTarget !== null || isObjectId
-          ? null
-          : `origin/${input.refName}`;
-      const remoteFallbackExists =
-        remoteFallback !== null &&
-        (yield* refExists(
-          "GitVcsDriver.switchRef.remoteFallbackExists",
-          `refs/remotes/${remoteFallback}`,
-        ));
-
-      const trackTarget =
-        remoteBranchTarget !== null
-          ? localTargetExists
-            ? null
-            : input.refName
-          : remoteFallbackExists
-            ? remoteFallback
-            : null;
-
       const checkoutArgs =
-        trackTarget !== null
-          ? ["checkout", "--track", trackTarget]
+        remoteBranchTarget !== null && !localTargetExists
+          ? ["checkout", "--track", input.refName]
           : ["checkout", remoteBranchTarget ?? input.refName];
 
       yield* refuseOptionLikeRefName("GitVcsDriver.switchRef", input.cwd, checkoutArgs.at(-1));

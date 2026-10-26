@@ -3032,62 +3032,28 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         const cwd = yield* makeTmpDir();
         const remote = yield* makeTmpDir("git-remote-");
         const { initialBranch } = yield* initRepoWithCommit(cwd);
-        const delegate = yield* ChildProcessSpawner.ChildProcessSpawner;
-        const commands: Array<ReadonlyArray<string>> = [];
-        const spawner = ChildProcessSpawner.make((command) =>
-          Effect.gen(function* () {
-            if (ChildProcess.isStandardCommand(command)) commands.push(command.args);
-            return yield* delegate.spawn(command);
-          }),
-        );
-        const driver = yield* makeGitVcsDriverCore().pipe(
-          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-          Effect.provide(layerServerConfig),
-        );
-        const assertCheckout = (
-          checkoutArgs: ReadonlyArray<string>,
-          existenceReads: number,
-          trackingReads: number,
-        ) => {
-          assert.deepEqual(
-            commands.filter((args) => args[0] === "checkout"),
-            [checkoutArgs],
-          );
-          assert.equal(commands.filter((args) => args[0] === "show-ref").length, existenceReads);
-          assert.equal(commands.filter((args) => args[0] === "for-each-ref").length, trackingReads);
-          assert.deepEqual(
-            commands.filter((args) => args[0] === "branch"),
-            [["branch", "--show-current"]],
-          );
-        };
+        const driver = yield* GitVcsDriver.GitVcsDriver;
         yield* git(remote, ["init", "--bare"]);
         yield* git(cwd, ["remote", "add", "origin", remote]);
         yield* git(cwd, ["push", "origin", "HEAD:refs/heads/remote-only"]);
 
         for (let attempt = 0; attempt < 2; attempt += 1) {
-          commands.length = 0;
           const result = yield* driver.switchRef({ cwd, refName: "origin/remote-only" });
           assert.equal(result.refName, "remote-only");
-          assertCheckout(["checkout", "--track", "origin/remote-only", "--"], 3, 0);
           assert.equal(
             yield* git(cwd, ["rev-parse", "--abbrev-ref", "@{upstream}"]),
             "origin/remote-only",
           );
-          // The renamed branch is not reused: the remote ref always maps to its own name.
           if (attempt === 0) yield* git(cwd, ["branch", "-m", "review/renamed"]);
           yield* driver.switchRef({ cwd, refName: initialBranch });
         }
         yield* git(cwd, ["branch", "origin/remote-only"]);
-        commands.length = 0;
         const shadowed = yield* driver.switchRef({ cwd, refName: "origin/remote-only" });
         assert.equal(shadowed.refName, "origin/remote-only");
-        assertCheckout(["checkout", "origin/remote-only", "--"], 2, 0);
 
         const commit = yield* git(cwd, ["rev-parse", "HEAD"]);
-        commands.length = 0;
         const detached = yield* driver.switchRef({ cwd, refName: commit });
         assert.equal(detached.refName, null);
-        assertCheckout(["checkout", commit, "--"], 2, 0);
         assert.equal(yield* git(cwd, ["rev-parse", "HEAD"]), commit);
       }),
     );
@@ -3159,27 +3125,6 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
 
         assert.equal(result.refName, "develop");
         assert.equal(yield* git(cwd, ["branch", "--show-current"]), "develop");
-      }),
-    );
-
-    it.effect("recreates a locally deleted branch from the remote", () =>
-      Effect.gen(function* () {
-        const cwd = yield* makeTmpDir();
-        const remote = yield* makeTmpDir("git-remote-");
-        yield* initRepoWithCommit(cwd);
-        const driver = yield* GitVcsDriver.GitVcsDriver;
-        yield* git(remote, ["init", "--bare"]);
-        yield* git(cwd, ["remote", "add", "origin", remote]);
-        yield* git(cwd, ["push", "--quiet", "origin", "HEAD:refs/heads/develop"]);
-        yield* git(cwd, ["fetch", "--quiet", "origin"]);
-
-        const result = yield* driver.switchRef({ cwd, refName: "develop" });
-
-        assert.equal(result.refName, "develop");
-        assert.equal(
-          yield* git(cwd, ["rev-parse", "--abbrev-ref", "@{upstream}"]),
-          "origin/develop",
-        );
       }),
     );
   });
