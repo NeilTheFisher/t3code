@@ -390,15 +390,6 @@ function parseUpstreamRefByFirstSeparator(
   };
 }
 
-function deriveLocalBranchNameFromRemoteRef(branchName: string): string | null {
-  const separatorIndex = branchName.indexOf("/");
-  if (separatorIndex <= 0 || separatorIndex === branchName.length - 1) {
-    return null;
-  }
-  const localBranch = branchName.slice(separatorIndex + 1).trim();
-  return localBranch.length > 0 ? localBranch : null;
-}
-
 function gitCommandContext(
   input: Pick<GitVcsDriver.ExecuteGitInput, "operation" | "cwd" | "args">,
 ) {
@@ -4265,7 +4256,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
 
       const remoteBranchTarget =
         remoteExists && !localInputExists
-          ? deriveLocalBranchNameFromRemoteRef(input.refName)
+          ? yield* resolveBranchName(input.cwd, `refs/remotes/${input.refName}`)
           : null;
       const localTargetExists =
         remoteBranchTarget !== null &&
@@ -4276,10 +4267,14 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
 
       const checkoutArgs =
         remoteBranchTarget !== null && !localTargetExists
-          ? ["checkout", "--track", input.refName]
+          ? ["checkout", "--track", "-b", remoteBranchTarget, input.refName]
           : ["checkout", remoteBranchTarget ?? input.refName];
 
-      yield* refuseOptionLikeRefName("GitVcsDriver.switchRef", input.cwd, checkoutArgs.at(-1));
+      yield* refuseOptionLikeRefName(
+        "GitVcsDriver.switchRef",
+        input.cwd,
+        remoteBranchTarget ?? input.refName,
+      );
 
       // A stale ref must not turn into a path checkout that discards local edits.
       yield* executeGitWithStableDiagnostics(
