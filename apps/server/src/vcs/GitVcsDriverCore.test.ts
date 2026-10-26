@@ -3088,25 +3088,34 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
       }),
     );
 
-    it.effect.each(["origin", "team/upstream"])(
+    it.effect.each(["origin", "team/upstream", "-bfoo"])(
       "prefers the named branch for remote %s over older tracking branches",
       (remoteName) =>
         Effect.gen(function* () {
           const cwd = yield* makeTmpDir();
           const remote = yield* makeTmpDir("git-remote-");
-          yield* initRepoWithCommit(cwd);
+          const { initialBranch } = yield* initRepoWithCommit(cwd);
           const driver = yield* GitVcsDriver.GitVcsDriver;
           yield* git(remote, ["init", "--bare"]);
-          yield* git(cwd, ["remote", "add", remoteName, remote]);
-          yield* git(cwd, ["push", "--quiet", remoteName, "HEAD:refs/heads/develop"]);
-          yield* git(cwd, ["fetch", "--quiet", remoteName]);
-          yield* git(cwd, ["branch", "--track", "774", `${remoteName}/develop`]);
-          yield* git(cwd, ["branch", "--track", "develop", `${remoteName}/develop`]);
+          yield* git(cwd, ["remote", "add", "--", remoteName, remote]);
+          yield* git(cwd, ["push", "--quiet", "--", remoteName, "HEAD:refs/heads/develop"]);
+          yield* git(cwd, ["fetch", "--quiet", "--", remoteName]);
+          yield* git(cwd, ["branch", "--track", "--", "774", `${remoteName}/develop`]);
+          yield* git(cwd, ["branch", "--track", "--", "develop", `${remoteName}/develop`]);
 
           const result = yield* driver.switchRef({ cwd, refName: `${remoteName}/develop` });
 
           assert.equal(result.refName, "develop");
           assert.equal(yield* git(cwd, ["branch", "--show-current"]), "develop");
+
+          yield* git(cwd, ["checkout", initialBranch]);
+          yield* git(cwd, ["branch", "-d", "develop"]);
+          const recreated = yield* driver.switchRef({ cwd, refName: `${remoteName}/develop` });
+          assert.equal(recreated.refName, "develop");
+          assert.equal(
+            yield* git(cwd, ["rev-parse", "--abbrev-ref", "@{upstream}"]),
+            `${remoteName}/develop`,
+          );
         }),
     );
 

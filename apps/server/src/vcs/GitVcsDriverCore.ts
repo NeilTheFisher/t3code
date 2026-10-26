@@ -4267,7 +4267,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
 
       const checkoutArgs =
         remoteBranchTarget !== null && !localTargetExists
-          ? ["checkout", "--track", "-b", remoteBranchTarget, input.refName]
+          ? ["checkout", "--track", "-b", remoteBranchTarget, `refs/remotes/${input.refName}`]
           : ["checkout", remoteBranchTarget ?? input.refName];
 
       yield* refuseOptionLikeRefName(
