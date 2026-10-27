@@ -7,6 +7,7 @@ import {
   buildFileDiffRenderKey,
   getDiffLineStat,
   getRenderablePatch,
+  trimTruncatedHunk,
   resolveFileDiffPath,
   resolveFileDiffPreviousPath,
 } from "./diffRendering";
@@ -218,6 +219,46 @@ describe("getRenderablePatch", () => {
     expect(parsed?.kind).toBe("files");
     if (parsed?.kind !== "files") return;
     expect(parsed.files[0]?.hunks[0]?.unifiedLineStart).toBe(47);
+  });
+});
+
+describe("trimTruncatedHunk", () => {
+  const complete = [
+    "diff --git a/a.ts b/a.ts",
+    "index 1111111..2222222 100644",
+    "--- a/a.ts",
+    "+++ b/a.ts",
+    "@@ -1,3 +1,3 @@",
+    " one",
+    "-two",
+    "+TWO",
+    " three",
+  ].join("\n");
+
+  it("keeps a complete hunk as written", () => {
+    expect(trimTruncatedHunk(complete)).toBe(complete);
+  });
+
+  it("drops a hunk the output limit cut short, marker and all", () => {
+    const truncated = [complete, "@@ -10,4 +10,4 @@", " ten", "-eleven", "", "[truncated]"].join(
+      "\n",
+    );
+
+    expect(trimTruncatedHunk(truncated)).toBe(complete);
+  });
+
+  it("keeps a short final hunk that is genuinely the end of the file", () => {
+    const shortButWhole = [
+      "diff --git a/a.ts b/a.ts",
+      "--- a/a.ts",
+      "+++ b/a.ts",
+      "@@ -1,2 +1,2 @@",
+      " one",
+      "-two",
+      "+TWO",
+    ].join("\n");
+
+    expect(trimTruncatedHunk(shortButWhole)).toBe(shortButWhole);
   });
 });
 

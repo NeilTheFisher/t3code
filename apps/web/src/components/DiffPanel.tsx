@@ -329,7 +329,7 @@ export default function DiffPanel({
   const reviewSectionId = toolCallSelection
     ? `tool-call:${toolCallSelection.threadId}:${toolCallSelection.itemId}`
     : selectedSubmodule
-    ? `submodule:${selectedSubmodule.path}:${selectedSubmodule.from}..${selectedSubmodule.to}`
+    ? `submodule:${selectedSubmodule.path}:${selectedSubmodule.from}..${selectedSubmodule.to ?? "worktree"}`
     : selectedCommitRange
       ? `commit:${selectedCommitRange.from}..${selectedCommitRange.to}`
       : selectedTurn
@@ -381,7 +381,9 @@ export default function DiffPanel({
                 submodule: {
                   path: selectedSubmodule.path,
                   from: selectedSubmodule.from,
-                  to: selectedSubmodule.to,
+                  // No `to` compares against the submodule's working tree, which is
+                  // how uncommitted work inside it becomes visible.
+                  ...(selectedSubmodule.to !== null ? { to: selectedSubmodule.to } : {}),
                 },
               }
             : {}),
@@ -756,7 +758,9 @@ export default function DiffPanel({
   const selectedScopeValue = toolCallSelection
     ? ""
     : selectedSubmodule
-      ? "submodule-range"
+    ? selectedSubmodule.to === null
+      ? "submodule-working-tree"
+      : "submodule-range"
     : selectedCommitRange
       ? "commit-range"
       : selectedRunId === null
@@ -765,6 +769,17 @@ export default function DiffPanel({
           ? "latest"
           : selectedTurnValue;
   const selectScopeValue = (value: string) => {
+    if (value === "submodule-working-tree") {
+      if (selectedSubmodule && routeThreadRef) {
+        useDiffPanelStore.getState().selectSubmodule(routeThreadRef, {
+          path: selectedSubmodule.path,
+          from: selectedSubmodule.from,
+          to: null,
+          label: `${selectedSubmodule.path} uncommitted`,
+        });
+      }
+      return;
+    }
     if (value === "unstaged" || value === "branch") {
       selectGitScope(value);
     } else if (value === "latest") {
@@ -795,9 +810,14 @@ export default function DiffPanel({
                   <span>{selectedCommitRange.label}</span>
                 </DropdownMenuRadioItem>
               ) : null}
-              {selectedSubmodule ? (
+              {selectedSubmodule && selectedSubmodule.to !== null ? (
                 <DropdownMenuRadioItem value="submodule-range" closeOnClick>
-                  <span>{selectedSubmodule.label}</span>
+                  <span>{`${selectedSubmodule.path} ${selectedSubmodule.from.slice(0, 8)}..${selectedSubmodule.to.slice(0, 8)}`}</span>
+                </DropdownMenuRadioItem>
+              ) : null}
+              {selectedSubmodule ? (
+                <DropdownMenuRadioItem value="submodule-working-tree" closeOnClick>
+                  <span>{`${selectedSubmodule.path} uncommitted`}</span>
                 </DropdownMenuRadioItem>
               ) : null}
               <DropdownMenuRadioItem value="branch" closeOnClick>

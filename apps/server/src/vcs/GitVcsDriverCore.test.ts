@@ -1573,7 +1573,10 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         // is current: the refs and commits are the same repository-wide.
         const fromLinked = yield* driver.logGraph({ cwd: linkedPath, includeRemotes: false });
         assert.equal(fromLinked.currentBranch, "feature/linked");
-        assert.equal(fromLinked.worktrees?.find((worktree) => worktree.isCurrent)?.path, linkedPath);
+        assert.equal(
+          fromLinked.worktrees?.find((worktree) => worktree.isCurrent)?.path,
+          linkedPath,
+        );
         assert.equal(fromLinked.worktrees?.find((worktree) => worktree.isMain)?.path, cwd);
 
         // Uncommitted work marks only the checkout that holds it.
@@ -1705,6 +1708,49 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         });
 
         assert.deepStrictEqual(paths, ["complete.txt"]);
+      }),
+    );
+
+    it.effect("reveals uncommitted work inside a submodule", () =>
+      Effect.gen(function* () {
+        const sub = yield* makeTmpDir();
+        yield* initRepoWithCommit(sub);
+        const subFrom = yield* git(sub, ["rev-parse", "HEAD"]);
+
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const pathService = yield* Path.Path;
+        const submoduleCwd = pathService.join(cwd, "t3code");
+        yield* git(cwd, ["clone", sub, "t3code"]);
+        yield* git(cwd, ["update-index", "--add", "--cacheinfo", `160000,${subFrom},t3code`]);
+        yield* git(cwd, ["commit", "-m", "record submodule pointer"]);
+
+        // Work that only exists in the submodule's working tree.
+        yield* writeTextFile(submoduleCwd, "README.md", "# test\n\nuncommitted\n");
+
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const preview = yield* driver.getReviewDiffPreview({
+          cwd,
+          submodule: { path: "t3code", from: subFrom },
+        });
+        const source = preview.sources[0]!;
+        assert.equal(source.kind, "submodule-range");
+        assert.isNull(source.headRef);
+        assert.include(source.title, "t3code");
+        assert.include(source.diff, "+uncommitted");
+
+        const contents = yield* driver.getReviewDiffFileContents({
+          cwd,
+          sourceKind: "submodule-range",
+          submodulePath: "t3code",
+          changeType: "change",
+          baseRef: subFrom,
+          headRef: null,
+          oldPath: "README.md",
+          newPath: "README.md",
+        });
+        assert.equal(contents.oldContents, "# test\n");
+        assert.equal(contents.newContents, "# test\n\nuncommitted\n");
       }),
     );
 

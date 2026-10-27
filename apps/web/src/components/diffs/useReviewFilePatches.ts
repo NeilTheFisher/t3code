@@ -40,8 +40,14 @@ export function reviewFilePatchRequest(input: {
     cwd: input.cwd,
     ...(input.baseRef ? { baseRef: input.baseRef } : {}),
     ...(source.kind === "commit-range" && range ? { commitRange: range } : {}),
-    ...(source.kind === "submodule-range" && range && input.submodulePath
-      ? { submodule: { path: input.submodulePath, ...range } }
+    ...(source.kind === "submodule-range" && input.submodulePath && source.baseRef !== null
+      ? {
+          submodule: {
+            path: input.submodulePath,
+            from: source.baseRef,
+            ...(source.headRef !== null ? { to: source.headRef } : {}),
+          },
+        }
       : {}),
     ignoreWhitespace: input.ignoreWhitespace,
     file: {

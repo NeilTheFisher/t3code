@@ -265,6 +265,47 @@ function isBinaryFileDiff(file: FileDiffMetadata, binaryPaths: Set<string>): boo
   return candidates.some((path) => binaryPaths.has(path));
 }
 
+const OUTPUT_TRUNCATED_MARKER = "[truncated]";
+const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
+
+/**
+ * Drops a hunk the server cut at the output limit. Its header still claims the
+ * full line counts, so the parser would report it shorter than declared; the
+ * complete hunks before it render fine, and the source is already flagged
+ * truncated, so the tail is not pretending to be a complete diff.
+ */
+export function trimTruncatedHunk(patch: string): string {
+  const markerIndex = patch.lastIndexOf(`\n\n${OUTPUT_TRUNCATED_MARKER}`);
+  const body = markerIndex === -1 ? patch : patch.slice(0, markerIndex);
+  const lines = body.split("\n");
+
+  let headerIndex = -1;
+  let oldCount = 0;
+  let newCount = 0;
+  for (const [index, line] of lines.entries()) {
+    const header = HUNK_HEADER.exec(line);
+    if (header === null) continue;
+    headerIndex = index;
+    oldCount = Number(header[2] ?? 1);
+    newCount = Number(header[4] ?? 1);
+  }
+  if (headerIndex === -1) return body;
+
+  let oldSeen = 0;
+  let newSeen = 0;
+  for (const line of lines.slice(headerIndex + 1)) {
+    if (line.startsWith("\\")) continue;
+    if (line.startsWith("+")) newSeen += 1;
+    else if (line.startsWith("-")) oldSeen += 1;
+    else if (line.startsWith(" ") || line.length === 0) {
+      oldSeen += 1;
+      newSeen += 1;
+    }
+  }
+  if (oldSeen >= oldCount && newSeen >= newCount) return body;
+  return lines.slice(0, headerIndex).join("\n");
+}
+
 export function getRenderablePatch(
   patch: string | undefined,
   cacheScope = "diff-panel",
@@ -278,7 +319,11 @@ export function getRenderablePatch(
     // Parse the patch exactly as git wrote it. Trimming strips a hunk's trailing
     // blank context lines (a context line for an empty file line is just a
     // space), and the parser then reads that hunk shorter than its header claims.
-    const parsedPatches = parsePatchFiles(patch, buildPatchCacheKey(patch, cacheScope));
+    const parseablePatch = trimTruncatedHunk(patch);
+    const parsedPatches = parsePatchFiles(
+      parseablePatch,
+      buildPatchCacheKey(parseablePatch, cacheScope),
+    );
     const sourceFiles = parsedPatches.flatMap((parsedPatch) => parsedPatch.files);
     const binaryPaths = extractBinaryPatchPaths(normalizedPatch);
     const files: FileDiffMetadata[] = [];
