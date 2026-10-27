@@ -1,1 +1,0 @@
-{"version":3,"file":"legalLinks-BaIJY52l.js","names":["PRIVACY_POLICY_URL"],"sources":["../../src/legalLinks.ts"],"sourcesContent":["export const PRIVACY_POLICY_URL = \"https://t3.codes/privacy-policy\";\n"],"mappings":"AAAA,IAAaA,EAAqB,kC"}
