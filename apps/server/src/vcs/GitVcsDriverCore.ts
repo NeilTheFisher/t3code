@@ -3161,9 +3161,6 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     const diffArgs = [
       ...REVIEW_DIFF_ARGS,
       "--minimal",
-      // Review previews carry full-file context; the client collapses and
-      // expands omitted regions itself (`useExpandedFileDiff`).
-      "--unified=999999",
       ...(input.ignoreWhitespace ? ["--ignore-all-space"] : []),
     ];
 

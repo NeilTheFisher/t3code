@@ -2485,7 +2485,7 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
       }),
     );
 
-    it.effect("includes full file context in worktree and branch previews", () =>
+    it.effect("keeps worktree and branch previews to the changed hunks", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();
         const { initialBranch } = yield* initRepoWithCommit(cwd);
@@ -2514,10 +2514,12 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         const worktreeDiff = preview.sources.find((source) => source.kind === "working-tree")?.diff;
         const branchDiff = preview.sources.find((source) => source.kind === "branch-range")?.diff;
 
-        assert.include(worktreeDiff, "@@ -1,200 +1,200 @@");
-        assert.include(branchDiff, "@@ -1,200 +1,200 @@");
-        assert.include(worktreeDiff, " line 1");
-        assert.include(branchDiff, " line 200");
+        // Standard context keeps the panel collapsed with "show more lines" controls;
+        // expanding loads the file rather than shipping all 200 lines per preview.
+        assert.include(worktreeDiff, "@@ -147,7 +147,7 @@");
+        assert.include(branchDiff, "@@ -97,7 +97,7 @@");
+        assert.notInclude(worktreeDiff, "\n line 1\n");
+        assert.notInclude(branchDiff, " line 200");
       }),
     );
   });
@@ -2589,8 +2591,6 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
           "--no-textconv",
           "--src-prefix=a/",
           "--dst-prefix=b/",
-          // Review previews carry full-file context; the client collapses it.
-          "--unified=999999",
           "HEAD",
           "--",
         ]);

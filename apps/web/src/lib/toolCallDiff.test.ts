@@ -53,9 +53,10 @@ describe("toolCallDiff", () => {
         const lines = content.split("\n").length;
         expect(file.additionLines).toHaveLength(operation === "add" ? lines : 0);
         expect(file.deletionLines).toHaveLength(operation === "delete" ? lines : 0);
-        expect((operation === "add" ? file.additionLines : file.deletionLines).join("")).toBe(
-          recordedContent.replace(/\n$/, ""),
-        );
+        // `createTwoFilesPatch` re-emits every line with its terminator.
+        expect(
+          (operation === "add" ? file.additionLines : file.deletionLines).join("").replace(/\n$/, ""),
+        ).toBe(recordedContent.replace(/\n$/, ""));
       }
     }
   });
