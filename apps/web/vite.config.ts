@@ -282,8 +282,10 @@ export default defineConfig(() => {
       tasks: {
         // A local tsbuildinfo is leftover build state, not a typecheck input.
         typecheck: {
+          // WSL2 mirrored networking installs a seccomp user-notify filter, so
+          // fspy cannot add its own listener (EBUSY). Caching needs fspy.
           command: "effect-tsgo tsrs --noEmit",
-          cache: { input: [{ auto: true }, "!*.tsbuildinfo"] },
+          cache: false,
         },
       },
     },
