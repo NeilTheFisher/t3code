@@ -44,8 +44,8 @@ export const BUILT_IN_SOURCE_CONTROL_DRIVER_LIST = [
   GitCafeDriver.driver,
   ForgejoDriver.driver,
   BitbucketDriver.driver,
-  AzureDevOpsDriver.driver,
   gerritDriver,
+  AzureDevOpsDriver.driver,
 ] as const;
 
 export const sourceControlDefinitions = builtInSourceControlDefinitions;
