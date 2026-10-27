@@ -25,7 +25,13 @@ import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { resolveRuntimeMode } from "../../delegatedTaskModes.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
-import { newCommandId, readCaller, resolveProjectId, unavailable } from "../../threadAccess.ts";
+import {
+  newCommandId,
+  readCaller,
+  resolveProjectId,
+  unavailable,
+  type Caller,
+} from "../../threadAccess.ts";
 import { ProjectToolkit } from "./tools.ts";
 
 function projectFailure(error: Project.ProjectServiceError) {
@@ -38,6 +44,45 @@ function projectFailure(error: Project.ProjectServiceError) {
         : "The project is not empty; force=true is required to delete it.";
   return new OrchestratorMcpFailure({ code: "invalid_request", message });
 }
+
+/**
+ * A client names a project the way a person does: by title. Resolve an id or
+ * path first, then fall back to an exact case-insensitive title, so a launch
+ * into an unknown project fails loudly instead of landing somewhere else.
+ */
+const resolveProjectReference = (context: Caller, reference: ProjectId | undefined) =>
+  Effect.gen(function* () {
+    if (reference === undefined) return yield* resolveProjectId(context, reference);
+    const projects = yield* Project.ProjectService;
+    const project = yield* projects.getById(reference).pipe(Effect.mapError(unavailable));
+    if (Option.isSome(project)) return reference;
+    // Title matching is a convenience on top of the id; a shell listing that
+    // cannot be read must not fail a launch that named an id.
+    const shells = yield* projects
+      .listShells()
+      .pipe(Effect.mapError(unavailable), Effect.catchCause(() => Effect.succeed([])));
+    const wanted = reference.trim().toLowerCase();
+    const matches = shells.filter(
+      (shell) =>
+        shell.title.trim().toLowerCase() === wanted ||
+        shell.workspaceRoot?.replace(/\/+$/u, "").toLowerCase() === wanted.replace(/\/+$/u, ""),
+    );
+    const only = matches[0];
+    if (matches.length === 1 && only !== undefined) return only.id;
+    // An id the service does not list here (a client-supplied project the shell
+    // projection has not caught up with) is still the id that was asked for;
+    // only a human-readable name has to resolve, because a wrong one would
+    // otherwise land work in the wrong project.
+    if (!/[\s/\\]/u.test(reference)) return reference;
+    const known = shells.map((shell) => `"${shell.title}"`).join(", ");
+    return yield* new OrchestratorMcpFailure({
+      code: "invalid_request",
+      message:
+        matches.length === 0
+          ? `No project is named "${reference}". Projects: ${known}.`
+          : `"${reference}" names ${matches.length} projects; pass the project id instead.`,
+    });
+  });
 
 /** Require project worktrees so launches cannot target arbitrary host directories. */
 const assertProjectWorktree = Effect.fn("mcp.assertProjectWorktree")(function* (
@@ -98,28 +143,33 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
             code: "invalid_request",
             message: "A new thread accepts only pending attachment uploads.",
           });
-        if (
-          input.scratch === true &&
-          (input.projectId !== undefined || input.workspaceStrategy !== undefined)
-        )
+        // A client outside a thread that names no project gets a project-less
+        // thread rather than an error: that is what "just ask T3 to do X" means.
+        const wantsScratch =
+          input.scratch === true || (input.projectId === undefined && context.caller === undefined);
+        if (wantsScratch && input.projectId !== undefined)
+          return yield* new OrchestratorMcpFailure({
+            code: "invalid_request",
+            message: "scratch:true picks its own project; omit projectId.",
+          });
+        if (wantsScratch && input.workspaceStrategy !== undefined)
           return yield* new OrchestratorMcpFailure({
             code: "invalid_request",
             message:
-              "scratch:true picks its own project and folder; omit projectId and workspaceStrategy.",
+              "A thread without a project picks its own folder; omit workspaceStrategy or pass projectId.",
           });
-        const projectId =
-          input.scratch === true
-            ? (yield* ManagedProjectFolders.ManagedProjectFolders.pipe(
-                Effect.flatMap((folders) => folders.ensureScratchProject),
-                Effect.mapError(
-                  (error) =>
-                    new OrchestratorMcpFailure({
-                      code: "orchestration_error",
-                      message: error.message,
-                    }),
-                ),
-              )).projectId
-            : yield* resolveProjectId(context, input.projectId);
+        const projectId = wantsScratch
+          ? (yield* ManagedProjectFolders.ManagedProjectFolders.pipe(
+              Effect.flatMap((folders) => folders.ensureScratchProject),
+              Effect.mapError(
+                (error) =>
+                  new OrchestratorMcpFailure({
+                    code: "orchestration_error",
+                    message: error.message,
+                  }),
+              ),
+            )).projectId
+          : yield* resolveProjectReference(context, input.projectId);
         const readProject = Project.ProjectService.pipe(
           Effect.flatMap((projects) => projects.getById(projectId)),
           Effect.mapError(unavailable),

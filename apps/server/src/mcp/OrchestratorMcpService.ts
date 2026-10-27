@@ -2826,11 +2826,7 @@ const make = Effect.gen(function* () {
       return {
         projectId,
         currentThreadId: parent?.thread.id ?? null,
-<<<<<<< HEAD
-        threads: page.map((shell) => listItemFromShell(scope, shell, nowMs)),
-=======
-        threads: page.map((shell) => listItemFromShell(shell, nowMs, workspaceFor(shell.id))),
->>>>>>> 74e3273053 (feat(web): add server-backed workspaces, unsorted filing, and agent moves)
+        threads: page.map((shell) => listItemFromShell(scope, shell, nowMs, workspaceFor(shell.id))),
         nextCursor,
         total: filtered.length,
       } satisfies OrchestratorMcpThreadListResult;
