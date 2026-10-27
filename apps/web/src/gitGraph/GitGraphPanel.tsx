@@ -23,6 +23,7 @@ import {
   type ContextMenuItem,
   type EnvironmentId,
   type VcsGraphWorkingTree,
+  type VcsGraphWorktree,
   type VcsLogGraphResult,
 } from "@t3tools/contracts";
 import {
@@ -698,7 +699,9 @@ export function GitGraphPanel(props: {
   const removeWorktree = useAtomCommand(vcsEnvironment.removeWorktree, { reportFailure: false });
   const canCheckout = useEnvironmentScope(props.environmentId, AuthSourceControlWriteScope);
   const loadGraphRef = useRef(loadGraph);
-  loadGraphRef.current = loadGraph;
+  useEffect(() => {
+    loadGraphRef.current = loadGraph;
+  }, [loadGraph]);
 
   useEffect(() => {
     const cwd = props.cwd;
