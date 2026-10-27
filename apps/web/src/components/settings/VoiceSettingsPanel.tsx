@@ -105,11 +105,15 @@ function VoiceSettingsContent({ environmentId }: { readonly environmentId: Envir
   const setTurnEagerness = useVoiceSettingsStore((state) => state.setTurnEagerness);
   const setNoiseReduction = useVoiceSettingsStore((state) => state.setNoiseReduction);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- The form mirrors the server's credential status query.
   useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- Saving updates this optimistically until the query answers.
     if (queriedStatus) setConfigured(queriedStatus.configured);
   }, [queriedStatus]);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- The form mirrors the server's credential status query.
   useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- Saving updates this optimistically until the query answers.
     if (queriedParallelStatus) setParallelConfigured(queriedParallelStatus.configured);
   }, [queriedParallelStatus]);
 

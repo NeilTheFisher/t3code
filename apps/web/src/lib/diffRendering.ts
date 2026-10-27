@@ -103,11 +103,8 @@ interface RenderablePatchOptions {
   /** Compact Pierre source offsets for partial-patch rows; retain collapsedBefore for separators. */
   compactPartialHunkOffsets?: boolean;
   /**
-   * Pierre only allows expanding unmodified regions when a diff carries full
-   * file contents (isPartial=false); patch-parsed diffs never do. When a
-   * patch was generated with full context (git diff -U999999), its single
-   * hunk holds the whole file, so rebuild the diff from those contents to
-   * make unmodified regions expandable.
+   * Rebuild a full-context patch from its own contents so Pierre can expand
+   * unmodified regions (it only offers that for isPartial=false diffs).
    */
   upgradeFullContextFiles?: boolean;
 }
@@ -219,12 +216,9 @@ function compactPartialHunkOffsets(file: FileDiffMetadata): FileDiffMetadata {
 }
 
 /**
- * Collect the paths of files that git reported as binary in a unified patch
- * ("Binary files a/x and b/x differ" or a "GIT binary patch" section).
- *
- * @pierre/diffs' parser silently drops these markers, leaving a hunk-less
- * FileDiffMetadata whose virtualized rendering can crash the app. We detect
- * them from the raw patch text so they can be rendered as static rows instead.
+ * Paths git reported as binary ("Binary files ... differ" or "GIT binary
+ * patch"). The parser drops those markers, leaving a hunk-less FileDiffMetadata
+ * whose virtualized rendering can crash, so they render as static rows instead.
  */
 export function extractBinaryPatchPaths(patch: string): Set<string> {
   const binaryPaths = new Set<string>();

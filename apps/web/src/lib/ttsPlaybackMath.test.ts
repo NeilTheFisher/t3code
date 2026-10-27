@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { convergeEstimatedDuration, estimateSpokenDuration, seekSchedule } from "./ttsPlaybackMath";
+import { convergeEstimatedDuration, estimateSpokenDuration } from "./ttsPlaybackMath";
 
 describe("estimateSpokenDuration", () => {
   it("estimates ~15 chars per second at 1x", () => {

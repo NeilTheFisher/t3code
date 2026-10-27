@@ -90,7 +90,7 @@ export function WebPageSurface(props: { threadRef: ScopedThreadRef; url: string 
           <Globe2 className="size-6 text-muted-foreground" />
           <p className="text-sm font-medium text-foreground">Open a page</p>
           <p className="max-w-xs text-xs leading-relaxed text-muted-foreground">
-            Enter a URL above to load it here — for example a local dev server like{" "}
+            Enter a URL above to load it here, for example a local dev server like{" "}
             <span className="font-mono">localhost:3000</span>.
           </p>
         </div>

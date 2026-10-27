@@ -1,12 +1,9 @@
 /**
- * The TTS server's model registry for the settings picker. Loads once, then
- * polls every ~1.5s while any model is downloading so progress advances without
- * a manual refresh. Install/delete/activate refresh immediately.
- *
- * Every fetch is best-effort: when the server is unreachable the list stays
- * empty and Settings shows nothing, rather than breaking the panel.
+ * The TTS server's model registry for the settings picker: loads once, polls
+ * while a model downloads, and refreshes after install/delete/activate. When the
+ * server is unreachable the list stays empty rather than breaking Settings.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   activateTtsModel,
   deleteTtsModel,
@@ -29,6 +26,7 @@ export function useTtsModels(serverUrl: string): TtsModelsController {
   const [models, setModels] = useState<TtsModel[]>([]);
   const base = stripTrailingSlash(serverUrl);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- The model registry is fetched over HTTP from the TTS server.
   useEffect(() => {
     let cancelled = false;
     void fetchTtsModels(base).then((next) => {
@@ -40,6 +38,7 @@ export function useTtsModels(serverUrl: string): TtsModelsController {
   }, [base]);
 
   const downloading = models.some((model) => model.state === "downloading");
+  // oxlint-disable-next-line t3code/react-effect-budget -- Polling an in-flight download is external to React.
   useEffect(() => {
     if (!downloading) return;
     const timer = setInterval(() => {
@@ -50,34 +49,25 @@ export function useTtsModels(serverUrl: string): TtsModelsController {
     return () => clearInterval(timer);
   }, [downloading, base]);
 
-  const refresh = useCallback(async () => {
+  const refresh = async () => {
     const next = await fetchTtsModels(base);
     if (next !== null) setModels(next);
-  }, [base]);
+  };
 
-  const install = useCallback(
-    async (id: string) => {
-      await installTtsModel(base, id);
-      await refresh();
-    },
-    [base, refresh],
-  );
+  const install = async (id: string) => {
+    await installTtsModel(base, id);
+    await refresh();
+  };
 
-  const remove = useCallback(
-    async (id: string) => {
-      await deleteTtsModel(base, id);
-      await refresh();
-    },
-    [base, refresh],
-  );
+  const remove = async (id: string) => {
+    await deleteTtsModel(base, id);
+    await refresh();
+  };
 
-  const activate = useCallback(
-    async (id: string) => {
-      await activateTtsModel(base, id);
-      await refresh();
-    },
-    [base, refresh],
-  );
+  const activate = async (id: string) => {
+    await activateTtsModel(base, id);
+    await refresh();
+  };
 
   return { models, install, remove, activate };
 }

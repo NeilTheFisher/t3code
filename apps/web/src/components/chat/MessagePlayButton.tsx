@@ -3,7 +3,7 @@
  * from `useAudioPlayerStore` (audio itself lives in `useTtsPlayer`); progress
  * and failures surface as stacked toasts via `toastManager`.
  */
-import { memo, useEffect, useRef } from "react";
+import { memo, useEffect, useEffectEvent, useRef } from "react";
 import { Loader2Icon, Volume2Icon, VolumeXIcon } from "lucide-react";
 import { type MessageId, type ScopedThreadRef } from "@t3tools/contracts";
 import { Button } from "../ui/button";
@@ -42,15 +42,16 @@ export const MessagePlayButton = memo(function MessagePlayButton({
   const isPlaying = isThis && status === "playing";
   const isActive = isLoading || isPlaying;
 
-  const closeWakingToast = () => {
+  const closeWakingToast = useEffectEvent(() => {
     if (wakingToastRef.current !== null) {
       toastManager.close(wakingToastRef.current);
       wakingToastRef.current = null;
     }
-  };
+  });
 
   // While the on-demand TTS server wakes, show a persistent toast; close it
   // once this message leaves the waking state (started, failed, or superseded).
+  // oxlint-disable-next-line t3code/react-effect-budget -- The waking toast mirrors the module-level audio store.
   useEffect(() => {
     if (!isWaking) {
       closeWakingToast();
@@ -61,7 +62,7 @@ export const MessagePlayButton = memo(function MessagePlayButton({
         stackedThreadToast({
           type: "loading",
           title: "Starting TTS server",
-          description: "Waking the local speech server — first playback can take up to a minute.",
+          description: "Waking the local speech server, first playback can take up to a minute.",
           timeout: 0,
         }),
       );
@@ -69,9 +70,11 @@ export const MessagePlayButton = memo(function MessagePlayButton({
   }, [isWaking]);
 
   // Clean up on unmount so the toast never outlives the button that opened it.
+  // oxlint-disable-next-line t3code/react-effect-budget -- Cleanup for a toast raised outside React runs on unmount only.
   useEffect(() => closeWakingToast, []);
 
   // Surface a failure once per error transition as a plain stacked toast.
+  // oxlint-disable-next-line t3code/react-effect-budget -- A playback failure is raised from the audio store, once per error.
   useEffect(() => {
     if (error === null || errorMessageId !== messageId) return;
     toastManager.add(

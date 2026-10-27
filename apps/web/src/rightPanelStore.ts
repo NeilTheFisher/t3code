@@ -83,12 +83,9 @@ export type RightPanelSurface =
   | { id: "git-graph"; kind: "git-graph" };
 
 const RIGHT_PANEL_STORAGE_KEY = "t3code:right-panel-state:v2";
-// v9 removed the "plan" surface kind (plans render inline in the transcript).
-// v10 keys pull-request surfaces by reference instead of a singleton tab.
-// v11 stops persisting the pull-request list's shared panel, so a restart opens the page fresh.
-// v12 adds the device surface.
-// v14 removes the agents surface; lineage lives in the thread title bar.
-// v15 adds the webpage surface.
+// v9 dropped the "plan" surface, v10 keyed pull requests by reference, v11 stopped
+// persisting the list panel, v12 added devices, v14 dropped agents, v15 added the
+// webpage surface.
 const RIGHT_PANEL_STORAGE_VERSION = 15;
 
 export const PULL_REQUESTS_PANEL_REF = scopeThreadRef(

@@ -32,7 +32,6 @@ import {
   derivePhase,
   deriveModelChangeNotices,
   mergeModelChangeNotices,
-  findLatestProposedPlan,
   isLatestRunSettled,
   selectHandoffImageResources,
   selectMessageImageResources,

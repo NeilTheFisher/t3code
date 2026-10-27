@@ -1,12 +1,7 @@
 /**
- * Locates the rendered markdown block for the TTS active-paragraph cue.
- *
- * The cue is the opening words of a *spoken* paragraph (markdown stripped),
- * which does not line up with the DOM text exactly: casing and punctuation are
- * gone, `[pause:Ns]` tags were inlined, and one spoken paragraph can span
- * several blocks (a heading plus its body, a list, a table row). Matching on a
- * normalized word prefix — rather than an exact substring of the raw text —
- * tolerates all of those differences.
+ * Locates the rendered markdown block for the TTS cue. The cue is markdown-free
+ * opening words while the DOM keeps punctuation, headings and list structure, so
+ * matching uses a normalized word prefix rather than an exact substring.
  */
 
 const PAUSE_TAG = /\[pause:[\d.]+s\]/g;

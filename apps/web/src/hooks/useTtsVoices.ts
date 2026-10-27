@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 export function useTtsVoices(serverUrl: string): string[] {
   const [voices, setVoices] = useState<string[]>([]);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- The voice list is fetched over HTTP from the TTS server.
   useEffect(() => {
     const base = serverUrl.replace(/\/+$/, "");
     let cancelled = false;

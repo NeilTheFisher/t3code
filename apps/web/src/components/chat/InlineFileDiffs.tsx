@@ -1,6 +1,6 @@
 import type { EnvironmentId } from "@t3tools/contracts";
 import { FileDiff } from "@pierre/diffs/react";
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useState } from "react";
 
 import {
   expandPartialPatchWithCurrentFile,
@@ -31,17 +31,15 @@ const InlineFileDiff = memo(function InlineFileDiff(props: {
   wordWrap: boolean;
 }) {
   const { change } = props;
-  const renderable = useMemo(
-    () =>
-      getRenderablePatch(change.patch, `inline-file-change:${change.filePath}`, {
-        upgradeFullContextFiles: true,
-      }),
-    [change.filePath, change.patch],
-  );
+  const renderable = getRenderablePatch(change.patch, `inline-file-change:${change.filePath}`, {
+    upgradeFullContextFiles: true,
+  });
   const parsedFile = renderable?.kind === "files" ? renderable.files[0] : undefined;
   const [expandedFile, setExpandedFile] = useState(parsedFile);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- A partial patch expands by reading the current file from the workspace.
   useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- A new patch resets the expanded copy before the async file read.
     setExpandedFile(parsedFile);
     if (!parsedFile?.isPartial || !props.workspaceRoot || !change.patch) return;
     let cancelled = false;

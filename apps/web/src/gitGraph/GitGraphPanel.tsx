@@ -14,6 +14,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
   useEffect,
+  useEffectEvent,
   useRef,
   useState,
 } from "react";
@@ -226,7 +227,7 @@ function RefBadge(props: {
   current: boolean;
   className?: string;
 }) {
-  const { kind, name, current, className } = props;
+  const { kind, name, current } = props;
   const Icon = kind === "tag" ? TagIcon : kind === "remote" ? CloudIcon : GitBranchIcon;
   return (
     <span
@@ -454,13 +455,12 @@ function CommitRow(props: {
           {isHead && uncommitted !== null ? (
             <button
               type="button"
-              aria-label={`Open ${uncommitted.changedFiles} uncommitted changes`}
-              title={`${uncommitted.changedFiles} uncommitted path(s), +${uncommitted.additions} -${uncommitted.deletions}`}
+              aria-label={`Open ${uncommitted.changedFiles} uncommitted changes, +${uncommitted.additions} -${uncommitted.deletions}`}
               onClick={(event) => {
                 event.stopPropagation();
                 onOpenWorkingTreeDiff();
               }}
-              className="inline-flex shrink-0 items-center gap-1 rounded-sm border border-warning/25 bg-warning/10 px-1 py-px text-3xs leading-4 font-medium text-warning-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              className="inline-flex shrink-0 items-center gap-1 rounded-sm border border-warning/25 bg-warning/10 px-1 py-px text-3xs leading-4 font-medium text-warning-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset"
             >
               <span aria-hidden className="size-1.5 rounded-full bg-warning" />
               {uncommitted.changedFiles} uncommitted
@@ -488,8 +488,8 @@ function CommitRow(props: {
           {checkouts.map((checkout) => (
             <span
               key={checkout.path}
-              title={`${checkout.path}${checkout.dirty ? " (uncommitted changes)" : ""}${
-                checkout.isCurrent ? " — this graph's checkout" : ""
+              aria-label={`${checkout.path}${checkout.dirty ? " (uncommitted changes)" : ""}${
+                checkout.isCurrent ? ", this graph's checkout" : ""
               }`}
               className={cn(
                 "inline-flex max-w-32 shrink-0 items-center gap-1 rounded-sm border px-1 py-px align-middle text-3xs leading-4 font-medium",
@@ -698,14 +698,13 @@ export function GitGraphPanel(props: {
   const switchRef = useAtomCommand(vcsEnvironment.switchRef, { reportFailure: false });
   const removeWorktree = useAtomCommand(vcsEnvironment.removeWorktree, { reportFailure: false });
   const canCheckout = useEnvironmentScope(props.environmentId, AuthSourceControlWriteScope);
-  const loadGraphRef = useRef(loadGraph);
-  useEffect(() => {
-    loadGraphRef.current = loadGraph;
-  }, [loadGraph]);
+  const loadGraphEvent = useEffectEvent(loadGraph);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- The graph is read from the repository over RPC.
   useEffect(() => {
     const cwd = props.cwd;
     if (cwd === null) {
+      // oxlint-disable-next-line react/set-state-in-effect -- Clearing the selection resets the graph and its loading flag.
       setLoading(false);
       setGraph(null);
       return;
@@ -718,36 +717,41 @@ export function GitGraphPanel(props: {
     const load = (attempt: number) => {
       setLoadingMore(true);
       setLoadError(null);
-      void loadGraphRef
-        .current({
-          environmentId: props.environmentId,
-          input: { cwd, limit, includeRemotes: showRemotes },
-        })
-        .then((result) => {
-          if (cancelled) return;
-          if (result._tag === "Success") {
-            setGraph(result.value);
-            setWorkingTree(result.value.workingTree ?? null);
-            setLoading(false);
-            setLoadingMore(false);
-            return;
-          }
-          if (attempt < LOAD_ATTEMPTS) {
-            retryTimer = window.setTimeout(() => load(attempt + 1), 350 * attempt);
-            return;
-          }
-          setGraph(null);
-          setLoadError("Could not read this repository's history.");
+      void loadGraphEvent({
+        environmentId: props.environmentId,
+        input: { cwd, limit, includeRemotes: showRemotes },
+      }).then((result) => {
+        if (cancelled) return;
+        if (result._tag === "Success") {
+          setGraph(result.value);
+          setWorkingTree(result.value.workingTree ?? null);
           setLoading(false);
           setLoadingMore(false);
-        });
+          return;
+        }
+        if (attempt < LOAD_ATTEMPTS) {
+          retryTimer = window.setTimeout(() => load(attempt + 1), 350 * attempt);
+          return;
+        }
+        setGraph(null);
+        setLoadError("Could not read this repository's history.");
+        setLoading(false);
+        setLoadingMore(false);
+      });
     };
     load(1);
     return () => {
       cancelled = true;
       if (retryTimer !== null) window.clearTimeout(retryTimer);
     };
-  }, [props.cwd, props.environmentId, limit, reloadToken, showRemotes]);
+  }, [
+    props.cwd,
+    props.environmentId,
+    limit,
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- A reload request bumps the token without changing the query inputs.
+    reloadToken,
+    showRemotes,
+  ]);
 
   const data = graph === null ? null : toGraphData(graph, props.repositoryLabel ?? "");
   const commits = data?.commits ?? [];
@@ -756,6 +760,7 @@ export function GitGraphPanel(props: {
   const currentBranch = data?.currentBranch ?? "HEAD";
   const showWorktrees = worktrees.length > 0;
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- A notice timer is cleared on unmount.
   useEffect(
     () => () => {
       if (noticeTimer.current !== null) window.clearTimeout(noticeTimer.current);

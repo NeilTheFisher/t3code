@@ -1,13 +1,5 @@
 import { type RunId } from "@t3tools/contracts";
-import {
-  type MouseEvent,
-  type ReactNode,
-  memo,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { type MouseEvent, type ReactNode, memo, useLayoutEffect, useRef, useState } from "react";
 import { type TurnDiffFileChange } from "../../types";
 import {
   buildTurnDiffTree,
@@ -65,9 +57,9 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
     onOpenTurnDiff,
     onFileContextMenu,
   } = props;
-  const summaryStat = useMemo(() => summarizeTurnDiffStats(files), [files]);
-  const scopeSummary = useMemo(() => summarizeChangedFileScopes(files), [files]);
-  const previewFiles = useMemo(() => selectChangedFilePreview(files), [files]);
+  const summaryStat = summarizeTurnDiffStats(files);
+  const scopeSummary = summarizeChangedFileScopes(files);
+  const previewFiles = selectChangedFilePreview(files);
   const compactPreviewVisible = showCompactPreview && !expanded;
 
   return (
@@ -88,7 +80,7 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
           type="button"
           aria-expanded={expanded}
           data-scroll-anchor-ignore
-          className="group flex min-w-0 flex-1 items-center rounded-xl px-2 py-1.5 text-left transition-colors hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="group flex min-w-0 flex-1 items-center rounded-xl px-2 py-1.5 text-left transition-colors hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset"
           onClick={() => onExpandedChange(!expanded)}
         >
           <span className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
@@ -194,7 +186,7 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
                   render={
                     <button
                       type="button"
-                      className="inline-flex max-w-48 items-center gap-1 rounded-md border border-border/70 bg-background/45 px-1.5 py-1 font-mono text-3xs text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className="inline-flex max-w-48 items-center gap-1 rounded-md border border-border/70 bg-background/45 px-1.5 py-1 font-mono text-3xs text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset"
                       onClick={() => onOpenTurnDiff(runId, file.path)}
                     />
                   }
@@ -212,7 +204,7 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
             ))}
             <button
               type="button"
-              className="rounded-md px-1.5 py-1 text-2xs font-medium text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="rounded-md px-1.5 py-1 text-2xs font-medium text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset"
               onClick={() => onExpandedChange(true)}
             >
               Show all {files.length} files

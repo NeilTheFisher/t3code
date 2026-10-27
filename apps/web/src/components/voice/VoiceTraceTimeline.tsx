@@ -76,11 +76,16 @@ export function VoiceTraceTimeline({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const pinnedToBottomRef = useRef(true);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Keeping the trace pinned to the bottom follows streamed text.
   useEffect(() => {
     if (!pinnedToBottomRef.current) return;
     const element = scrollRef.current;
     if (element) element.scrollTop = element.scrollHeight;
-  }, [entries, streamingAssistantText]);
+  }, [
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- New trace text arrives from the stream store; these deps are the scroll trigger.
+    entries,
+    streamingAssistantText,
+  ]);
 
   return (
     <div

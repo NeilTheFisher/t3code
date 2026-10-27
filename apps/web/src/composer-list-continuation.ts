@@ -99,14 +99,6 @@ function indentWidth(line: string, fromColumn = 0): number {
   return column - fromColumn;
 }
 
-function segmentSource(
-  segment: ReturnType<typeof splitPromptIntoComposerSegments>[number],
-): string {
-  if (segment.type === "text") return segment.text;
-  if (segment.type === "terminal-context") return INLINE_TERMINAL_CONTEXT_PLACEHOLDER;
-  return segment.source;
-}
-
 function renumberFollowingItems(
   value: string,
   afterLineEnd: number,

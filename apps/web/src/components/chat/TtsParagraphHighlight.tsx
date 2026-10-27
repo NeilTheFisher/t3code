@@ -1,16 +1,9 @@
 /**
- * Highlights the assistant-message block currently being spoken by TTS, and
- * makes each matched block clickable to seek to that paragraph. Renders
- * nothing: it observes its parent (the markdown container), reads the shared
- * audio player store, and toggles classes on the block whose normalized text
- * best matches the active paragraph's opening words.
- *
- * Spoken paragraphs are markdown-stripped and can span several DOM blocks, so
- * matching is delegated to `findActiveBlockIndex` / `findParagraphIndexForBlock`
- * (normalized word prefix, punctuation-insensitive) rather than an exact
- * substring.
+ * Highlights the block being spoken and makes matched blocks clickable to seek.
+ * Renders nothing: it observes the markdown container, reads the shared audio
+ * store, and matches blocks by normalized word prefix (`findActiveBlockIndex`).
  */
-import { memo, useCallback, useEffect, useRef } from "react";
+import { memo, useEffect, useRef } from "react";
 import { type MessageId } from "@t3tools/contracts";
 import { useAudioPlayerStore } from "~/audioPlayerStore";
 import { canSeekToParagraph, getActiveParagraphCues, seekToParagraph } from "~/hooks/useTtsPlayer";
@@ -29,11 +22,8 @@ function blockText(element: HTMLElement): string {
 
 /**
  * Text of the rendered line the click landed on, or null when it cannot be
- * resolved (no caret-from-point API, or an element-level hit). Lines break at
- * `<br>` and at block children, so a multi-line block seeks to the line under
- * the pointer rather than always its first line. The whole line is returned,
- * not just the prefix before the caret, so leading-word matching works even
- * when the first word is clicked.
+ * resolved. The whole line is returned, not the prefix before the caret, so
+ * leading-word matching works even when the first word is clicked.
  */
 function clickedLineText(block: HTMLElement, event: MouseEvent): string | null {
   const doc = block.ownerDocument;
@@ -119,6 +109,7 @@ export const TtsParagraphHighlight = memo(function TtsParagraphHighlight({
   // Clickability only: which blocks can be clicked to seek. Re-runs as
   // synthesis advances so newly-synthesized paragraphs become clickable, but
   // never touches the highlight, so it can't flicker.
+  // oxlint-disable-next-line t3code/react-effect-budget -- The markdown DOM is built outside React; classes follow the active cue.
   useEffect(() => {
     const container = ref.current?.parentElement;
     if (container === null || container === undefined) return;
@@ -128,9 +119,14 @@ export const TtsParagraphHighlight = memo(function TtsParagraphHighlight({
       const paragraph = active ? findParagraphIndexForBlock(cues, blockText(block)) : -1;
       block.classList.toggle(CLICKABLE_CLASS, paragraph >= 0 && canSeekToParagraph(paragraph));
     }
-  }, [active, synthesizedParagraphs]);
+  }, [
+    active,
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Synthesis state lives in the audio store; this cue refreshes when blocks gain seek targets.
+    synthesizedParagraphs,
+  ]);
 
   // Highlight + scroll: only on a new active paragraph or an explicit reveal.
+  // oxlint-disable-next-line t3code/react-effect-budget -- Highlighting writes classes on markdown DOM built outside React.
   useEffect(() => {
     const container = ref.current?.parentElement;
     if (container === null || container === undefined) return;
@@ -161,35 +157,33 @@ export const TtsParagraphHighlight = memo(function TtsParagraphHighlight({
 
   // Delegated click: any matched block seeks to its paragraph. A single
   // listener survives the markdown DOM re-rendering under us.
-  const handleClick = useCallback(
-    (event: MouseEvent) => {
-      const store = useAudioPlayerStore.getState();
-      if (store.playingMessageId !== messageId || store.status === "idle") return;
-      const target = event.target;
-      if (!(target instanceof Element)) return;
-      // Let links, controls, and text selection behave normally.
-      if (target.closest("a, button, input, textarea, select, [role='button']") !== null) return;
-      if (window.getSelection()?.toString()) return;
-      const container = ref.current?.parentElement;
-      if (container === null || container === undefined) return;
-      const block = target.closest<HTMLElement>(BLOCK_SELECTOR);
-      if (block === null || !container.contains(block)) return;
-      const lineText = clickedLineText(block, event) ?? undefined;
-      const paragraph = findParagraphIndexForBlock(
-        getActiveParagraphCues(),
-        blockText(block),
-        lineText,
-      );
-      if (paragraph < 0) return;
-      seekToParagraph(paragraph);
-      // Reflect the seek on the clicked block immediately, before its audio (and
-      // the synthesis-progress re-run) catches up.
-      block.classList.add(HIGHLIGHT_CLASS);
-      block.classList.add(CLICKABLE_CLASS);
-    },
-    [messageId],
-  );
+  const handleClick = (event: MouseEvent) => {
+    const store = useAudioPlayerStore.getState();
+    if (store.playingMessageId !== messageId || store.status === "idle") return;
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    // Let links, controls, and text selection behave normally.
+    if (target.closest("a, button, input, textarea, select, [role='button']") !== null) return;
+    if (window.getSelection()?.toString()) return;
+    const container = ref.current?.parentElement;
+    if (container === null || container === undefined) return;
+    const block = target.closest<HTMLElement>(BLOCK_SELECTOR);
+    if (block === null || !container.contains(block)) return;
+    const lineText = clickedLineText(block, event) ?? undefined;
+    const paragraph = findParagraphIndexForBlock(
+      getActiveParagraphCues(),
+      blockText(block),
+      lineText,
+    );
+    if (paragraph < 0) return;
+    seekToParagraph(paragraph);
+    // Reflect the seek on the clicked block immediately, before its audio (and
+    // the synthesis-progress re-run) catches up.
+    block.classList.add(HIGHLIGHT_CLASS);
+    block.classList.add(CLICKABLE_CLASS);
+  };
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- The delegated listener outlives markdown re-renders.
   useEffect(() => {
     const container = ref.current?.parentElement;
     if (container === null || container === undefined) return;

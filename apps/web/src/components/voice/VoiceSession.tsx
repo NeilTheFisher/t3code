@@ -6,10 +6,8 @@ import {
   createContext,
   type ReactNode,
   type RefObject,
-  useCallback,
   useContext,
   useEffect,
-  useMemo,
   useRef,
   useState,
 } from "react";
@@ -400,21 +398,18 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
   const sessionReadyRef = useRef(false);
   const panelGeometry = useVoicePanelGeometry();
 
-  const appendTrace = useCallback(
-    (input: {
-      readonly kind: VoiceTraceEntryKind;
-      readonly title: string;
-      readonly text?: string | undefined;
-      readonly callId?: string | undefined;
-      readonly details?: string | undefined;
-    }) => {
-      const sessionId = traceSessionIdRef.current;
-      if (sessionId) useVoiceTraceStore.getState().appendEntry(sessionId, input);
-    },
-    [],
-  );
+  const appendTrace = (input: {
+    readonly kind: VoiceTraceEntryKind;
+    readonly title: string;
+    readonly text?: string | undefined;
+    readonly callId?: string | undefined;
+    readonly details?: string | undefined;
+  }) => {
+    const sessionId = traceSessionIdRef.current;
+    if (sessionId) useVoiceTraceStore.getState().appendEntry(sessionId, input);
+  };
 
-  const upsertUserTrace = useCallback((transcript: string) => {
+  const upsertUserTrace = (transcript: string) => {
     const sessionId = traceSessionIdRef.current;
     const text = transcript.trim();
     if (!sessionId || text.length === 0) return;
@@ -426,16 +421,16 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
       title: "You",
       text,
     });
-  }, []);
+  };
 
-  const completeTrace = useCallback((status: "completed" | "error" = "completed") => {
+  const completeTrace = (status: "completed" | "error" = "completed") => {
     const sessionId = traceSessionIdRef.current;
     if (!sessionId) return;
     useVoiceTraceStore.getState().completeSession(sessionId, status);
     traceSessionIdRef.current = null;
-  }, []);
+  };
 
-  const registerComposer = useCallback((registration: VoiceComposerRegistration) => {
+  const registerComposer = (registration: VoiceComposerRegistration) => {
     currentComposerRef.current = registration;
     lastComposerRef.current = registration;
     setCurrentTitle(registration.title);
@@ -444,192 +439,181 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
         currentComposerRef.current = null;
       }
     };
-  }, []);
+  };
 
-  const resolveComposer = useCallback(
-    () => currentComposerRef.current ?? lastComposerRef.current,
-    [],
-  );
+  const resolveComposer = () => currentComposerRef.current ?? lastComposerRef.current;
 
-  const executeTool = useCallback(
-    async (event: VoiceEvent): Promise<unknown> => {
-      const args = event.arguments ? (JSON.parse(event.arguments) as Record<string, unknown>) : {};
-      if (event.name === "stay_silent") {
-        return { ok: true, silent: true };
-      }
-      if (event.name === "search_web") {
-        const environmentId = originComposerRef.current?.environmentId;
-        if (!environmentId)
-          return { ok: false, error: "The origin T3 environment is unavailable." };
-        const objective = typeof args.objective === "string" ? args.objective : "";
-        const searchQueries = Array.isArray(args.searchQueries)
-          ? args.searchQueries.filter((value): value is string => typeof value === "string")
-          : [];
-        const result = await searchVoiceWeb({
-          environmentId,
-          input: { objective, searchQueries },
-        });
-        return result._tag === "Success"
-          ? { ok: true, ...result.value }
-          : { ok: false, error: errorMessage(squashAtomCommandFailure(result)) };
-      }
-      if (event.name === "extract_web_pages") {
-        const environmentId = originComposerRef.current?.environmentId;
-        if (!environmentId)
-          return { ok: false, error: "The origin T3 environment is unavailable." };
-        const urls = Array.isArray(args.urls)
-          ? args.urls.filter((value): value is string => typeof value === "string")
-          : [];
-        const objective = typeof args.objective === "string" ? args.objective : undefined;
-        const searchQueries = Array.isArray(args.searchQueries)
-          ? args.searchQueries.filter((value): value is string => typeof value === "string")
-          : undefined;
-        const sessionId = typeof args.sessionId === "string" ? args.sessionId : undefined;
-        const result = await extractVoiceWeb({
-          environmentId,
-          input: {
-            urls,
-            ...(objective ? { objective } : {}),
-            ...(searchQueries && searchQueries.length > 0 ? { searchQueries } : {}),
-            ...(sessionId ? { sessionId } : {}),
-          },
-        });
-        return result._tag === "Success"
-          ? { ok: true, ...result.value }
-          : { ok: false, error: errorMessage(squashAtomCommandFailure(result)) };
-      }
-      if (event.name === "get_previous_messages") {
-        const ref = originComposerRef.current?.threadRef ?? null;
-        if (!ref) return { ok: false, error: "The origin task is unavailable." };
-        const thread = readThreadDetail(ref);
-        if (!thread) {
-          return {
-            ok: false,
-            error: "The origin task history is not loaded.",
-          };
-        }
-        const limit = Math.max(1, Math.min(20, Number(args.limit ?? 8)));
-        const beforeMessageId =
-          typeof args.beforeMessageId === "string" ? args.beforeMessageId : null;
-        const endIndex = beforeMessageId
-          ? thread.projection.messages.findIndex((message) => message.id === beforeMessageId)
-          : thread.projection.messages.length;
-        if (endIndex < 0) return { ok: false, error: "Pagination cursor not found." };
-        const startIndex = Math.max(0, endIndex - limit);
-        const page = thread.projection.messages.slice(startIndex, endIndex).map((message) => ({
-          id: message.id,
-          role: message.role,
-          text:
-            message.text.length > 8_000
-              ? `${message.text.slice(0, 8_000)}\n[message truncated]`
-              : message.text,
-          createdAt: message.createdAt,
-        }));
+  const executeTool = async (event: VoiceEvent): Promise<unknown> => {
+    const args = event.arguments ? (JSON.parse(event.arguments) as Record<string, unknown>) : {};
+    if (event.name === "stay_silent") {
+      return { ok: true, silent: true };
+    }
+    if (event.name === "search_web") {
+      const environmentId = originComposerRef.current?.environmentId;
+      if (!environmentId) return { ok: false, error: "The origin T3 environment is unavailable." };
+      const objective = typeof args.objective === "string" ? args.objective : "";
+      const searchQueries = Array.isArray(args.searchQueries)
+        ? args.searchQueries.filter((value): value is string => typeof value === "string")
+        : [];
+      const result = await searchVoiceWeb({
+        environmentId,
+        input: { objective, searchQueries },
+      });
+      return result._tag === "Success"
+        ? { ok: true, ...result.value }
+        : { ok: false, error: errorMessage(squashAtomCommandFailure(result)) };
+    }
+    if (event.name === "extract_web_pages") {
+      const environmentId = originComposerRef.current?.environmentId;
+      if (!environmentId) return { ok: false, error: "The origin T3 environment is unavailable." };
+      const urls = Array.isArray(args.urls)
+        ? args.urls.filter((value): value is string => typeof value === "string")
+        : [];
+      const objective = typeof args.objective === "string" ? args.objective : undefined;
+      const searchQueries = Array.isArray(args.searchQueries)
+        ? args.searchQueries.filter((value): value is string => typeof value === "string")
+        : undefined;
+      const sessionId = typeof args.sessionId === "string" ? args.sessionId : undefined;
+      const result = await extractVoiceWeb({
+        environmentId,
+        input: {
+          urls,
+          ...(objective ? { objective } : {}),
+          ...(searchQueries && searchQueries.length > 0 ? { searchQueries } : {}),
+          ...(sessionId ? { sessionId } : {}),
+        },
+      });
+      return result._tag === "Success"
+        ? { ok: true, ...result.value }
+        : { ok: false, error: errorMessage(squashAtomCommandFailure(result)) };
+    }
+    if (event.name === "get_previous_messages") {
+      const ref = originComposerRef.current?.threadRef ?? null;
+      if (!ref) return { ok: false, error: "The origin task is unavailable." };
+      const thread = readThreadDetail(ref);
+      if (!thread) {
         return {
-          ok: true,
-          task: {
-            environmentId: ref.environmentId,
-            threadId: ref.threadId,
-            title: thread.projection.thread.title,
-          },
-          messages: page,
-          hasMore: startIndex > 0,
-          nextBeforeMessageId: startIndex > 0 ? (page[0]?.id ?? null) : null,
+          ok: false,
+          error: "The origin task history is not loaded.",
         };
       }
-      if (event.name === "read_composer") {
-        const registration = resolveComposer();
-        if (!registration) return { ok: false, error: "No T3 composer is available." };
-        const draft = useComposerDraftStore
-          .getState()
-          .getComposerDraft(registration.composerDraftTarget);
-        return {
-          ok: true,
-          text: draft?.prompt ?? registration.composerRef.current?.readSnapshot().value ?? "",
-        };
+      const limit = Math.max(1, Math.min(20, Number(args.limit ?? 8)));
+      const beforeMessageId =
+        typeof args.beforeMessageId === "string" ? args.beforeMessageId : null;
+      const endIndex = beforeMessageId
+        ? thread.projection.messages.findIndex((message) => message.id === beforeMessageId)
+        : thread.projection.messages.length;
+      if (endIndex < 0) return { ok: false, error: "Pagination cursor not found." };
+      const startIndex = Math.max(0, endIndex - limit);
+      const page = thread.projection.messages.slice(startIndex, endIndex).map((message) => ({
+        id: message.id,
+        role: message.role,
+        text:
+          message.text.length > 8_000
+            ? `${message.text.slice(0, 8_000)}\n[message truncated]`
+            : message.text,
+        createdAt: message.createdAt,
+      }));
+      return {
+        ok: true,
+        task: {
+          environmentId: ref.environmentId,
+          threadId: ref.threadId,
+          title: thread.projection.thread.title,
+        },
+        messages: page,
+        hasMore: startIndex > 0,
+        nextBeforeMessageId: startIndex > 0 ? (page[0]?.id ?? null) : null,
+      };
+    }
+    if (event.name === "read_composer") {
+      const registration = resolveComposer();
+      if (!registration) return { ok: false, error: "No T3 composer is available." };
+      const draft = useComposerDraftStore
+        .getState()
+        .getComposerDraft(registration.composerDraftTarget);
+      return {
+        ok: true,
+        text: draft?.prompt ?? registration.composerRef.current?.readSnapshot().value ?? "",
+      };
+    }
+    if (event.name === "replace_composer_text") {
+      const registration = resolveComposer();
+      if (!registration) return { ok: false, error: "No T3 composer is available." };
+      const store = useComposerDraftStore.getState();
+      const currentText =
+        store.getComposerDraft(registration.composerDraftTarget)?.prompt ??
+        registration.composerRef.current?.readSnapshot().value ??
+        "";
+      const rangeStart = Number(args.rangeStart);
+      const rangeEnd = Number(args.rangeEnd);
+      const replacement = typeof args.replacement === "string" ? args.replacement : "";
+      const expectedText = typeof args.expectedText === "string" ? args.expectedText : undefined;
+      if (
+        !Number.isInteger(rangeStart) ||
+        !Number.isInteger(rangeEnd) ||
+        rangeStart < 0 ||
+        rangeEnd < rangeStart ||
+        rangeEnd > currentText.length
+      ) {
+        return { ok: false, error: "Composer range is invalid.", length: currentText.length };
       }
-      if (event.name === "replace_composer_text") {
-        const registration = resolveComposer();
-        if (!registration) return { ok: false, error: "No T3 composer is available." };
-        const store = useComposerDraftStore.getState();
-        const currentText =
-          store.getComposerDraft(registration.composerDraftTarget)?.prompt ??
-          registration.composerRef.current?.readSnapshot().value ??
-          "";
-        const rangeStart = Number(args.rangeStart);
-        const rangeEnd = Number(args.rangeEnd);
-        const replacement = typeof args.replacement === "string" ? args.replacement : "";
-        const expectedText = typeof args.expectedText === "string" ? args.expectedText : undefined;
-        if (
-          !Number.isInteger(rangeStart) ||
-          !Number.isInteger(rangeEnd) ||
-          rangeStart < 0 ||
-          rangeEnd < rangeStart ||
-          rangeEnd > currentText.length
-        ) {
-          return { ok: false, error: "Composer range is invalid.", length: currentText.length };
-        }
-        if (
-          expectedText !== undefined &&
-          currentText.slice(rangeStart, rangeEnd) !== expectedText
-        ) {
-          return { ok: false, error: "Composer changed before the edit could be applied." };
-        }
-        const nextText = `${currentText.slice(0, rangeStart)}${replacement}${currentText.slice(rangeEnd)}`;
-        const mountedComposer = registration.composerRef.current;
-        const applied = mountedComposer
-          ? mountedComposer.replaceTextRange({
-              rangeStart,
-              rangeEnd,
-              replacement,
-              ...(expectedText !== undefined ? { expectedText } : {}),
-            })
-          : (store.setPrompt(registration.composerDraftTarget, nextText), true);
-        return applied
-          ? { ok: true, text: nextText, length: nextText.length }
-          : { ok: false, error: "Composer changed before the edit could be applied." };
+      if (expectedText !== undefined && currentText.slice(rangeStart, rangeEnd) !== expectedText) {
+        return { ok: false, error: "Composer changed before the edit could be applied." };
       }
-      if (event.name === "edit_composer_text") {
-        const registration = resolveComposer();
-        if (!registration) return { ok: false, error: "No T3 composer is available." };
-        const edits = Array.isArray(args.edits)
-          ? args.edits.filter(
-              (edit): edit is { oldText: string; newText: string } =>
-                typeof edit === "object" &&
-                edit !== null &&
-                "oldText" in edit &&
-                typeof edit.oldText === "string" &&
-                "newText" in edit &&
-                typeof edit.newText === "string",
-            )
-          : [];
-        const store = useComposerDraftStore.getState();
-        const currentText =
-          store.getComposerDraft(registration.composerDraftTarget)?.prompt ??
-          registration.composerRef.current?.readSnapshot().value ??
-          "";
-        const editResult = applyExactComposerEdits(currentText, edits);
-        if (!editResult.ok) return editResult;
-        const nextText = editResult.text;
-        const mountedComposer = registration.composerRef.current;
-        const applied = mountedComposer
-          ? mountedComposer.replaceTextRange({
-              rangeStart: 0,
-              rangeEnd: currentText.length,
-              replacement: nextText,
-              expectedText: currentText,
-            })
-          : (store.setPrompt(registration.composerDraftTarget, nextText), true);
-        return applied
-          ? { ok: true, text: nextText, length: nextText.length, editsApplied: edits.length }
-          : { ok: false, error: "Composer changed before the edits could be applied." };
-      }
-      return { ok: false, error: `Unknown tool: ${event.name ?? "unnamed"}` };
-    },
-    [extractVoiceWeb, resolveComposer, searchVoiceWeb],
-  );
+      const nextText = `${currentText.slice(0, rangeStart)}${replacement}${currentText.slice(rangeEnd)}`;
+      const mountedComposer = registration.composerRef.current;
+      const applied = mountedComposer
+        ? mountedComposer.replaceTextRange({
+            rangeStart,
+            rangeEnd,
+            replacement,
+            ...(expectedText !== undefined ? { expectedText } : {}),
+          })
+        : (store.setPrompt(registration.composerDraftTarget, nextText), true);
+      return applied
+        ? { ok: true, text: nextText, length: nextText.length }
+        : { ok: false, error: "Composer changed before the edit could be applied." };
+    }
+    if (event.name === "edit_composer_text") {
+      const registration = resolveComposer();
+      if (!registration) return { ok: false, error: "No T3 composer is available." };
+      const edits = Array.isArray(args.edits)
+        ? args.edits.filter(
+            (edit): edit is { oldText: string; newText: string } =>
+              typeof edit === "object" &&
+              edit !== null &&
+              "oldText" in edit &&
+              typeof edit.oldText === "string" &&
+              "newText" in edit &&
+              typeof edit.newText === "string",
+          )
+        : [];
+      const store = useComposerDraftStore.getState();
+      const currentText =
+        store.getComposerDraft(registration.composerDraftTarget)?.prompt ??
+        registration.composerRef.current?.readSnapshot().value ??
+        "";
+      const editResult = applyExactComposerEdits(currentText, edits);
+      if (!editResult.ok) return editResult;
+      const nextText = editResult.text;
+      const mountedComposer = registration.composerRef.current;
+      const applied = mountedComposer
+        ? mountedComposer.replaceTextRange({
+            rangeStart: 0,
+            rangeEnd: currentText.length,
+            replacement: nextText,
+            expectedText: currentText,
+          })
+        : (store.setPrompt(registration.composerDraftTarget, nextText), true);
+      return applied
+        ? { ok: true, text: nextText, length: nextText.length, editsApplied: edits.length }
+        : { ok: false, error: "Composer changed before the edits could be applied." };
+    }
+    return { ok: false, error: `Unknown tool: ${event.name ?? "unnamed"}` };
+  };
 
-  const flushToolCalls = useCallback(async () => {
+  const flushToolCalls = async () => {
     toolTimerRef.current = null;
     const connection = connectionRef.current;
     if (!connection) return;
@@ -679,9 +663,9 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
     } else if (!shouldContinue) {
       setStatus("listening");
     }
-  }, [appendTrace, executeTool]);
+  };
 
-  const end = useCallback(() => {
+  const end = () => {
     activeRef.current = false;
     if (toolTimerRef.current) clearTimeout(toolTimerRef.current);
     toolTimerRef.current = null;
@@ -701,9 +685,9 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
     setAssistantTranscript("");
     activeUserTraceEntryIdRef.current = null;
     assistantTranscriptRef.current = "";
-  }, [appendTrace, completeTrace]);
+  };
 
-  const start = useCallback(() => {
+  const start = () => {
     if (activeRef.current) {
       setPanelOpen(true);
       return;
@@ -936,23 +920,18 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
       appendTrace({ kind: "error", title: "Voice session failed", text: message });
       completeTrace("error");
     });
-  }, [
-    appendTrace,
-    completeTrace,
-    createVoiceSession,
-    flushToolCalls,
-    resolveComposer,
-    upsertUserTrace,
-  ]);
+  };
 
-  const toggleMuted = useCallback(() => {
+  const toggleMuted = () => {
     setMuted((current) => {
       const next = !current;
       connectionRef.current?.setMuted(next);
       return next;
     });
-  }, []);
+  };
 
+  /* oxlint-disable react/exhaustive-effect-dependencies -- Session patches follow the settings store; these deps are the trigger set. */
+  // oxlint-disable-next-line t3code/react-effect-budget -- Settings are patched onto the live WebRTC connection.
   useEffect(() => {
     const connection = connectionRef.current;
     if (!connection || !sessionReadyRef.current || status !== "listening") return;
@@ -981,26 +960,25 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
     voiceTurnEagerness,
     status,
   ]);
+  /* oxlint-enable react/exhaustive-effect-dependencies */
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- The call ends when its owner unmounts.
   useEffect(() => end, [end]);
 
   const active = status !== "idle" && status !== "error";
   const displayTraceSession = traceSessions.find((session) => session.id === displayTraceSessionId);
-  const value = useMemo<VoiceSessionContextValue>(
-    () => ({
-      status,
-      active,
-      muted,
-      panelOpen,
-      errorMessage: errorText,
-      registerComposer,
-      start,
-      end,
-      toggleMuted,
-      setPanelOpen,
-    }),
-    [active, end, errorText, muted, panelOpen, registerComposer, start, status, toggleMuted],
-  );
+  const value: VoiceSessionContextValue = {
+    status,
+    active,
+    muted,
+    panelOpen,
+    errorMessage: errorText,
+    registerComposer,
+    start,
+    end,
+    toggleMuted,
+    setPanelOpen,
+  };
 
   return (
     <VoiceSessionContext.Provider value={value}>

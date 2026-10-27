@@ -1,17 +1,8 @@
 /**
- * Fetch layer for the local OpenAI-compatible TTS endpoint. Pure: no React, no
- * store coupling, no logging side-effects.
- *
- * The server is expected to be reachable at `serverUrl` (loopback by default);
- * the setup repo serves Paradee there from its `paradee-tts/` service.
- *
- * A server may reply 503 while an on-demand backend wakes up; poll until it is
- * up before surfacing an error to the caller.
- *
- * Streaming: with `stream: true` + `response_format: "pcm"` the server emits
- * raw s16le mono 24kHz chunks as they are synthesized (and stops generating on
- * client disconnect). Chunks arrive progressively; the first bytes play long
- * before the whole message is synthesized.
+ * Fetch layer for the local OpenAI-compatible TTS endpoint: no React, no store.
+ * A 503 means an on-demand backend is waking, so poll before surfacing an error.
+ * With `stream: true` the server emits raw s16le mono 24kHz chunks as it
+ * synthesizes, so playback starts before the whole message exists.
  */
 
 export type TtsRequest = {
@@ -107,13 +98,9 @@ export async function synthesizeSpeech(req: TtsRequest): Promise<Blob> {
 export const TTS_PCM_SAMPLE_RATE = 24_000;
 
 /**
- * Progressive PCM chunks of a streaming synthesis. Resolves once the HTTP
- * response starts; iterate the returned async iterable for each chunk. The
- * request aborts (and the server stops generating) if `signal` aborts.
- *
- * TCP read boundaries do not align with 16-bit sample boundaries, so a carry
- * byte from the end of one read is prepended to the next — every chunk handed
- * to `onChunk` always starts on a sample boundary and has an even byte length.
+ * Progressive PCM chunks of a streaming synthesis. TCP reads do not align with
+ * 16-bit samples, so a carry byte from one read is prepended to the next: every
+ * chunk starts on a sample boundary with an even length.
  */
 export async function streamSpeechChunks(
   req: TtsRequest,

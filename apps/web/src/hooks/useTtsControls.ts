@@ -3,7 +3,7 @@
  * the mobile mini-bar). Reads the singleton audio player store and wraps the
  * imperative playback controls in React-friendly callbacks.
  */
-import { useCallback, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useAudioPlayerStore } from "~/audioPlayerStore";
 import {
   seekPlayback,
@@ -45,56 +45,56 @@ export function useTtsControls(router: AppRouter) {
       : "Loading…"
     : (title ?? "Audio");
 
-  const revealThread = useCallback(() => {
+  const revealThread = () => {
     if (threadRef === null) return;
     requestScrollToActiveParagraph();
     void router.navigate({
       to: "/$environmentId/$threadId",
       params: { environmentId: threadRef.environmentId, threadId: threadRef.threadId },
     });
-  }, [requestScrollToActiveParagraph, router, threadRef]);
+  };
 
   // The thumb drag stays local for smoothness (a live seek per input event would
   // stop/reschedule sources and stutter the thumb); the seek commits on release.
   const [scrubValue, setScrubValue] = useState<number | null>(null);
   const draggingRef = useRef(false);
 
-  const handleScrubChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleScrubChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const value = Number(event.currentTarget.value);
     if (draggingRef.current) {
       setScrubValue(value);
       return;
     }
     if (Number.isFinite(value)) seekPlayback(value);
-  }, []);
+  };
 
-  const handleScrubPointerDown = useCallback(() => {
+  const handleScrubPointerDown = () => {
     draggingRef.current = true;
-  }, []);
+  };
 
-  const commitScrub = useCallback(() => {
+  const commitScrub = () => {
     draggingRef.current = false;
     if (scrubValue === null) return;
     seekPlayback(scrubValue);
     setScrubValue(null);
-  }, [scrubValue]);
+  };
 
-  const cancelScrub = useCallback(() => {
+  const cancelScrub = () => {
     draggingRef.current = false;
     setScrubValue(null);
-  }, []);
+  };
 
-  const handleVolume = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleVolume = (event: React.ChangeEvent<HTMLInputElement>) => {
     setPlaybackVolume(Number(event.target.value));
-  }, []);
+  };
 
-  const cycleRate = useCallback(() => {
+  const cycleRate = () => {
     const next =
       RATE_OPTIONS[
         (RATE_OPTIONS.indexOf(rate as (typeof RATE_OPTIONS)[number]) + 1) % RATE_OPTIONS.length
       ] ?? RATE_OPTIONS[0]!;
     setPlaybackRate(next);
-  }, [rate]);
+  };
 
   return {
     visible,

@@ -1,12 +1,7 @@
 /**
- * Converts assistant-message markdown into text suitable for speech
- * synthesis: strips heading markers, emphasis, code fences, links, and other
- * syntax that would otherwise be read aloud, and inlines `[pause:Ns]` tags at
- * structural boundaries (the Kokoro endpoint renders them as silence).
- *
- * Three shapes: a flat spoken string, merged paragraphs, and sentence-sized
- * spoken units (streaming playback + line-level seek/highlight matching). Pure,
- * no dependencies.
+ * Converts assistant markdown into speech: strips syntax that would be read
+ * aloud and inlines `[pause:Ns]` tags at structural boundaries. Pure. Three
+ * shapes: a flat string, merged paragraphs, and sentence-sized spoken units.
  */
 
 /** Pause lengths (seconds) at markdown structural boundaries. */
@@ -135,11 +130,8 @@ export interface SpokenUnit {
 }
 
 /**
- * Upper bound on a unit. The speech server synthesizes a whole request before
- * emitting any bytes, so a unit's length is its time-to-first-audio; keeping
- * units short is what makes playback start quickly and speed changes take
- * effect. Sentences under this length stay whole; longer ones are cut at word
- * boundaries.
+ * Upper bound on a unit: it is the unit's time-to-first-audio, so keeping units
+ * short starts playback quickly. Longer sentences are cut at word boundaries.
  */
 const MAX_UNIT_CHARS = 160;
 
@@ -228,11 +220,9 @@ function pushLine(units: SpokenUnit[], lineText: string, trailingPause: number):
 }
 
 /**
- * Spoken units for streaming playback and seek/highlight matching. Unlike
- * `toSpokenParagraphs`, each structural line (heading, list item) is its own
- * unit and every paragraph is split into sentence-sized units, so each is a
- * small, quickly-synthesized request that also maps to one rendered line.
- * Trailing pauses land on the last unit of their paragraph or item.
+ * Spoken units for streaming and seek/highlight matching: each structural line
+ * is its own unit and paragraphs split into sentences, so every unit maps to one
+ * rendered line.
  */
 export function toSpokenUnits(markdown: string): SpokenUnit[] {
   const lines = convertLines(markdown).map(parseLine);

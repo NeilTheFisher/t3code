@@ -2,11 +2,9 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { SETTINGS_SEARCH_ITEMS } from "./settingsSearch";
 
-// Every searchable settings entry is supposed to point at a real control. Rebase
-// merges can silently drop upstream's `{...searchableSetting(id)}` rows when the
-// fork has rewritten the surrounding region, which is how the context window
-// indicator toggle went missing. This test fails as soon as an entry loses its
-// control.
+// Every searchable settings entry must point at a real control: rebase merges can
+// silently drop upstream's `{...searchableSetting(id)}` rows when the fork
+// rewrote the region, which is how the context window indicator went missing.
 const settingsSources = Object.entries(
   import.meta.glob("./**/*.{ts,tsx}", {
     query: "?raw",
@@ -49,6 +47,10 @@ const NON_CONTROL_SEARCH_IDS = new Set<string>([
   "continue-threads-after-server-update",
   // Anchor ids (rendered with a raw id, not a searchableSetting row).
   "device-hosts",
+  // Upstream anchors the device sources panel at `<SettingsSection id="device-sources">`.
+  "device-sources",
+  // Its row lives inside that panel, found by `targetId`.
+  "device-platform-support",
   "browser-default-profile",
   // Upstream storage sections anchor to `<SettingsSection id="storage-…">`.
   "storage-worktrees",

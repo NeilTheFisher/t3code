@@ -854,10 +854,8 @@ export interface ModelChangeNotice {
 }
 
 /**
- * Derives "Switched from X to Y" notices from consecutive runs. Runs are the
- * only v2 record of the model a turn was sent with, so a switch is visible
- * exactly where two consecutive runs differ in provider instance or model.
- * `modelLabel` resolves a selection to a display name; without it the raw
+ * "Switched from X to Y" notices from consecutive runs, the only v2 record of
+ * the model a turn used. `modelLabel` names a selection; without it the raw
  * model id is used.
  */
 export function deriveModelChangeNotices(
