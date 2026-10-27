@@ -101,6 +101,7 @@ import {
   type SidebarDropVerb,
   resolveSidebarRowStatus,
   resolveThreadLastVisitedAt,
+  isSidebarRowMarkUnreadGesture,
   shouldRecedeSidebarThread,
   resolveWorkingStartedAt,
   useRetainedValue,
@@ -660,6 +661,7 @@ type SidebarThreadRowProps = {
   onUnsnooze: (threadRef: ScopedThreadRef) => void;
   onUnpin: (threadRef: ScopedThreadRef) => void;
   onAcknowledgeWoke: (threadRef: ScopedThreadRef, visitedAt: string) => void;
+  onMarkUnread: (threadRef: ScopedThreadRef) => void;
   onFileDropThreads?: ((threadRef: ScopedThreadRef, files: File[]) => void) | undefined;
 };
 
@@ -715,6 +717,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     onContextMenu,
     onAcknowledgeWoke,
     onFileDropThreads,
+    onMarkUnread,
     onRenameTitleChange,
     onSettle,
     onActionSweepStart,
@@ -947,6 +950,18 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     if (event.key !== "Enter" && event.key !== " ") return;
     event.preventDefault();
     onThreadActivate(threadRef);
+  };
+  // Middle click is the row's mark-unread gesture, so it never starts the
+  // browser's middle-click autoscroll.
+  const handleRowMouseDown = (event: ReactMouseEvent) => {
+    if (event.button !== 1) return;
+    event.preventDefault();
+  };
+  const handleRowAuxClick = (event: ReactMouseEvent) => {
+    if (!isSidebarRowMarkUnreadGesture(event.button, event.target)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onMarkUnread(threadRef);
   };
   const handleDoubleClick = (event: ReactMouseEvent) => {
     if (
@@ -1374,6 +1389,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               onPointerEnter={intentPrefetch.onPointerEnter}
               onPointerLeave={intentPrefetch.onPointerLeave}
               onPointerDown={intentPrefetch.onPointerDown}
+              onMouseDown={handleRowMouseDown}
+              onAuxClick={handleRowAuxClick}
               onDoubleClick={handleDoubleClick}
               onKeyDown={handleKeyDown}
               onContextMenu={handleContextMenu}
@@ -1579,6 +1596,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             onPointerEnter={intentPrefetch.onPointerEnter}
             onPointerLeave={intentPrefetch.onPointerLeave}
             onPointerDown={intentPrefetch.onPointerDown}
+            onMouseDown={handleRowMouseDown}
+            onAuxClick={handleRowAuxClick}
             onDoubleClick={handleDoubleClick}
             onKeyDown={handleKeyDown}
             onContextMenu={handleContextMenu}
