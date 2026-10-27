@@ -40,9 +40,16 @@ export function reviewFilePatchRequest(input: {
   return {
     cwd: input.cwd,
     ...(input.baseRef ? { baseRef: input.baseRef } : {}),
+    ...(source.kind === "commit" ? { commitSha: source.id } : {}),
     ...(source.kind === "commit-range" && range ? { commitRange: range } : {}),
-    ...(source.kind === "submodule-range" && range && input.submodulePath
-      ? { submodule: { path: input.submodulePath, ...range } }
+    ...(source.kind === "submodule-range" && input.submodulePath && source.baseRef !== null
+      ? {
+          submodule: {
+            path: input.submodulePath,
+            from: source.baseRef,
+            ...(source.headRef !== null ? { to: source.headRef } : {}),
+          },
+        }
       : {}),
     ignoreWhitespace: input.ignoreWhitespace,
     file: {
@@ -240,16 +247,8 @@ function reviewFileQueries({
                 ...(previewInput ? { preview: previewInput } : {}),
                 request: reviewFilePatchRequest({
                   cwd,
-                  ...(baseRef ? { baseRef } : {}),
-                  ...(submodulePath ? { submodulePath } : {}),
-                  ...(source.kind === "commit" ? { commitSha: source.id } : {}),
-                  // A commit range has no merge base to resolve, so the file patch
-                  // must carry the range itself; its two ends are on the source.
-                  ...(source.kind === "commit-range" &&
-                  source.baseRef !== null &&
-                  source.headRef !== null
-                    ? { commitRange: { from: source.baseRef, to: source.headRef } }
-                    : {}),
+                  baseRef,
+                  submodulePath,
                   ignoreWhitespace,
                   source,
                   file,
