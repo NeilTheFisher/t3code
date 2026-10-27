@@ -20,9 +20,9 @@ const baseProps = {
   workspaces,
   activeWorkspaceId: null,
   attentionByWorkspace: new Map<string, number>(),
+  attentionUnsorted: 0,
   attentionTotal: 0,
   dragOverWorkspaceId: null,
-  registerIconElement: () => {},
   onCreate: () => "new-workspace",
   onUpdate: () => {},
   onDelete: () => {},
@@ -86,6 +86,26 @@ it("marks the active workspace and switches on click, with All clearing the filt
 
   await userEvent.click(screen.getByRole("button", { name: "All workspaces" }));
   expect(onSelect).toHaveBeenCalledWith(null);
+});
+
+it("treats Unsorted as a selectable slot with its own badge", async () => {
+  const onSelect = vi.fn();
+  await using screen = await render(
+    <ThreadWorkspaceStrip
+      {...baseProps}
+      activeWorkspaceId="unsorted"
+      attentionUnsorted={5}
+      onSelect={onSelect}
+    />,
+    { router: false },
+  );
+
+  const unsorted = screen.getByRole("button", { name: "Unsorted" });
+  await expect.element(unsorted).toHaveAttribute("aria-pressed", "true");
+  await expect.element(unsorted).toHaveTextContent("5");
+
+  await userEvent.click(unsorted);
+  expect(onSelect).toHaveBeenCalledWith("unsorted");
 });
 
 it("paints the badge with the theme's primary, matching a primary button", async () => {
