@@ -258,8 +258,10 @@ export default defineConfig(() => {
       tasks: {
         // tsc (tsc-rs) rewrites the tsbuildinfo it reads, which keeps a task out of the cache.
         typecheck: {
+          // WSL2 mirrored networking installs a seccomp user-notify filter, so
+          // fspy cannot add its own listener (EBUSY). Caching needs fspy.
           command: "tsc --noEmit",
-          cache: { input: [{ auto: true }, "!*.tsbuildinfo"] },
+          cache: false,
         },
       },
     },
