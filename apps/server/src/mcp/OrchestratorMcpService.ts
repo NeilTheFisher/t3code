@@ -3651,7 +3651,7 @@ const make = Effect.gen(function* () {
       return {
         projectId,
         currentThreadId: parent?.thread.id ?? null,
-        threads: page.map((shell) => listItemFromShell(scope, shell, nowMs)),
+        threads: page.map((shell) => listItemFromShell(scope, shell, nowMs, workspaceFor(shell.id))),
         nextCursor,
         total,
       } satisfies OrchestratorMcpThreadListResult;
