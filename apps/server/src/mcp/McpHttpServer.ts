@@ -70,6 +70,8 @@ import { EnvironmentToolkit } from "./toolkits/environment/tools.ts";
 import * as EnvironmentHandlers from "./toolkits/environment/handlers.ts";
 import { ThemeToolkit } from "./toolkits/theme/tools.ts";
 import * as ThemeHandlers from "./toolkits/theme/handlers.ts";
+import { WorkspaceToolkit } from "./toolkits/workspace/tools.ts";
+import * as WorkspaceHandlers from "./toolkits/workspace/handlers.ts";
 import { ProjectToolkit } from "./toolkits/project/tools.ts";
 import * as ProjectHandlers from "./toolkits/project/handlers.ts";
 import { AttachmentToolkit } from "./toolkits/attachment/tools.ts";
@@ -1438,6 +1440,7 @@ const layerEnvironmentToolkit = toolkitRegistration(
 const layerThemeToolkit = toolkitRegistration(ThemeToolkit, ThemeHandlers.layer).pipe(
   Layer.provide(ThreadCommandExecutor.layer),
 );
+const layerWorkspaceToolkit = toolkitRegistration(WorkspaceToolkit, WorkspaceHandlers.layer);
 
 export const layerProjectRegistration = toolkitRegistration(ProjectToolkit, ProjectHandlers.layer);
 
@@ -1520,6 +1523,7 @@ export const layerTools = Layer.mergeAll(
   layerFeedbackToolkit,
   layerEnvironmentToolkit,
   layerThemeToolkit,
+  layerWorkspaceToolkit,
   layerPreviewControlsRegistration,
   layerWorktreeToolkitRegistration,
   layerPullRequestsToolkit,
