@@ -327,14 +327,17 @@ export const VcsGraphWorkingTree = Schema.Struct({
 export type VcsGraphWorkingTree = typeof VcsGraphWorkingTree.Type;
 
 /**
- * One checkout on disk. `isPrimary` marks the main worktree, which has no branch
- * of its own to recreate and is therefore never removable from the graph.
+ * One checkout on disk. `isMain` is the repository's own worktree (git lists it
+ * first) and has no branch of its own to recreate, so it is never removed from
+ * the graph. `isCurrent` is the checkout this graph was read from — the reason
+ * two threads' graphs can look different: same refs, different checked-out head.
  */
 export const VcsGraphWorktree = Schema.Struct({
   path: TrimmedNonEmptyStringSchema,
   branch: Schema.NullOr(TrimmedNonEmptyStringSchema),
   head: TrimmedNonEmptyStringSchema,
-  isPrimary: Schema.Boolean,
+  isMain: Schema.Boolean,
+  isCurrent: Schema.Boolean,
   dirty: Schema.Boolean,
 });
 export type VcsGraphWorktree = typeof VcsGraphWorktree.Type;
