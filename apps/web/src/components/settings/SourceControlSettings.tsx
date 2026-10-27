@@ -46,10 +46,7 @@ import {
 import { searchableSetting, sourceControlHostSettingsSearchId } from "./settingsSearch";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
-import {
-  getSourceControlPresentationForKind,
-  sourceControlIcon,
-} from "~/sourceControlPresentation";
+import { getSourceControlPresentationForKind } from "~/sourceControlPresentation";
 
 const EMPTY_DISCOVERY_RESULT: SourceControlDiscoveryResult = {
   versionControlSystems: [],
@@ -120,16 +117,6 @@ function itemStatusDot(item: VcsDiscoveryItem | SourceControlProviderDiscoveryIt
   }
   if (item.status !== "available") return "bg-warning";
   return "bg-success";
-}
-
-function sourceControlItemIcon(
-  item: VcsDiscoveryItem | SourceControlProviderDiscoveryItem,
-): ReactNode {
-  const host = isProviderDiscoveryItem(item) ? sourceControlClients.find(item.kind) : undefined;
-  const Icon = isProviderDiscoveryItem(item)
-    ? host && sourceControlIcon(host)
-    : VCS_ICONS[item.kind];
-  return Icon ? <Icon className="size-4.5 text-foreground/80" aria-hidden /> : null;
 }
 
 function SourceControlItemMark({

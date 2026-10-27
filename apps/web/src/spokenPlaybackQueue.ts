@@ -1,10 +1,7 @@
 /**
- * Queue for agent `t3_speak` utterances. They play one at a time through the
- * shared TTS player, with a short silence between them.
- *
- * The queue is global, so an utterance is tagged by its timeline entry id. An
- * `interrupt` utterance replaces whatever is playing right now, but never drops
- * another thread's queued speech. A user-initiated play clears the queue.
+ * Queue for agent `t3_speak` utterances: one at a time through the shared TTS
+ * player. An `interrupt` utterance replaces what is playing but never drops
+ * another thread's queued speech; a user-initiated play clears the queue.
  */
 import { MessageId } from "@t3tools/contracts";
 import { useAudioPlayerStore } from "~/audioPlayerStore";

@@ -21,7 +21,7 @@ import { formatTime, useTtsControls } from "~/hooks/useTtsControls";
 import { useRouter } from "@tanstack/react-router";
 
 // iOS-like spring: overshoots slightly before settling.
-const SPRING = "ease-[cubic-bezier(0.34,1.56,0.64,1)]";
+const SPRING = "ease-spring";
 
 /** Drives the shared `.settings-slider` fill. */
 const sliderStyle = (percent: number): CSSProperties =>
@@ -174,12 +174,11 @@ export function SidebarTtsPlayer() {
             </div>
             <Button
               aria-label="Playback speed"
-              className="cursor-pointer tabular-nums"
               size="icon-sm"
               variant="ghost"
               onClick={tts.cycleRate}
             >
-              <span className="text-3xs">{tts.rate}×</span>
+              <span className="text-3xs tabular-nums">{tts.rate}×</span>
             </Button>
           </div>
         </div>

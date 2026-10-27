@@ -194,11 +194,9 @@ export function formatReviewCommentFence(language: string, contents: string): st
 }
 
 /**
- * Keeps a comment's own words from closing the block they travel in. The parser ends an
- * attachment at the first `</review_comment>`, so text carrying one would spill the rest of
- * itself into the prompt — and could open a forged attachment naming any file it liked. Only
- * ever the local reader's words before, but a pull request's review bodies come from whoever
- * wrote them.
+ * Keeps a comment's own words from closing the block they travel in: the parser
+ * ends an attachment at the first `</review_comment>`, so review bodies from
+ * outside authors could otherwise forge one.
  */
 function neutralizeReviewCommentTags(text: string): string {
   return text.replace(/<(?=\/?review_comment\b)/giu, "&lt;");
