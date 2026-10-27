@@ -19,7 +19,7 @@ export type DiffPanelSelection =
   | { kind: "unstaged" }
   | { kind: "commit"; sha: string; baseRef: string | null }
   | { kind: "commit-range"; from: string; to: string; label: string }
-  | { kind: "submodule"; path: string; from: string; to: string; label: string }
+  | { kind: "submodule"; path: string; from: string; to: string | null; label: string }
   | {
       kind: "turn";
       turnId: RunId;
@@ -55,7 +55,7 @@ interface DiffPanelStoreState {
   ) => void;
   selectSubmodule: (
     ref: ScopedThreadRef,
-    range: { path: string; from: string; to: string; label: string },
+    range: { path: string; from: string; to: string | null; label: string },
   ) => void;
   selectTurn: (ref: ScopedThreadRef, turnId: RunId, filePath?: string) => void;
   selectTurnRepository: (ref: ScopedThreadRef, turnId: RunId, repository: string | null) => void;
