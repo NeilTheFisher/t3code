@@ -20,6 +20,7 @@ import {
   NonNegativeInt,
   ProjectId,
   clampedPositiveInt,
+  ThreadWorkspaceRef,
 } from "@t3tools/contracts";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Schema from "effect/Schema";
@@ -29,11 +30,12 @@ import * as ThreadSearch from "../../../orchestration-v2/ThreadSearch.ts";
 import * as ProviderRegistry from "../../../provider/ProviderRegistry.ts";
 import * as ScheduledTaskService from "../../../scheduledTasks/ScheduledTaskService.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
+import * as ServerSettings from "../../../serverSettings.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 
 const ThreadOrganizeTool = Tool.make("t3_thread_organize", {
   description:
-    "Pin, snooze, settle, archive, or mark a thread unread. Omit `threadId` for this thread. `snooze` needs `snoozedUntil`. Settling this thread applies at turn end. A failed turn or queued message leaves it active.",
+    "Pin, snooze, settle, archive, mark a thread unread, or file it into a workspace. Omit `threadId` for this thread. `snooze` needs `snoozedUntil`. `file` needs `workspace` (id or name); only set `createWorkspace` after the user gives a name. Settling this thread applies at turn end. A failed turn or queued message leaves it active.",
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
     threadId: Schema.optional(ThreadId),
@@ -47,18 +49,25 @@ const ThreadOrganizeTool = Tool.make("t3_thread_organize", {
       "archive",
       "unarchive",
       "mark_unread",
+      "file",
+      "unfile",
     ]),
     snoozedUntil: Schema.optional(IsoDateTime),
+    workspace: Schema.optional(TrimmedNonEmptyString),
+    createWorkspace: Schema.optional(Schema.Boolean),
   }),
   success: Schema.Union([
     OrchestrationV2DispatchCommandResult,
     Schema.Struct({ settlesWhenTurnEnds: Schema.Literal(true) }),
+    Schema.Struct({ threadId: ThreadId, workspace: Schema.NullOr(ThreadWorkspaceRef) }),
   ]),
   failure: OrchestratorMcpFailure,
   failureMode: "return" as const,
   dependencies: [
     McpInvocationContext.McpInvocationContext,
     ThreadManagementService.ThreadManagementService,
+    SecureRandom.SecureRandom,
+    ServerSettings.ServerSettingsService,
     SecureRandom.SecureRandom,
   ],
 })
