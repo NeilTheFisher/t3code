@@ -805,7 +805,7 @@ it.effect.each([
   },
 ])("when a host stops listing a session's device, $case", ({ endsDevices, kept }) =>
   Effect.gen(function* () {
-    const { service, endDevice } = yield* fixture(
+    const { service, endDevice, discoveryErrors } = yield* fixture(
       Effect.void,
       undefined,
       false,
@@ -820,6 +820,11 @@ it.effect.each([
     expect((yield* service.state).sessions.map((session) => session.deviceId)).toEqual([
       "emulator-5554",
     ]);
+    if (!endsDevices) {
+      // A session survives only while its platform's listing is partial, so a
+      // host that can miss a device reports the incomplete listing.
+      yield* Ref.set(discoveryErrors, [{ message: "[android-utils] listing incomplete" }]);
+    }
     endDevice();
     yield* service.list;
     expect((yield* service.state).sessions).toHaveLength(kept);
