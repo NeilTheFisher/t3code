@@ -308,8 +308,7 @@ function parseWorktreeBranchPaths(stdout: string): ReadonlyMap<string, string> {
  */
 function parseWorktreeEntries(
   stdout: string,
-  primaryCwd: string,
-): ReadonlyArray<{ path: string; branch: string | null; head: string; isPrimary: boolean }> {
+): ReadonlyArray<{ path: string; branch: string | null; head: string }> {
   const entries: Array<{ path: string; branch: string | null; head: string }> = [];
   let current: { path: string; branch: string | null; head: string } | null = null;
 
@@ -334,11 +333,7 @@ function parseWorktreeEntries(
   }
   flush();
 
-  const primaryIndex = entries.findIndex((entry) => entry.path === primaryCwd);
-  return entries.map((entry, index) => ({
-    ...entry,
-    isPrimary: primaryIndex === -1 ? index === 0 : primaryIndex === index,
-  }));
+  return entries;
 }
 
 function splitNullSeparatedPaths(input: string, truncated: boolean): string[] {
@@ -4104,12 +4099,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         { allowNonZeroExit: true, maxOutputBytes: 1_000_000 },
       );
       const listedWorktrees =
-        worktreeListResult.exitCode === 0
-          ? parseWorktreeEntries(
-              worktreeListResult.stdout,
-              repositoryPaths.worktreeRoot ?? input.cwd,
-            )
-          : [];
+        worktreeListResult.exitCode === 0 ? parseWorktreeEntries(worktreeListResult.stdout) : [];
       // Bounded so a repository with many checkouts cannot turn one graph read
       // into an unbounded burst of git calls.
       const WORKTREE_STATUS_MAX = 24;
@@ -4126,7 +4116,9 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
               path: entry.path,
               branch: entry.branch,
               head: entry.head,
-              isPrimary: entry.isPrimary,
+              // Git lists the repository's own worktree first.
+              isMain: entry.path === listedWorktrees[0]?.path,
+              isCurrent: entry.path === repositoryPaths.worktreeRoot,
               dirty:
                 status.exitCode === 0 &&
                 status.stdout.split("\n").some((line) => line.trim().length > 0),
