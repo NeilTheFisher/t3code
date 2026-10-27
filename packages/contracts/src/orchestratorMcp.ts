@@ -43,6 +43,7 @@ import {
   OrchestrationV2TurnItemStatus,
 } from "./orchestrationV2.ts";
 import { ProviderOptionSelection, ProviderOptionSelectionValue } from "./model.ts";
+import { ThreadWorkspaceRef } from "./settings.ts";
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 
 const OrchestratorMcpPrompt = TrimmedNonEmptyString.check(Schema.isMaxLength(120_000));
@@ -424,6 +425,7 @@ export const OrchestratorMcpThreadListItem = Schema.Struct({
   relationshipToParent: Schema.NullOr(Schema.Literals(["fork", "subagent"])),
   /** The linked environment's thread that delegated this one; absent otherwise. */
   delegatedFrom: Schema.optional(OrchestrationV2DelegatedFrom),
+  workspace: Schema.NullOr(ThreadWorkspaceRef),
   itemCount: NonNegativeInt,
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
