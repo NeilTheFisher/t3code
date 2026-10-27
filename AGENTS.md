@@ -15,10 +15,14 @@ You can think of T3 Code as an open source "bring-your-own-subscription" alterna
   and expanding the work-log file-change row must render the patch. Keep the projection and client
   regression tests, including an absolute workspace path. Inline previews must hide redundant tool
   input, preserve the global line-wrap preference, and keep full-context regions expandable.
+- Middle-clicking a sidebar thread row marks that thread unread, and a middle click on a nested link
+  still opens the link in a background tab. The gesture is the row's own (`sidebar/SidebarThreadRow.tsx`
+  `onAuxClick`/`onMouseDown` + an `onMarkUnread` prop from `Sidebar.tsx`), and the row is re-created by
+  upstream component splits, so keep `sidebar/markUnreadMiddleClick.test.ts` green.
 - After every upstream rebase, follow the parent setup repository's required dependency install,
   build, web/server test, and scoped web-check workflow. Then smoke-test inline diffs in the
   controlled browser with: `make an edit to the readme. I'm testing the file edit tool... make an
-improvement to it if you see one while you're at it`.
+  improvement to it if you see one while you're at it`.
 - Verify inactive threads can settle unless an approval or user-input request is pending, or their
   provider session is starting or running.
 
