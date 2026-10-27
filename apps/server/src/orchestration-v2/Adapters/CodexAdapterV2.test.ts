@@ -7670,9 +7670,9 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         assert.lengthOf(fileChanges, 1);
         assert.equal(fileChanges[0]?.fileName, "/w/c.ts");
         assert.deepEqual(fileChanges[0]?.changes, [
-          { operation: "update", path: "/w/d.ts", oldPath: "/w/c.ts" },
-          { operation: "delete", path: "/w/e.ts" },
-          { operation: "add", path: "/w/a.ts" },
+          { operation: "update", path: "/w/d.ts", oldPath: "/w/c.ts", patch: "@@" },
+          { operation: "delete", path: "/w/e.ts", patch: "gone" },
+          { operation: "add", path: "/w/a.ts", patch: "export {};" },
         ]);
       }).pipe(
         Effect.scoped,

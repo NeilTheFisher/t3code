@@ -1558,20 +1558,29 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
 
         const clean = yield* driver.logGraph({ cwd, includeRemotes: false });
         assert.equal(clean.worktrees?.length, 2);
-        const primary = clean.worktrees?.find((worktree) => worktree.isPrimary);
-        const linked = clean.worktrees?.find((worktree) => !worktree.isPrimary);
-        assert.equal(primary?.path, cwd);
-        assert.equal(primary?.branch, primaryBranch);
+        const main = clean.worktrees?.find((worktree) => worktree.isMain);
+        const linked = clean.worktrees?.find((worktree) => !worktree.isMain);
+        assert.equal(main?.path, cwd);
+        assert.equal(main?.branch, primaryBranch);
+        assert.isTrue(main?.isCurrent);
         assert.equal(linked?.path, linkedPath);
         assert.equal(linked?.branch, "feature/linked");
-        assert.isFalse(primary?.dirty);
+        assert.isFalse(linked?.isCurrent);
+        assert.isFalse(main?.dirty);
         assert.isFalse(linked?.dirty);
+
+        // Opening the graph from the linked checkout changes only which checkout
+        // is current: the refs and commits are the same repository-wide.
+        const fromLinked = yield* driver.logGraph({ cwd: linkedPath, includeRemotes: false });
+        assert.equal(fromLinked.currentBranch, "feature/linked");
+        assert.equal(fromLinked.worktrees?.find((worktree) => worktree.isCurrent)?.path, linkedPath);
+        assert.equal(fromLinked.worktrees?.find((worktree) => worktree.isMain)?.path, cwd);
 
         // Uncommitted work marks only the checkout that holds it.
         yield* writeTextFile(linkedPath, "README.md", "# test\n\nchanged\n");
         const dirty = yield* driver.logGraph({ cwd, includeRemotes: false });
-        assert.isTrue(dirty.worktrees?.find((worktree) => !worktree.isPrimary)?.dirty);
-        assert.isFalse(dirty.worktrees?.find((worktree) => worktree.isPrimary)?.dirty);
+        assert.isTrue(dirty.worktrees?.find((worktree) => !worktree.isMain)?.dirty);
+        assert.isFalse(dirty.worktrees?.find((worktree) => worktree.isMain)?.dirty);
       }),
     );
   });
@@ -2580,6 +2589,8 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
           "--no-textconv",
           "--src-prefix=a/",
           "--dst-prefix=b/",
+          // Review previews carry full-file context; the client collapses it.
+          "--unified=999999",
           "HEAD",
           "--",
         ]);

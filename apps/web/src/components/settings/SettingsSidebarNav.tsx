@@ -9,7 +9,6 @@ import {
 } from "react";
 import {
   ArchiveIcon,
-  FlaskConicalIcon,
   BotIcon,
   createLucideIcon,
   CalendarClockIcon,
@@ -23,7 +22,6 @@ import {
   PanelsTopLeftIcon,
   KeyboardIcon,
   PaletteIcon,
-  HardDriveIcon,
   FlaskConicalIcon,
   Mic2Icon,
   SearchIcon,
@@ -108,10 +106,7 @@ const SETTINGS_SECTION_ICONS: Readonly<
   "/settings/maintenance": WrenchIcon,
   "/settings/labs": FlaskConicalIcon,
   "/settings/about": InfoIcon,
-  "/settings/storage": HardDriveIcon,
-  "/settings/beta": FlaskConicalIcon,
   "/settings/voice": Mic2Icon,
-  "/settings/beta": FlaskConicalIcon,
   "/settings/archived": ArchiveIcon,
 };
 

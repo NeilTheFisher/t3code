@@ -14,29 +14,14 @@ import {
   type SidebarProjectGroupingMode,
 } from "@t3tools/contracts";
 import {
-  DEFAULT_TTS_SERVER_URL,
+  DEFAULT_SERVER_SETTINGS,
   DEFAULT_TTS_VOICE,
   DEFAULT_UNIFIED_SETTINGS,
-  DEFAULT_SERVER_SETTINGS,
   type DiffLayout,
-  type EnvironmentIdentificationMode,
-  MAX_APPEARANCE_CONTRAST,
-  MAX_CODE_FONT_SIZE,
-  MAX_GLASS_OPACITY,
-  MAX_INTERFACE_FONT_SIZE,
-  MAX_PANEL_ANIMATION_DURATION_MS,
-  MAX_PROMPT_FONT_SIZE,
   MAX_SIDEBAR_AUTO_SETTLE_AFTER_DAYS,
-  MAX_TERMINAL_FONT_SIZE,
-  MIN_APPEARANCE_CONTRAST,
-  MIN_CODE_FONT_SIZE,
-  MIN_GLASS_OPACITY,
-  MIN_INTERFACE_FONT_SIZE,
-  MIN_PANEL_ANIMATION_DURATION_MS,
-  MIN_PROMPT_FONT_SIZE,
   MIN_SIDEBAR_AUTO_SETTLE_AFTER_DAYS,
-  type ResponseStreamingMode,
   type QuitConfirmationMode,
+  type ResponseStreamingMode,
   SidebarProjectSortOrder,
 } from "@t3tools/contracts/settings";
 import { desktopUpdateChannelOf } from "@t3tools/shared/cliRelease";
@@ -134,12 +119,6 @@ const RESPONSE_STREAMING_MODE_LABELS: Record<ResponseStreamingMode, string> = {
 const RESPONSE_STREAMING_MODE_DESCRIPTIONS: Record<ResponseStreamingMode, string> = {
   turn: "Text appears once the agent finishes its turn.",
   paragraph: "Each paragraph or code block appears as soon as it is complete.",
-};
-
-const CHAT_WIDTH_LABELS: Record<ChatWidth, string> = {
-  comfortable: "Comfortable",
-  wide: "Wide",
-  full: "Full width",
 };
 
 const SIDEBAR_PROJECT_SORT_ORDER_LABELS: Record<SidebarProjectSortOrder, string> = {
@@ -467,6 +446,12 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.mathRenderingEnabled !== DEFAULT_UNIFIED_SETTINGS.mathRenderingEnabled
       ? ["Render math"]
       : []),
+    ...(settings.sidebarProjectIconColors !== DEFAULT_UNIFIED_SETTINGS.sidebarProjectIconColors
+      ? ["Colored project icons"]
+      : []),
+    ...(settings.redesignEnabled !== DEFAULT_UNIFIED_SETTINGS.redesignEnabled
+      ? ["New design"]
+      : []),
     ...(settings.panelAnimationDurationMs !== DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs
       ? ["Panel animations"]
       : []),
@@ -482,6 +467,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       : []),
     ...(settings.inAppNotificationsEnabled !== DEFAULT_UNIFIED_SETTINGS.inAppNotificationsEnabled
       ? ["In-app notifications"]
+      : []),
+    ...(settings.sidebarThreadPreviewCount !== DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount
+      ? ["Visible threads"]
       : []),
     ...(settings.sidebarProjectGroupingMode !== DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode
       ? ["Project Grouping"]
@@ -517,6 +505,10 @@ export function useSettingsRestore(onRestored?: () => void) {
       ? ["Composer context"]
       : []),
     ...getChangedTypographySettingLabels(settings),
+    ...(settings.showProviderUsageInContextPopover !==
+    DEFAULT_UNIFIED_SETTINGS.showProviderUsageInContextPopover
+      ? ["Provider usage in chat"]
+      : []),
     ...(settings.diffFilesCollapsed !== DEFAULT_UNIFIED_SETTINGS.diffFilesCollapsed
       ? ["Default diff file state"]
       : []),
@@ -529,6 +521,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       : []),
     ...(settings.showSkillsInSlashMenu !== DEFAULT_UNIFIED_SETTINGS.showSkillsInSlashMenu
       ? ["Show skills in slash menu"]
+      : []),
+    ...(settings.composerCollapseOnScroll !== DEFAULT_UNIFIED_SETTINGS.composerCollapseOnScroll
+      ? ["Collapse composer on scroll"]
       : []),
     ...(settings.composerRichTextEnabled !== DEFAULT_UNIFIED_SETTINGS.composerRichTextEnabled
       ? ["Rich text composer"]
@@ -806,6 +801,9 @@ export function GeneralSettingsPanel() {
               checked={settings.inAppNotificationsEnabled}
               onCheckedChange={(checked) => updateSettings({ inAppNotificationsEnabled: checked })}
               aria-label="In-app notifications"
+            />
+          }
+        />
         <SettingsRow
           serverScoped
           settingKeys={["sidebarThreadWorkspacesEnabled"]}
@@ -833,7 +831,6 @@ export function GeneralSettingsPanel() {
                 updateSettings({ sidebarThreadWorkspacesEnabled: Boolean(checked) })
               }
               aria-label="Thread workspaces"
-        />
             />
           }
         />

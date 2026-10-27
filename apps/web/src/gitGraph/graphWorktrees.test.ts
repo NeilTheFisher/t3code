@@ -2,7 +2,9 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { graphWorktrees } from "./graphWorktrees";
 
-const checkout = (overrides: Partial<Parameters<typeof graphWorktrees>[0]>[number]) => ({
+const checkout = (
+  overrides: Partial<NonNullable<Parameters<typeof graphWorktrees>[0]>[number]>,
+) => ({
   path: "/repos/example",
   branch: "main",
   head: "abc1234",

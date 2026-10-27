@@ -5,7 +5,11 @@ import {
 } from "@t3tools/contracts";
 import { memo } from "react";
 import { CheckIcon, StarIcon } from "lucide-react";
-import { getDisplayModelName, getProviderRowLabel } from "./providerIconUtils";
+import {
+  getDisplayModelName,
+  getProviderRowLabel,
+  getTriggerDisplayModelName,
+} from "./providerIconUtils";
 import { ComboboxItem } from "../ui/combobox";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
@@ -20,6 +24,7 @@ export const ModelListRow = memo(function ModelListRow(props: {
   index: number;
   slug: string;
   name: string;
+  shortName?: string | undefined;
   subProvider?: string | undefined;
   instanceId: ProviderInstanceId;
   driverKind: ProviderDriverKind;
@@ -29,7 +34,10 @@ export const ModelListRow = memo(function ModelListRow(props: {
   acpRegistryIconUrl?: string | undefined;
   isFavorite: boolean;
   isSelected: boolean;
+  showSelection?: boolean;
   showProvider: boolean;
+  preferShortName?: boolean;
+  useTriggerLabel?: boolean;
   showNewBadge?: boolean;
   unavailable?: boolean;
   jumpLabel?: string | null;
@@ -50,7 +58,7 @@ export const ModelListRow = memo(function ModelListRow(props: {
       <div className="flex min-w-0 items-center gap-2">
         <div className="min-w-0 truncate text-xs font-medium leading-snug">
           {props.useTriggerLabel
-            ? getTriggerDisplayModelLabel(model)
+            ? getTriggerDisplayModelName(model, props.driverKind)
             : getDisplayModelName(
                 model,
                 props.preferShortName ? { preferShortName: true } : undefined,
