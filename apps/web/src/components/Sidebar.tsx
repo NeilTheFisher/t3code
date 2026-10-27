@@ -211,7 +211,7 @@ import {
   type SidebarSection,
   resolveSidebarRowThreadId,
 } from "./Sidebar.logic";
-import { isSidebarSubagentThread } from "./Sidebar.logic";
+import { isSidebarHiddenThread } from "./Sidebar.logic";
 import {
   createSidebarCollisionDetection,
   createSidebarSortingStrategy,
@@ -444,7 +444,7 @@ function useSidebarThreads(input: {
   readonly folderGroups: readonly SidebarProjectSnapshot[] | null;
   // Keeps folders with no active threads, so a project the user filtered to or pinned can start one.
   readonly keepEmptyFolders: (group: SidebarProjectSnapshot) => boolean;
-  readonly workspaceFilter: WorkspaceFilter | null;
+  readonly workspaceFilter: ThreadWorkspaceFilter | null;
 }) {
   const {
     projectScopeKey,
@@ -725,8 +725,8 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
   const sortedSettled = sortSettledThreads(settled);
   return {
     pinnedThreads: filterThreadsByWorkspace(orderedPinned, input.workspaceFilter),
-    draggableThreadKeys: draggable,
-    activeReorderableThreadKeys: activeReorderable,
+    draggableThreadKeys,
+    activeReorderableThreadKeys,
     activeThreads: filterThreadsByWorkspace(orderedActive, input.workspaceFilter),
     workingThreads: filterThreadsByWorkspace(sortedWorking, input.workspaceFilter),
     snoozedThreads: filterThreadsByWorkspace(sortedSnoozed, input.workspaceFilter),
@@ -1375,7 +1375,6 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     orderedThreadKeys,
     threadByKey,
     settledThreadKeys,
-    searchableSettledKeys,
     snoozedThreadKeys,
     sectionByThreadKey,
     pinnedKeys,
@@ -1403,7 +1402,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   });
 
   const workspaceAttention = countThreadWorkspaceAttention(
-    threads.filter((thread) => thread.archivedAt === null && !isSidebarSubagentThread(thread)),
+    threads.filter((thread) => thread.archivedAt === null && !isSidebarHiddenThread(thread)),
     workspaceFilter,
     threadNeedsWorkspaceAttention,
   );
@@ -3464,7 +3463,6 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                     contextDragKeyRef.current = String(event.active.id);
                   }}
                 >
-
                   <ul
                     ref={searchResultsListRef}
                     id="sidebar-thread-search-results"
@@ -3492,36 +3490,39 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                           ) : null}
                           <SidebarSearchResultRow
                             isSettled={settledThreadKeys.has(threadKey)}
-                          thread={thread}
-                          project={
-                            projectByKey.get(`${thread.environmentId}:${thread.projectId}`) ?? null
-                          }
-                          projectDisplayName={
-                            projectDisplayNameByKey.get(
-                              `${thread.environmentId}:${thread.projectId}`,
-                            ) ?? null
-                          }
-                          environmentLabel={environmentLabelById.get(thread.environmentId) ?? null}
-                          environmentMachine={
-                            environmentMachineById.get(thread.environmentId) ?? "server"
-                          }
-                          providerEntryByInstanceId={
-                            providerEntriesByEnvironment.get(thread.environmentId) ??
-                            EMPTY_PROVIDER_ENTRIES
-                          }
-                          isHighlighted={activeSearchResultIndex === index}
-                          isRouteActive={routeRowThreadKey === threadKey}
-                          resultId={threadSearchResultId(index)}
-                          searchMatch={
-                            threadSearchMatchByKey.get(
-                              threadSearchMatchKey({
-                                environmentId: thread.environmentId,
-                                threadId: thread.id,
-                              }),
-                            ) ?? null
-                          }
-                          searchQuery={threadSearchQuery}
-                          searchMatchQuery={threadSearch.query}
+                            thread={thread}
+                            project={
+                              projectByKey.get(`${thread.environmentId}:${thread.projectId}`) ??
+                              null
+                            }
+                            projectDisplayName={
+                              projectDisplayNameByKey.get(
+                                `${thread.environmentId}:${thread.projectId}`,
+                              ) ?? null
+                            }
+                            environmentLabel={
+                              environmentLabelById.get(thread.environmentId) ?? null
+                            }
+                            environmentMachine={
+                              environmentMachineById.get(thread.environmentId) ?? "server"
+                            }
+                            providerEntryByInstanceId={
+                              providerEntriesByEnvironment.get(thread.environmentId) ??
+                              EMPTY_PROVIDER_ENTRIES
+                            }
+                            isHighlighted={activeSearchResultIndex === index}
+                            isRouteActive={routeRowThreadKey === threadKey}
+                            resultId={threadSearchResultId(index)}
+                            searchMatch={
+                              threadSearchMatchByKey.get(
+                                threadSearchMatchKey({
+                                  environmentId: thread.environmentId,
+                                  threadId: thread.id,
+                                }),
+                              ) ?? null
+                            }
+                            searchQuery={threadSearchQuery}
+                            searchMatchQuery={threadSearch.query}
                             onDragStart={(event) =>
                               startSearchRowDrag(event, threadKey, thread.title)
                             }
@@ -3692,6 +3693,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                             onUnsnooze={attemptUnsnooze}
                             onUnpin={attemptUnpin}
                             onAcknowledgeWoke={acknowledgeWoke}
+                            onMarkUnread={markThreadUnread}
                             onFileDropThreads={handleThreadFileDrop}
                           />
                         );
