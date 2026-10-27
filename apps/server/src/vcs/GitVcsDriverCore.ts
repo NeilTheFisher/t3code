@@ -307,11 +307,8 @@ function parseWorktreeBranchPaths(stdout: string): ReadonlyMap<string, string> {
 }
 
 /**
- * `git worktree list --porcelain -z` reports one record per checkout, fields
- * NUL-separated and records ended by an empty field. The ref is either
- * `branch refs/heads/<name>` or `detached`, and the primary checkout is the one
- * whose path is the requested repository root (git lists it first, which is the
- * fallback for a bare or pruned layout).
+ * `git worktree list --porcelain -z` fields are NUL-separated per checkout; the
+ * primary checkout is the one whose path is the requested repository root.
  */
 function parseWorktreeEntries(
   stdout: string,
@@ -3517,12 +3514,6 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       };
     }
 
-    const dirtyRef = sourceKind === "branch-range" ? null : "HEAD";
-    const review =
-      sourceKind === "working-tree"
-        ? { baseRef: input.baseRef ?? null, mergeBase: null }
-        : yield* resolveReviewMergeBase(cwd, repository.currentBranch, input.baseRef);
-
     const diffArgs = [
       ...REVIEW_DIFF_ARGS,
       "--minimal",
@@ -3530,9 +3521,8 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     ];
 
     if (input.submodule) {
-      // A submodule's commits live in its own repository, so this reads that
-      // work tree instead of the parent one. Both ends must already be present
-      // locally, which a fetch that recorded the gitlink guarantees.
+      // A submodule's commits live in its own repository, so this reads that work
+      // tree; without a `to` revision it compares `from` to the working tree.
       const { path: submodulePath, from, to } = input.submodule;
       const submoduleCwd = path.join(cwd, submodulePath);
       // A missing directory cannot even spawn git, so every failure here means
@@ -3552,10 +3542,15 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           exitCode: isWorkTree?.exitCode ?? 1,
         });
       }
+      const revisions = to === undefined ? [from] : [from, to];
+      const compared =
+        to === undefined
+          ? shortRevisionForDisplay(from)
+          : `${shortRevisionForDisplay(from)}..${shortRevisionForDisplay(to)}`;
       const stat = yield* executeGit(
         "GitVcsDriver.getReviewDiffPreview.submodule.stat",
         submoduleCwd,
-        [...diffArgs, "--numstat", "-z", from, to],
+        [...diffArgs, "--numstat", "-z", ...revisions],
         { allowNonZeroExit: true, maxOutputBytes: REVIEW_METADATA_MAX_OUTPUT_BYTES },
       );
       if (stat.exitCode !== 0) {
@@ -3563,7 +3558,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           operation: "GitVcsDriver.getReviewDiffPreview.submodule",
           cwd: submoduleCwd,
           command: "git diff --numstat",
-          detail: `Could not compare ${submodulePath} between ${shortRevisionForDisplay(from)} and ${shortRevisionForDisplay(to)}; the submodule commits may not be present locally.`,
+          detail: `Could not compare ${submodulePath} at ${compared}; the submodule commits may not be present locally.`,
           exitCode: stat.exitCode,
         });
       }
@@ -3574,7 +3569,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           : yield* executeGit(
               "GitVcsDriver.getReviewDiffPreview.submodule.patch",
               submoduleCwd,
-              [...diffArgs, "--patch", from, to],
+              [...diffArgs, "--patch", ...revisions],
               { allowNonZeroExit: true, maxOutputBytes: patchLimit, appendTruncationMarker: true },
             );
       return {
@@ -3584,9 +3579,9 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           {
             id: "submodule-range",
             kind: "submodule-range" as const,
-            title: `${submodulePath} ${shortRevisionForDisplay(from)}..${shortRevisionForDisplay(to)}`,
+            title: `${submodulePath} ${compared}`,
             baseRef: from,
-            headRef: to,
+            headRef: to ?? null,
             diff: patch.stdout,
             files: submoduleFiles,
             diffHash: yield* hashDiff(patch.stdout, submoduleFiles),
@@ -3647,9 +3642,9 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       };
     }
 
-    const dirtyRef = input.file?.sourceKind === "branch-range" ? null : "HEAD";
+    const dirtyRef = sourceKind === "branch-range" ? null : "HEAD";
     const review =
-      input.file?.sourceKind === "working-tree"
+      sourceKind === "working-tree"
         ? { baseRef: input.baseRef ?? null, mergeBase: null }
         : yield* resolveReviewMergeBase(cwd, repository.currentBranch, input.baseRef);
 
@@ -3916,13 +3911,16 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     }
     if (input.sourceKind === "submodule-range") {
       const submodulePath = input.submodulePath;
-      if (submodulePath === undefined || input.baseRef === null || input.headRef === null) {
+      if (submodulePath === undefined || input.baseRef === null) {
         return yield* reviewDiffFileError(
           input,
           "A submodule range needs the submodule path, not just its revisions.",
         );
       }
-      const submoduleInput = { ...input, cwd: path.join(input.cwd, submodulePath) };
+      const submoduleCwd = path.join(input.cwd, submodulePath);
+      const submoduleInput = { ...input, cwd: submoduleCwd };
+      // A null head is the submodule's working tree, so the new side is read from
+      // disk inside the submodule rather than from a revision.
       const [oldContents, newContents] = yield* Effect.all(
         [
           input.changeType === "new"
@@ -3930,7 +3928,9 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
             : readReviewFileAtRevision(submoduleInput, input.baseRef, input.oldPath),
           input.changeType === "deleted"
             ? Effect.succeed("")
-            : readReviewFileAtRevision(submoduleInput, input.headRef, input.newPath),
+            : input.headRef === null
+              ? readWorkingTreeReviewFile(submoduleInput, submoduleCwd)
+              : readReviewFileAtRevision(submoduleInput, input.headRef, input.newPath),
         ],
         { concurrency: 2 },
       );
