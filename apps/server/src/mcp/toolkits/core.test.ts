@@ -83,6 +83,11 @@ const layerThreadToolkit = McpHttpServer.layerThreadToolkit.pipe(
   Layer.provide(Layer.mock(PeerForwarding.PeerForwarding)({})),
   Layer.provide(Layer.mock(PeerLinkRequests.PeerLinkRequests)({})),
   Layer.provide(Layer.mock(PeerLinks.PeerLinks)({})),
+  Layer.provide(
+    Layer.mock(ServerSettings.ServerSettingsService)({
+      getSettings: Effect.succeed(DEFAULT_SERVER_SETTINGS),
+    }),
+  ),
 );
 
 const threadId = ThreadId.make("mcp-core-thread");
@@ -804,6 +809,7 @@ it.effect.each([
         Layer.provide(Layer.mock(PeerForwarding.PeerForwarding)({})),
         Layer.provide(Layer.mock(PeerLinkRequests.PeerLinkRequests)({})),
         Layer.provide(Layer.mock(PeerLinks.PeerLinks)({})),
+        Layer.provide(ServerSettings.layerTest()),
         Layer.provide(
           Layer.mock(ScheduledTaskService.ScheduledTaskService)({
             list: () => Effect.succeed({ tasks }),
