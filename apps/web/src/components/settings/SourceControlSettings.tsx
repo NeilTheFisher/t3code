@@ -132,16 +132,6 @@ function itemStatusDot(item: VcsDiscoveryItem | SourceControlProviderDiscoveryIt
   return "bg-success";
 }
 
-function sourceControlItemIcon(
-  item: VcsDiscoveryItem | SourceControlProviderDiscoveryItem,
-): ReactNode {
-  const host = isProviderDiscoveryItem(item) ? sourceControlClients.find(item.kind) : undefined;
-  const Icon = isProviderDiscoveryItem(item)
-    ? host && sourceControlIcon(host)
-    : VCS_ICONS[item.kind];
-  return Icon ? <Icon className="size-4.5 text-foreground/80" aria-hidden /> : null;
-}
-
 function SourceControlItemMark({
   item,
 }: {

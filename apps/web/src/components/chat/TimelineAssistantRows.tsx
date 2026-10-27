@@ -496,6 +496,7 @@ export function SpokenTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "
   const id = MessageId.make(`spoken:${row.id}`);
   const isActive = status !== "idle" && playingId === id;
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Autoplay enqueues narration when a completed message appears.
   useEffect(() => {
     if (!tts.enabled || tts.autoplay === false) return;
     enqueueSpoken(
@@ -506,6 +507,7 @@ export function SpokenTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "
   }, [
     row.id,
     row.speak.text,
+    row.speak.speed,
     row.speak.interrupt,
     tts.enabled,
     tts.autoplay,

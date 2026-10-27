@@ -13,9 +13,6 @@ function sliceSearchText(value: string) {
   return value.slice(0, splitsSurrogatePair(value, 200) ? 199 : 200);
 }
 
-const pullRequestListEntryId = (target: Parameters<typeof pullRequestSurfaceId>[0]) =>
-  pullRequestSurfaceId({ ...target, repository: target.repository.toLowerCase() });
-
 function pullRequestSearchLabels(raw: unknown): PullRequestsSearch["labels"] {
   const values = (Array.isArray(raw) ? raw : typeof raw === "string" ? [raw] : []).slice(
     0,

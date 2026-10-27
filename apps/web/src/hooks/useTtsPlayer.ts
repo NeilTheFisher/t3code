@@ -1,12 +1,9 @@
 /**
- * Module-level singleton TTS player built on WebAudio: streaming PCM chunks
- * from the on-demand Kokoro endpoint are decoded and scheduled back-to-back,
- * so playback starts before the whole message is synthesized. One shared
- * AudioContext + gain node survive row unmounts and thread navigation, and a
- * new play supersedes the current one. Status mirrors into
- * `useAudioPlayerStore`, which the global mini-player also renders from.
+ * Module-level TTS player on WebAudio: streaming PCM chunks are scheduled
+ * back-to-back so playback starts before synthesis finishes. One AudioContext
+ * survives unmounts and navigation; status mirrors into `useAudioPlayerStore`.
  */
-import { useCallback } from "react";
+
 import { type MessageId, type ScopedThreadRef } from "@t3tools/contracts";
 import { useClientSettings } from "./useSettings";
 import { useAudioPlayerStore } from "~/audioPlayerStore";
@@ -263,11 +260,9 @@ export function togglePausePlayback(): void {
 }
 
 /**
- * Rebuild the schedule from the chunk timeline anchored so that message-time
- * `head` is "now". Shared by seek and skip. Playback rate is synthesis-side
- * (the server speeds the voice, pitch intact), so all buffers play at 1x and
- * message-time equals context-time.
- * Returns the message-time the reschedule started from (clamped to buffer).
+ * Rebuild the schedule anchored so message-time `head` is "now". Shared by seek
+ * and skip. Rate is synthesis-side, so buffers play at 1x and message-time
+ * equals context-time.
  */
 function rescheduleAt(head: number): number {
   const e = engine;
@@ -346,11 +341,8 @@ export function setPlaybackVolume(position: number): void {
 }
 
 /**
- * Change synthesis speed. Pitch is preserved because speed is synthesis-side,
- * so a mid-playback change cannot ride on the already-generated audio: while a
- * narration is active it drops the current unit and the unplayed tail and
- * re-synthesizes them at the new rate (see `handleRateChange` in
- * `startPlayback`).
+ * Change synthesis speed. Speed is synthesis-side, so during playback the
+ * current unit and unplayed tail are re-synthesized at the new rate.
  */
 export function setPlaybackRate(rate: number): void {
   if (applyRateChange !== null) {
@@ -543,12 +535,9 @@ export async function startPlayback(
   };
 
   /**
-   * Synthesize spoken units from `fromIndex` onward at the current rate, one
-   * request at a time. Units are sentence-sized, so each request returns its
-   * audio quickly and playback starts after the first one. Each call owns its
-   * AbortController, so a speed change can abort the running worker and start a
-   * fresh one without the old stream appending stale chunks. Synthesis runs
-   * through the whole message eagerly so any paragraph is seekable.
+   * Synthesize units from `fromIndex` onward, one request at a time, eagerly so
+   * any paragraph is seekable. Each call owns its AbortController, so a speed
+   * change can replace the worker without stale chunks.
    */
   const runSynthesis = (fromIndex: number, owner = new AbortController()): Promise<void> => {
     abortController = owner;
@@ -605,11 +594,8 @@ export async function startPlayback(
   };
 
   /**
-   * Apply a speed change to the active narration. Pitch is preserved by
-   * synthesizing at the new speed, so already-generated audio cannot be reused:
-   * keep every unit that has fully played, drop the unit under the head and the
-   * unplayed tail, and re-synthesize them at `rate`. Units are sentence-sized,
-   * so the change lands within about one request's latency.
+   * Apply a speed change: keep fully played units, re-synthesize the unit under
+   * the head and the unplayed tail at `rate` (speed is synthesis-side).
    */
   const handleRateChange = (rate: number): void => {
     e.rate = rate;
@@ -673,11 +659,8 @@ export async function startPlayback(
 export function useTtsPlayer() {
   const tts = useClientSettings((s) => s.tts);
 
-  const play = useCallback(
-    (id: MessageId, text: string, threadRef: ScopedThreadRef | null) =>
-      startPlayback(id, text, threadRef, { voice: tts.voice, serverUrl: tts.serverUrl }),
-    [tts.voice, tts.serverUrl],
-  );
+  const play = (id: MessageId, text: string, threadRef: ScopedThreadRef | null) =>
+    startPlayback(id, text, threadRef, { voice: tts.voice, serverUrl: tts.serverUrl });
 
   return {
     play,
