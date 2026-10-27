@@ -114,8 +114,9 @@ includes:
   context and usage limits, and improved OpenCode skill/session support.
 - File, diff, preview, and terminal improvements including binary-safe diffs, focused expandable
   sidebar diffs, workspace and external image previews, an embedded web surface, and terminal paste.
-- Attention and status improvements including background-task waiting state, retention of important
-  and recent threads, dismissible errors, and reliable settling of inactive threads.
+- Attention and status improvements including background-task waiting state, middle-click a thread
+  row to mark it unread, retention of important and recent threads, dismissible errors, and reliable
+  settling of inactive threads.
 
 These capability groups are rebase invariants, not an exhaustive changelog. See
 [AGENTS.md](./AGENTS.md#fork-rebase-invariants) for the checks required after updating from

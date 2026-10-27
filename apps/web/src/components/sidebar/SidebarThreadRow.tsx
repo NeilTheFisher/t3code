@@ -81,6 +81,7 @@ import {
   type SidebarDropVerb,
   resolveSidebarThreadStatus,
   resolveThreadLastVisitedAt,
+  isSidebarRowMarkUnreadGesture,
   shouldRecedeSidebarThread,
   resolveWorkingStartedAt,
   useRetainedValue,
@@ -584,6 +585,7 @@ type SidebarThreadRowProps = {
   onUnsnooze: (threadRef: ScopedThreadRef) => void;
   onUnpin: (threadRef: ScopedThreadRef) => void;
   onAcknowledgeWoke: (threadRef: ScopedThreadRef, visitedAt: string) => void;
+  onMarkUnread: (threadRef: ScopedThreadRef) => void;
   onFileDropThreads?: ((threadRef: ScopedThreadRef, files: File[]) => void) | undefined;
 };
 
@@ -636,6 +638,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     onContextMenu,
     onAcknowledgeWoke,
     onFileDropThreads,
+    onMarkUnread,
     onRenameTitleChange,
     onSettle,
     onActionSweepStart,
@@ -846,6 +849,18 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     if (event.key !== "Enter" && event.key !== " ") return;
     event.preventDefault();
     onThreadActivate(threadRef);
+  };
+  // Middle click is the row's mark-unread gesture, so it never starts the
+  // browser's middle-click autoscroll.
+  const handleRowMouseDown = (event: ReactMouseEvent) => {
+    if (event.button !== 1) return;
+    event.preventDefault();
+  };
+  const handleRowAuxClick = (event: ReactMouseEvent) => {
+    if (!isSidebarRowMarkUnreadGesture(event.button, event.target)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onMarkUnread(threadRef);
   };
   const handleDoubleClick = (event: ReactMouseEvent) => {
     if (
@@ -1121,6 +1136,167 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       />
     )
   ) : null;
+
+  if (variant === "slim") {
+    return (
+      <li
+        data-thread-item={threadKey}
+        {...sortableRootProps}
+        {...(fileDropHandlers ?? {})}
+        className={cn(
+          "list-none [content-visibility:auto] [contain-intrinsic-size:auto_36px]",
+          sortable?.isDragging && "relative z-20",
+        )}
+      >
+        <Tooltip disabled={sortable?.isDragging}>
+          <TooltipTrigger
+            render={
+              <div
+                ref={rowRef}
+                role="button"
+                tabIndex={0}
+                aria-label={accessibility.label}
+                aria-current={accessibility.current}
+                data-testid="sidebar-row-slim"
+                aria-busy={isRegeneratingTitle || undefined}
+                className={cn(rowSurfaceClassName, "flex h-9 items-center gap-2.5 px-2.5")}
+                onClick={handleClick}
+                onDoubleClick={handleDoubleClick}
+                onKeyDown={handleKeyDown}
+                onContextMenu={handleContextMenu}
+                onMouseDown={handleRowMouseDown}
+                onAuxClick={handleRowAuxClick}
+              />
+            }
+          >
+            {accessibleTitle}
+            <span
+              className={cn(
+                "flex shrink-0 items-center transition-opacity",
+                (!props.isActive || variantAction === "unsettle") &&
+                  "opacity-40 grayscale group-focus-within/sidebar-row:opacity-100 group-focus-within/sidebar-row:grayscale-0 group-hover/sidebar-row:opacity-100 group-hover/sidebar-row:grayscale-0",
+              )}
+            >
+              {props.project ? <ProjectFavicon project={props.project} className="size-4" /> : null}
+            </span>
+            {draftIndicator}
+            {title}
+            {pinIndicator}
+            {terminalStatusIcon}
+            {isRegeneratingTitle ? (
+              <span role="status" className="sr-only">
+                Regenerating title
+              </span>
+            ) : null}
+            {sortable?.isDragging ? (
+              dragDestination
+            ) : (
+              <span
+                className={cn(
+                  "relative ml-auto flex h-6 min-w-8 shrink-0 items-center justify-end",
+                  props.sweepAction !== null && "hidden",
+                )}
+              >
+                <span
+                  className={cn(
+                    "inline-flex justify-end tabular-nums text-secondary-label transition-opacity",
+                    !isWoke && "group-any-hover/sidebar-row:opacity-0",
+                  )}
+                >
+                  {variantAction === "unsnooze" && props.snoozeWakeLabelText !== null ? (
+                    <span className="inline-flex items-center gap-1 text-xs text-info-foreground tabular-nums">
+                      {/* The clock tells a wake time from an age at a glance. */}
+                      <AlarmClockIcon aria-hidden className="size-3" />
+                      {props.snoozeWakeLabelText}
+                    </span>
+                  ) : isWoke ? (
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <button
+                            type="button"
+                            aria-label="Dismiss Woke notification"
+                            onClick={handleAcknowledgeWokeClick}
+                            className="inline-flex cursor-pointer items-center gap-1 rounded-sm text-xs font-medium text-warning-foreground outline-none hover:underline focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                          >
+                            <AlarmClockIcon aria-hidden className="size-3" />
+                            <span role="status">Woke</span>
+                          </button>
+                        }
+                      />
+                      <TooltipPopup side="top">Dismiss Woke notification</TooltipPopup>
+                    </Tooltip>
+                  ) : (
+                    <span className="text-xs">
+                      <RelativeTimeLabel
+                        timestamp={
+                          variantAction === "unsettle"
+                            ? resolveSettledThreadTimestamp(thread)
+                            : threadTimeTimestamp(thread)
+                        }
+                      />
+                    </span>
+                  )}
+                </span>
+                {variantAction === "unsnooze" ? (
+                  !props.snoozeSupported ? null : (
+                    <button
+                      type="button"
+                      aria-label="Wake thread now"
+                      onClick={handleUnsnoozeClick}
+                      onPointerDown={handleActionPointerDown}
+                      className={cn(
+                        "pointer-events-none absolute inset-y-0 right-0 -mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:opacity-100",
+                        isWoke && "group-any-hover/sidebar-row:static",
+                      )}
+                    >
+                      <AlarmClockOffIcon className="mb-px size-3" />
+                    </button>
+                  )
+                ) : !props.settlementSupported ? null : variantAction === "unsettle" ? (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <button
+                          type="button"
+                          aria-label="Un-settle thread"
+                          onClick={handleUnsettleClick}
+                          onPointerDown={handleActionPointerDown}
+                          className={cn(
+                            "pointer-events-none absolute inset-y-0 right-0 -mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:opacity-100",
+                            isWoke && "group-any-hover/sidebar-row:static",
+                          )}
+                        />
+                      }
+                    >
+                      <Undo2Icon className="mb-px size-3.5" />
+                    </TooltipTrigger>
+                    <TooltipPopup side="top">Un-settle thread</TooltipPopup>
+                  </Tooltip>
+                ) : (
+                  <button
+                    type="button"
+                    aria-label="Settle thread"
+                    onClick={handleSettleClick}
+                    onPointerDown={handleActionPointerDown}
+                    className={cn(
+                      "pointer-events-none absolute inset-y-0 right-0 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-2 text-xs text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:opacity-100",
+                      isWoke && "group-any-hover/sidebar-row:static",
+                    )}
+                  >
+                    <CheckIcon className="size-3" />
+                  </button>
+                )}
+              </span>
+            )}
+            {props.sweepAction !== null ? dragDestination : null}
+            {props.jumpLabel ? <JumpHintBadge label={props.jumpLabel} /> : null}
+          </TooltipTrigger>
+          {detailsTooltip}
+        </Tooltip>
+      </li>
+    );
+  }
 
   const diff = latestRunDiff(thread);
   // Only the provider icon would remain, so the row drops the line instead of leaving it blank.
@@ -1409,6 +1585,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               onDoubleClick={handleDoubleClick}
               onKeyDown={handleKeyDown}
               onContextMenu={handleContextMenu}
+              onMouseDown={handleRowMouseDown}
+              onAuxClick={handleRowAuxClick}
             />
           }
         >

@@ -728,6 +728,12 @@ export function isSidebarNestedLinkClick(target: EventTarget | null): boolean {
   return nodeClosest(parent, "a[href]") !== null;
 }
 
+// Middle click marks a row unread unless it landed on a nested link, where the
+// browser's background-tab open wins.
+export function isSidebarRowMarkUnreadGesture(button: number, target: EventTarget | null): boolean {
+  return button === 1 && !isSidebarNestedLinkClick(target);
+}
+
 export function shouldCreateNewThreadInCurrentProject(
   shiftKey: boolean,
   projectGroupCount: number,
