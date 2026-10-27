@@ -1,12 +1,13 @@
-import type { SidebarThreadWorkspace } from "@t3tools/contracts";
+import { threadWorkspaceAssignmentKey, type SidebarThreadWorkspace } from "@t3tools/contracts";
 
 import { resolveSidebarThreadStatus } from "../Sidebar.logic";
 import type { SidebarThreadSummary } from "../../types";
 
 /**
- * Workspaces are a fork-local, client-only grouping of threads: a lighter
- * cousin of Chrome tab groups, applied to the sidebar. Nothing here crosses the
- * wire, so the server, desktop, and mobile clients are unaffected.
+ * Workspaces are a fork-local grouping of threads: a lighter cousin of Chrome
+ * tab groups, applied to the sidebar. The list and assignments live in server
+ * settings so they follow the user across clients; only the active selection is
+ * per-client.
  */
 
 export const THREAD_WORKSPACE_ICON_KEYS = [
@@ -31,16 +32,21 @@ export const THREAD_WORKSPACE_TINTS = [
 ] as const;
 export type ThreadWorkspaceTint = (typeof THREAD_WORKSPACE_TINTS)[number];
 
-export const DEFAULT_THREAD_WORKSPACE_ICON: ThreadWorkspaceIconKey = "briefcase";
-export const DEFAULT_THREAD_WORKSPACE_TINT: ThreadWorkspaceTint = "info";
-
-/** Seeded once, when the beta is first enabled, so the strip is never empty. */
-export const DEFAULT_THREAD_WORKSPACES: readonly SidebarThreadWorkspace[] = [
-  { id: "work", name: "Work", icon: "building-2", tint: "info" },
-  { id: "personal", name: "Personal", icon: "house", tint: "success" },
-];
+/**
+ * A strip slot rather than a workspace: selecting it shows threads with no
+ * assignment. Generated ids are `ws-…`, and a real workspace always wins anyway,
+ * so no stored workspace can be mistaken for this selection.
+ */
+export const UNSORTED_WORKSPACE_SELECTION = "unsorted";
 
 export type ThreadWorkspaceAssignments = Readonly<Record<string, string>>;
+
+/** The workspace selection a thread list or search is scoped to; null means unfiltered. */
+export type ThreadWorkspaceFilter = {
+  readonly assignments: ThreadWorkspaceAssignments;
+  readonly workspaces: readonly SidebarThreadWorkspace[];
+  readonly activeWorkspaceId: string | null;
+};
 
 type ScopedThreadIdentity = {
   readonly environmentId: string;
@@ -71,13 +77,8 @@ export function threadNeedsWorkspaceAttention(thread: ThreadAttentionInput): boo
   return status === "approval" || status === "input" || status === "failed" || status === "limited";
 }
 
-export function threadWorkspaceKey(environmentId: string, threadId: string): string {
-  return `${environmentId}:${threadId}`;
-}
-
-/** Mirrors `scopedThreadKey`, without widening caller ids to branded types. */
 export function threadWorkspaceKeyFor(thread: ScopedThreadIdentity): string {
-  return threadWorkspaceKey(thread.environmentId, thread.id);
+  return threadWorkspaceAssignmentKey(thread.environmentId, thread.id);
 }
 
 export function isThreadWorkspaceIconKey(value: string): value is ThreadWorkspaceIconKey {
@@ -99,54 +100,84 @@ export function resolveAssignedWorkspaceId(
   return workspaces.some((workspace) => workspace.id === assigned) ? assigned : null;
 }
 
+export function isUnsortedWorkspaceSelection(
+  activeWorkspaceId: string | null,
+  workspaces: readonly SidebarThreadWorkspace[],
+): boolean {
+  return (
+    activeWorkspaceId === UNSORTED_WORKSPACE_SELECTION &&
+    !workspaces.some((workspace) => workspace.id === activeWorkspaceId)
+  );
+}
+
+/**
+ * The filter a view must actually apply, or null when every thread shows: the
+ * strip is off, or All is selected.
+ */
+function effectiveThreadWorkspaceFilter(
+  filter: ThreadWorkspaceFilter | null,
+): ThreadWorkspaceFilter | null {
+  return filter !== null && filter.activeWorkspaceId !== null ? filter : null;
+}
+
 export function filterThreadsByWorkspace<T extends ScopedThreadIdentity>(
   threads: readonly T[],
-  input: {
-    readonly assignments: ThreadWorkspaceAssignments;
-    readonly workspaces: readonly SidebarThreadWorkspace[];
-    readonly activeWorkspaceId: string | null;
-  },
+  filter: ThreadWorkspaceFilter | null,
 ): readonly T[] {
-  if (input.activeWorkspaceId === null) return threads;
-  return threads.filter(
-    (thread) =>
-      resolveAssignedWorkspaceId(
-        input.assignments,
-        threadWorkspaceKeyFor(thread),
-        input.workspaces,
-      ) === input.activeWorkspaceId,
-  );
+  const active = effectiveThreadWorkspaceFilter(filter);
+  if (active === null) return threads;
+  const assignedWorkspaceId = (thread: T) =>
+    resolveAssignedWorkspaceId(
+      active.assignments,
+      threadWorkspaceKeyFor(thread),
+      active.workspaces,
+    );
+  if (isUnsortedWorkspaceSelection(active.activeWorkspaceId, active.workspaces)) {
+    return threads.filter((thread) => assignedWorkspaceId(thread) === null);
+  }
+  return threads.filter((thread) => assignedWorkspaceId(thread) === active.activeWorkspaceId);
 }
 
 export type ThreadWorkspaceAttentionCounts = {
   /** Workspace id to the number of its threads that need the user. */
   readonly byWorkspace: ReadonlyMap<string, number>;
+  /** Unassigned threads that need the user: the "Unsorted" badge. */
+  readonly unsorted: number;
   /** Every thread that needs the user, assigned or not: the "All" badge. */
   readonly total: number;
 };
 
+/** No badges: the strip is off, so nothing is filed and nothing is drawn. */
+const NO_THREAD_WORKSPACE_ATTENTION: ThreadWorkspaceAttentionCounts = {
+  byWorkspace: new Map(),
+  unsorted: 0,
+  total: 0,
+};
+
 export function countThreadWorkspaceAttention<T extends ScopedThreadIdentity>(
   threads: readonly T[],
-  input: {
-    readonly assignments: ThreadWorkspaceAssignments;
-    readonly workspaces: readonly SidebarThreadWorkspace[];
-    readonly needsAttention: (thread: T) => boolean;
-  },
+  filter: ThreadWorkspaceFilter | null,
+  needsAttention: (thread: T) => boolean,
 ): ThreadWorkspaceAttentionCounts {
+  if (filter === null) return NO_THREAD_WORKSPACE_ATTENTION;
   const byWorkspace = new Map<string, number>();
+  let unsorted = 0;
   let total = 0;
   for (const thread of threads) {
-    if (!input.needsAttention(thread)) continue;
+    if (!needsAttention(thread)) continue;
     total += 1;
     const workspaceId = resolveAssignedWorkspaceId(
-      input.assignments,
+      filter.assignments,
       threadWorkspaceKeyFor(thread),
-      input.workspaces,
+      filter.workspaces,
     );
-    if (workspaceId === null) continue;
+    if (workspaceId === null) {
+      unsorted += 1;
+      continue;
+    }
     byWorkspace.set(workspaceId, (byWorkspace.get(workspaceId) ?? 0) + 1);
   }
-  return { byWorkspace, total };
+  return { byWorkspace, unsorted, total };
 }
 
 export type OrderedThreadWorkspaceSearch<T> = {
@@ -166,25 +197,23 @@ export type OrderedThreadWorkspaceSearch<T> = {
  */
 export function orderThreadWorkspaceSearch<T extends ScopedThreadIdentity>(
   results: readonly T[],
-  input: {
-    readonly assignments: ThreadWorkspaceAssignments;
-    readonly workspaces: readonly SidebarThreadWorkspace[];
-    readonly activeWorkspaceId: string | null;
-  },
+  filter: ThreadWorkspaceFilter | null,
 ): OrderedThreadWorkspaceSearch<T> {
-  const activeWorkspaceId = input.activeWorkspaceId;
-  if (activeWorkspaceId === null || results.length === 0) {
+  const active = effectiveThreadWorkspaceFilter(filter);
+  if (active === null || results.length === 0) {
     return { results, otherWorkspacesStartIndex: null };
   }
+  const activeWorkspaceId = active.activeWorkspaceId;
+  const unsorted = isUnsortedWorkspaceSelection(activeWorkspaceId, active.workspaces);
   const inWorkspace: T[] = [];
   const otherWorkspaces: T[] = [];
   for (const thread of results) {
     const assigned = resolveAssignedWorkspaceId(
-      input.assignments,
+      active.assignments,
       threadWorkspaceKeyFor(thread),
-      input.workspaces,
+      active.workspaces,
     );
-    if (assigned === activeWorkspaceId) inWorkspace.push(thread);
+    if (unsorted ? assigned === null : assigned === activeWorkspaceId) inWorkspace.push(thread);
     else otherWorkspaces.push(thread);
   }
   if (inWorkspace.length === 0 || otherWorkspaces.length === 0) {
@@ -199,6 +228,21 @@ export function orderThreadWorkspaceSearch<T extends ScopedThreadIdentity>(
 /** Keeps the sidebar badge narrow the way an inbox badge is narrow. */
 export function formatThreadWorkspaceAttentionCount(count: number): string {
   return count > 9 ? "9+" : String(count);
+}
+
+/**
+ * The Settled header counts the rows this client holds plus the older pages it
+ * has not loaded. Those pages carry no assignment, so a view with a workspace
+ * selected counts only the rows it holds.
+ */
+export function threadWorkspaceSettledCount(input: {
+  readonly heldCount: number;
+  readonly unloadedCount: number;
+  readonly filter: ThreadWorkspaceFilter | null;
+}): number {
+  return effectiveThreadWorkspaceFilter(input.filter) === null
+    ? input.heldCount + input.unloadedCount
+    : input.heldCount;
 }
 
 export function createThreadWorkspaceId(
