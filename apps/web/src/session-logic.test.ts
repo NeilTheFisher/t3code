@@ -35,7 +35,6 @@ import {
   findRevertCheckpoint,
   deriveModelChangeNotices,
   mergeModelChangeNotices,
-  findLatestProposedPlan,
   isLatestRunSettled,
   selectHandoffImageResources,
   selectMessageImageResources,
