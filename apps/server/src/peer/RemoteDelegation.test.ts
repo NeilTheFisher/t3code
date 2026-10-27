@@ -606,6 +606,7 @@ const boxToolkitLayer = (thread: BoxThread) => {
       Layer.mock(ProjectService.ProjectService)({
         getById: (id) =>
           Effect.succeed(Option.fromNullishOr(boxProjects.find((project) => project.id === id))),
+        listShells: () => Effect.succeed(boxProjects),
         // More than a page, so finding the project with this repository pages.
         listPage: ({ cursor, limit }) =>
           Effect.succeed({
