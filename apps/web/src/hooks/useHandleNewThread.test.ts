@@ -160,10 +160,14 @@ vi.mock("@t3tools/client-runtime/environment", () => ({
   scopeProjectRef: (environmentId: string, projectId: string) => ({ environmentId, projectId }),
   scopeThreadRef: (environmentId: string, threadId: string) => ({ environmentId, threadId }),
 }));
-vi.mock("@t3tools/contracts", () => ({
-  DEFAULT_RUNTIME_MODE: "default",
-  DEFAULT_SERVER_SETTINGS: {},
-}));
+vi.mock("@t3tools/contracts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@t3tools/contracts")>();
+  return {
+    ...actual,
+    DEFAULT_RUNTIME_MODE: "default",
+    DEFAULT_SERVER_SETTINGS: {},
+  };
+});
 vi.mock("@t3tools/shared/projectSettings", () => ({
   resolveProjectSettings: (
     settings: Record<string, unknown>,
@@ -218,11 +222,20 @@ vi.mock("../lib/t3ProjectFileDefaults", () => ({
   readT3ProjectFile: () => testState.projectFileRead,
   peekT3ProjectFile: () => undefined,
 }));
-vi.mock("../lib/utils", () => ({
-  newDraftId: () => "draft-delayed",
-  newThreadId: () => "thread-delayed",
-}));
+vi.mock("../lib/utils", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/utils")>();
+  return {
+    ...actual,
+    newDraftId: () => "draft-delayed",
+    newThreadId: () => "thread-delayed",
+  };
+});
 vi.mock("@t3tools/client-runtime/state/project-grouping", () => ({
+  deriveLogicalProjectKeyFromSettings: () => "remote-project",
+  getProjectOrderKey: () => "remote-project",
+  selectProjectGroupingSettings: () => ({}),
+}));
+vi.mock("../logicalProject", () => ({
   deriveLogicalProjectKeyFromSettings: () => "remote-project",
   getProjectOrderKey: () => "remote-project",
   selectProjectGroupingSettings: () => ({}),
@@ -260,6 +273,7 @@ vi.mock("../uiStateStore", () => ({
   useUiStateStore: () => [],
 }));
 vi.mock("./useSettings", () => ({ getClientSettings: () => ({}) }));
+vi.mock("./useThreadWorkspaces", () => ({ fileThreadInActiveWorkspace: () => {} }));
 
 import {
   readPendingWorkspaceDefault,
