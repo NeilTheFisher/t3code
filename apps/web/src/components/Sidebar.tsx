@@ -214,7 +214,7 @@ import {
   type SidebarSection,
   resolveSidebarRowThreadId,
 } from "./Sidebar.logic";
-import { isSidebarSubagentThread } from "./Sidebar.logic";
+import { isSidebarHiddenThread } from "./Sidebar.logic";
 import {
   createSidebarCollisionDetection,
   createSidebarSortingStrategy,
@@ -723,8 +723,8 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
   const sortedSettled = sortSettledThreads(settled);
   return {
     pinnedThreads: filterThreadsByWorkspace(orderedPinned, input.workspaceFilter),
-    draggableThreadKeys: draggable,
-    activeReorderableThreadKeys: activeReorderable,
+    draggableThreadKeys,
+    activeReorderableThreadKeys,
     activeThreads: filterThreadsByWorkspace(orderedActive, input.workspaceFilter),
     workingThreads: filterThreadsByWorkspace(sortedWorking, input.workspaceFilter),
     snoozedThreads: filterThreadsByWorkspace(sortedSnoozed, input.workspaceFilter),
@@ -1389,7 +1389,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   });
 
   const workspaceAttention = countThreadWorkspaceAttention(
-    threads.filter((thread) => thread.archivedAt === null && !isSidebarSubagentThread(thread)),
+    threads.filter((thread) => thread.archivedAt === null && !isSidebarHiddenThread(thread)),
     workspaceFilter,
     threadNeedsWorkspaceAttention,
   );
@@ -3677,6 +3677,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                             onUnsnooze={attemptUnsnooze}
                             onUnpin={attemptUnpin}
                             onAcknowledgeWoke={acknowledgeWoke}
+                            onMarkUnread={markThreadUnread}
                             onFileDropThreads={handleThreadFileDrop}
                           />
                         );
