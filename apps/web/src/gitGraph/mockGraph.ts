@@ -35,7 +35,10 @@ export interface MockWorktree {
   readonly path: string;
   readonly branch: string;
   readonly threadId: string | null;
-  readonly managed: boolean;
+  /** The repository's own checkout, which is never removed from here. */
+  readonly main: boolean;
+  /** The checkout this graph was read from. */
+  readonly current: boolean;
   readonly dirty: boolean;
   readonly stale: boolean;
 }
@@ -422,7 +425,8 @@ const WORKTREES: ReadonlyArray<MockWorktree> = [
     path: "/home/nfisher/repos/t3code-web-setup/t3code",
     branch: "main",
     threadId: "thread-gerrit",
-    managed: false,
+    main: true,
+    current: true,
     dirty: false,
     stale: false,
   },
@@ -430,7 +434,8 @@ const WORKTREES: ReadonlyArray<MockWorktree> = [
     path: "~/.t3/worktrees/git-graph-ui",
     branch: "feat/git-graph",
     threadId: "thread-graph",
-    managed: true,
+    main: false,
+    current: false,
     dirty: true,
     stale: false,
   },
@@ -438,7 +443,8 @@ const WORKTREES: ReadonlyArray<MockWorktree> = [
     path: "~/.t3/worktrees/worktree-cleanup",
     branch: "fix/worktree-cleanup",
     threadId: "thread-worktree",
-    managed: true,
+    main: false,
+    current: false,
     dirty: false,
     stale: false,
   },
@@ -446,7 +452,8 @@ const WORKTREES: ReadonlyArray<MockWorktree> = [
     path: "~/.t3/worktrees/tts-narration",
     branch: "feat/tts-narration",
     threadId: null,
-    managed: true,
+    main: false,
+    current: false,
     dirty: false,
     stale: true,
   },

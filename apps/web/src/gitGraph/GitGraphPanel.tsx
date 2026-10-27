@@ -45,6 +45,7 @@ import { PullRequestGlyph } from "../components/pullRequest/pullRequestIcons";
 import { Button } from "../components/ui/button";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { commitDragText } from "./commitDrag";
+import { graphWorktrees } from "./graphWorktrees";
 import { layoutGraph, type GraphRow } from "./graphLayout";
 import {
   partitionCommitRuns,
@@ -62,6 +63,8 @@ const LANE_INSET = 9;
 
 // The selected run is outlined as one block. An outline never affects layout, so
 // selecting a row cannot shift the graph sideways.
+const EMPTY_CHECKOUTS: ReadonlyArray<VcsGraphWorktree> = [];
+
 const SELECTION_OUTLINE = "2px solid color-mix(in oklab, var(--primary) 60%, transparent)";
 
 const LANE_COLORS = [
@@ -99,7 +102,7 @@ function toGraphData(result: VcsLogGraphResult, repository: string): MockGraphDa
       pullRequest: null,
     })),
     threads: [],
-    worktrees: [],
+    worktrees: graphWorktrees(result.worktrees),
     observedAt: new Date(),
   };
 }
@@ -339,6 +342,8 @@ function CommitRow(props: {
   onOpenDiff: () => void;
   /** The checkout's uncommitted state, shown on the checked-out commit. */
   uncommitted: VcsGraphWorkingTree | null;
+  /** Every checkout of this repository sitting on this commit. */
+  checkouts: ReadonlyArray<VcsGraphWorktree>;
   onOpenWorkingTreeDiff: () => void;
   /** Null when the panel has no resolved checkout, which a commit chip requires. */
   repositoryPath: string | null;
@@ -357,6 +362,7 @@ function CommitRow(props: {
     onSelect,
     onOpenDiff,
     uncommitted,
+    checkouts,
     onOpenWorkingTreeDiff,
     repositoryPath,
     onFilterThread,
@@ -475,6 +481,33 @@ function CommitRow(props: {
               +{commit.refs.filter((ref) => ref.kind !== "head").length - 2}
             </span>
           ) : null}
+          {/* A commit can be checked out in several worktrees at once, and the one
+              the graph was opened from is only one of them. Naming each checkout
+              here is what explains why two threads' graphs differ. */}
+          {checkouts.map((checkout) => (
+            <span
+              key={checkout.path}
+              title={`${checkout.path}${checkout.dirty ? " (uncommitted changes)" : ""}${
+                checkout.isCurrent ? " — this graph's checkout" : ""
+              }`}
+              className={cn(
+                "inline-flex max-w-32 shrink-0 items-center gap-1 rounded-sm border px-1 py-px align-middle text-3xs leading-4 font-medium",
+                checkout.isCurrent
+                  ? "border-primary/25 bg-primary/10 text-primary"
+                  : "border-border/70 bg-muted/60 text-muted-foreground",
+              )}
+            >
+              <FolderGit2Icon className="size-2.5 shrink-0" />
+              <span className="truncate">{checkout.branch ?? "detached"}</span>
+              {checkout.dirty ? (
+                <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-warning" />
+              ) : null}
+              <span className="sr-only">
+                {checkout.isMain ? " (main checkout)" : " (worktree)"}
+                {checkout.isCurrent ? " (this graph's checkout)" : ""}
+              </span>
+            </span>
+          ))}
           <span
             className={cn(
               "min-w-0 flex-1 truncate text-xs leading-4",
@@ -549,13 +582,24 @@ function WorktreeRow(props: {
   thread: MockThread | null;
   threadColor: string;
   confirming: boolean;
+  removing: boolean;
   onAskRemove: () => void;
+  onConfirmRemove: () => void;
   onCancelRemove: () => void;
 }) {
-  const { worktree, thread, threadColor, confirming, onAskRemove, onCancelRemove } = props;
-  // The primary checkout has no branch of its own to recreate, so it is never
-  // removable from this list; a managed checkout with a live run is unsafe.
-  const blockedByRunningThread = !worktree.managed || thread?.state === "running";
+  const {
+    worktree,
+    thread,
+    threadColor,
+    confirming,
+    removing,
+    onAskRemove,
+    onConfirmRemove,
+    onCancelRemove,
+  } = props;
+  // The repository's own checkout has no branch of its own to recreate, so it is
+  // never removable from this list; a checkout with a live run is unsafe.
+  const blockedByRunningThread = worktree.main || thread?.state === "running";
   return (
     <div className="group border-b border-border/40 px-3 py-2.5 last:border-b-0 hover:bg-accent/25">
       <div className="flex items-start gap-2">
@@ -566,8 +610,13 @@ function WorktreeRow(props: {
           <div className="flex min-w-0 items-center gap-1.5">
             <span className="truncate text-xs font-medium text-foreground">{worktree.branch}</span>
             <span className="shrink-0 rounded-sm border border-border/60 px-1 text-4xs leading-4 text-muted-foreground">
-              {worktree.managed ? "managed" : "main checkout"}
+              {worktree.main ? "main checkout" : "worktree"}
             </span>
+            {worktree.current ? (
+              <span className="shrink-0 rounded-sm border border-primary/25 bg-primary/10 px-1 text-4xs leading-4 text-primary">
+                current
+              </span>
+            ) : null}
             {worktree.dirty ? (
               <span className="inline-flex shrink-0 items-center gap-1 text-3xs text-warning-foreground">
                 <span className="size-1.5 rounded-full bg-warning" /> dirty
@@ -588,8 +637,8 @@ function WorktreeRow(props: {
         </div>
         {confirming ? (
           <div className="flex shrink-0 items-center gap-1">
-            <Button variant="destructive" size="xs" onClick={onAskRemove}>
-              <Trash2Icon /> Remove
+            <Button variant="destructive" size="xs" disabled={removing} onClick={onConfirmRemove}>
+              <Trash2Icon /> {removing ? "Removing…" : "Remove"}
             </Button>
             <Button variant="ghost-muted" size="xs" onClick={onCancelRemove}>
               Cancel
@@ -641,10 +690,12 @@ export function GitGraphPanel(props: {
   const [selectionHeadSha, setSelectionHeadSha] = useState<string | null>(null);
   const [filterThreadId, setFilterThreadId] = useState<string | null>(null);
   const [confirmPath, setConfirmPath] = useState<string | null>(null);
+  const [confirmingRemoval, setConfirmingRemoval] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const noticeTimer = useRef<number | null>(null);
   const loadGraph = useAtomCommand(vcsEnvironment.logGraph, { reportFailure: false });
   const switchRef = useAtomCommand(vcsEnvironment.switchRef, { reportFailure: false });
+  const removeWorktree = useAtomCommand(vcsEnvironment.removeWorktree, { reportFailure: false });
   const canCheckout = useEnvironmentScope(props.environmentId, AuthSourceControlWriteScope);
   const loadGraphRef = useRef(loadGraph);
   loadGraphRef.current = loadGraph;
@@ -720,6 +771,13 @@ export function GitGraphPanel(props: {
     const index = threads.findIndex((thread) => thread.id === id);
     return THREAD_COLORS[(index < 0 ? 0 : index) % THREAD_COLORS.length]!;
   };
+
+  const checkoutsByHead = new Map<string, VcsGraphWorktree[]>();
+  for (const worktree of graph?.worktrees ?? []) {
+    const list = checkoutsByHead.get(worktree.head) ?? [];
+    list.push(worktree);
+    checkoutsByHead.set(worktree.head, list);
+  }
 
   const visibleCommits = commits;
   const layout = layoutGraph(visibleCommits.map(({ sha, parents }) => ({ sha, parents })));
@@ -811,6 +869,45 @@ export function GitGraphPanel(props: {
         description: failure instanceof Error ? failure.message : "An error occurred.",
       }),
     );
+  };
+
+  const removingWorktree =
+    confirmPath === null
+      ? null
+      : (data?.worktrees.find((entry) => entry.path === confirmPath) ?? null);
+
+  // Removing a checkout keeps its branch and commits; a thread that still uses
+  // it recreates it on its next turn. The repository's own checkout has no branch
+  // to recreate, so the row never offers this for it.
+  const confirmRemoveWorktree = async () => {
+    const cwd = props.cwd;
+    const target = removingWorktree;
+    if (cwd === null || target === null || target.main) return;
+    if (!canCheckout) {
+      showNotice("Removing a checkout needs source-control write access");
+      return;
+    }
+    setConfirmingRemoval(true);
+    const result = await removeWorktree({
+      environmentId: props.environmentId,
+      input: { cwd, path: target.path },
+    });
+    setConfirmingRemoval(false);
+    if (isAtomCommandInterrupted(result)) return;
+    if (result._tag !== "Success") {
+      const failure = squashAtomCommandFailure(result);
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: `Could not remove ${target.branch}.`,
+          description: failure instanceof Error ? failure.message : "An error occurred.",
+        }),
+      );
+      return;
+    }
+    setConfirmPath(null);
+    showNotice(`Removed ${target.branch}`);
+    setReloadToken((token) => token + 1);
   };
 
   const openCommitMenu = async (commit: MockCommit, position: { x: number; y: number }) => {
@@ -1090,6 +1187,7 @@ export function GitGraphPanel(props: {
                     }
                     onOpenDiff={() => openSelectedDiff(commit)}
                     uncommitted={workingTree}
+                    checkouts={checkoutsByHead.get(commit.sha) ?? EMPTY_CHECKOUTS}
                     onOpenWorkingTreeDiff={props.onOpenWorkingTreeDiff}
                     repositoryPath={props.cwd}
                     onFilterThread={(id) => applyFilter(filterThreadId === id ? null : id)}
@@ -1129,8 +1227,8 @@ export function GitGraphPanel(props: {
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="flex h-8 items-center justify-between border-b border-border/40 px-3 text-3xs text-muted-foreground">
             <span>
-              {worktrees.length} checkouts ·{" "}
-              {worktrees.filter((worktree) => worktree.managed).length} managed
+              {worktrees.length} checkouts · {worktrees.filter((worktree) => !worktree.main).length}{" "}
+              worktrees
             </span>
             <span className="inline-flex items-center gap-1">
               <TriangleAlertIcon className="size-3 text-warning-foreground" />
@@ -1146,7 +1244,11 @@ export function GitGraphPanel(props: {
                 thread={thread}
                 threadColor={thread ? threadColor(thread.id) : THREAD_COLORS[0]}
                 confirming={confirmPath === worktree.path}
+                removing={confirmingRemoval}
                 onAskRemove={() => setConfirmPath(worktree.path)}
+                onConfirmRemove={() => {
+                  void confirmRemoveWorktree();
+                }}
                 onCancelRemove={() => setConfirmPath(null)}
               />
             );
