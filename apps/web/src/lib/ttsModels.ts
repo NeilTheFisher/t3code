@@ -1,12 +1,7 @@
 /**
- * Fetch layer for the TTS service's model registry. Pure: no React, no store
- * coupling. Resolves against the same base as `useTtsVoices` (the TTS
- * `serverUrl`, same-origin by default), through this server's `/v1/models`
- * proxy.
- *
- * Every call is defensive: the registry may be absent on older or external TTS
- * servers, so unreachable or malformed responses resolve to `null`/`[]` rather
- * than throwing into Settings.
+ * Fetch layer for the TTS service's model registry, resolved against the same
+ * base as `useTtsVoices`. Every call is defensive: an absent or malformed
+ * registry resolves to `null`/`[]` rather than throwing into Settings.
  */
 
 export type TtsModelState = "idle" | "downloading" | "installed" | "error";
