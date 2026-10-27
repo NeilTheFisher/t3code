@@ -5,6 +5,7 @@ import {
   FlaskConicalIcon,
   GraduationCapIcon,
   HouseIcon,
+  InboxIcon,
   LayoutGridIcon,
   NotebookPenIcon,
   PaletteIcon,
@@ -13,7 +14,11 @@ import {
 } from "lucide-react";
 import type { ComponentType } from "react";
 import { useRef, useState } from "react";
-import type { SidebarThreadWorkspace } from "@t3tools/contracts";
+import {
+  DEFAULT_THREAD_WORKSPACE_ICON,
+  DEFAULT_THREAD_WORKSPACE_TINT,
+  type SidebarThreadWorkspace,
+} from "@t3tools/contracts";
 
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
@@ -21,13 +26,12 @@ import { Input } from "../ui/input";
 import { Popover, PopoverPopup } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 import {
-  DEFAULT_THREAD_WORKSPACE_ICON,
-  DEFAULT_THREAD_WORKSPACE_TINT,
   formatThreadWorkspaceAttentionCount,
   isThreadWorkspaceIconKey,
   isThreadWorkspaceTint,
   THREAD_WORKSPACE_ICON_KEYS,
   THREAD_WORKSPACE_TINTS,
+  UNSORTED_WORKSPACE_SELECTION,
   type ThreadWorkspaceIconKey,
   type ThreadWorkspaceTint,
 } from "./threadWorkspaces";
@@ -111,9 +115,9 @@ export type ThreadWorkspaceStripProps = {
   readonly workspaces: readonly SidebarThreadWorkspace[];
   readonly activeWorkspaceId: string | null;
   readonly attentionByWorkspace: ReadonlyMap<string, number>;
+  readonly attentionUnsorted: number;
   readonly attentionTotal: number;
   readonly dragOverWorkspaceId: string | null;
-  readonly registerIconElement: (workspaceId: string, element: HTMLButtonElement | null) => void;
   readonly onSelect: (workspaceId: string | null) => void;
   readonly onCreate: () => string;
   readonly onUpdate: (
@@ -186,6 +190,37 @@ export function ThreadWorkspaceStrip(props: ThreadWorkspaceStripProps) {
           <TooltipPopup side="top">All workspaces</TooltipPopup>
         </Tooltip>
 
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                aria-label="Unsorted"
+                aria-pressed={props.activeWorkspaceId === UNSORTED_WORKSPACE_SELECTION}
+                className={cn(
+                  ICON_BUTTON_CLASS,
+                  props.activeWorkspaceId === UNSORTED_WORKSPACE_SELECTION
+                    ? "bg-foreground/10 text-foreground ring-foreground/20"
+                    : "text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground",
+                  props.dragOverWorkspaceId === UNSORTED_WORKSPACE_SELECTION &&
+                    "scale-110 ring-2 ring-ring",
+                )}
+                data-workspace-id={UNSORTED_WORKSPACE_SELECTION}
+                onClick={() => props.onSelect(UNSORTED_WORKSPACE_SELECTION)}
+                type="button"
+              >
+                <InboxIcon className="size-3.5" />
+                <AttentionBadge count={props.attentionUnsorted} />
+              </button>
+            }
+          />
+          <TooltipPopup side="top">Unsorted threads</TooltipPopup>
+        </Tooltip>
+
+        <div
+          aria-hidden="true"
+          className="mx-0.5 h-4 w-px shrink-0 bg-sidebar-border/60 light:bg-foreground/20"
+        />
+
         {props.workspaces.map((workspace) => {
           const tint = isThreadWorkspaceTint(workspace.tint)
             ? TINTS[workspace.tint]
@@ -212,7 +247,6 @@ export function ThreadWorkspaceStrip(props: ThreadWorkspaceStripProps) {
                     ref={(element) => {
                       if (element === null) elements.current.delete(workspace.id);
                       else elements.current.set(workspace.id, element);
-                      props.registerIconElement(workspace.id, element);
                     }}
                     type="button"
                   >
@@ -221,7 +255,7 @@ export function ThreadWorkspaceStrip(props: ThreadWorkspaceStripProps) {
                   </button>
                 }
               />
-              <TooltipPopup side="top">{workspace.name} — right-click to edit</TooltipPopup>
+              <TooltipPopup side="top">{workspace.name} (right-click to edit)</TooltipPopup>
             </Tooltip>
           );
         })}

@@ -55,6 +55,9 @@ import {
   type ProviderOptionDescriptor,
   type ProviderOptionSelection,
   ProviderRequestKind,
+  effectiveThreadWorkspaces,
+  threadWorkspaceAssignmentKey,
+  type ThreadWorkspaceRef,
   type RuntimeMode,
   type ScheduledTask,
   type ScheduledTaskUpsertInput,
@@ -1017,6 +1020,7 @@ function listItemFromShell(
   scope: McpInvocationScope,
   shell: OrchestrationV2ThreadShell,
   nowMs: number,
+  workspace: ThreadWorkspaceRef | null,
 ): OrchestratorMcpThreadListItem {
   return {
     threadId: shell.id,
@@ -1040,6 +1044,7 @@ function listItemFromShell(
     parentThreadId: shell.lineage.parentThreadId,
     relationshipToParent: shell.lineage.relationshipToParent,
     ...(shell.delegatedFrom == null ? {} : { delegatedFrom: shell.delegatedFrom }),
+    workspace,
     itemCount: shell.visibleItemCount,
     createdAt: DateTime.formatIso(shell.createdAt),
     updatedAt: DateTime.formatIso(shell.updatedAt),
@@ -3555,6 +3560,21 @@ const make = Effect.gen(function* () {
       }
       const listFailure = (error: unknown) =>
         failure("orchestration_error", `Unable to list threads: ${errorMessage(error)}`);
+      const settings = yield* serverSettings.getSettings.pipe(
+        Effect.mapError((error) =>
+          failure("orchestration_error", `Unable to read settings: ${error.message}`),
+        ),
+      );
+      const workspaces = effectiveThreadWorkspaces(settings);
+      const workspaceById = new Map(workspaces.map((workspace) => [workspace.id, workspace]));
+      const workspaceFor = (threadId: ThreadId): ThreadWorkspaceRef | null => {
+        const assigned =
+          settings.sidebarThreadWorkspaceAssignments[
+            threadWorkspaceAssignmentKey(scope.environmentId, threadId)
+          ];
+        const workspace = assigned === undefined ? undefined : workspaceById.get(assigned);
+        return workspace === undefined ? null : { id: workspace.id, name: workspace.name };
+      };
       const projectThreads = yield* threadManagement
         .listProjectThreads({
           projectId: projectId ?? undefined,
