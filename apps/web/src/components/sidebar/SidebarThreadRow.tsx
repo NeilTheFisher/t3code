@@ -1783,6 +1783,8 @@ export const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props
     source: ContextMenuSource,
   ) => void;
   onFileDropThreads: (threadRef: ScopedThreadRef, files: File[]) => void;
+  /** Search rows use the sidebar's pointer sensor directly; they are not sortable. */
+  onDragStart: (event: PointerEvent) => void;
 }) {
   const messages = useMessages();
   const thread =
@@ -1877,6 +1879,12 @@ export const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props
               aria-describedby={`${props.resultId}-pr`}
               aria-label={accessibility.label}
               {...dragListeners}
+              onPointerDown={(event) => {
+                if (event.nativeEvent.isPrimary && event.nativeEvent.button === 0) {
+                  props.onDragStart(event.nativeEvent);
+                }
+                dragListeners?.onPointerDown?.(event);
+              }}
               onMouseMove={props.onHighlight}
               // Focus stays in the search box, as for Enter. A focused result would lose focus as
               // the results close, and its recovery scrolls the list away from the opened thread.
