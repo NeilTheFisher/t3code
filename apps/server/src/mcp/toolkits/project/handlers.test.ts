@@ -9,6 +9,7 @@ import {
   type ServerProvider,
   type Project as ProjectRecord,
   type ModelSelection,
+  type OrchestrationProjectShell,
   type RuntimeMode,
   type OrchestrationV2ThreadShell,
   ThreadId,
@@ -168,12 +169,23 @@ const clientLaunchHarness = (input: {
               } as unknown as ProjectRecord)
             : Option.none(),
         ),
+      listShells: () =>
+        Effect.succeed([
+          { id: projectId, title: "Client target" } as unknown as OrchestrationProjectShell,
+        ]),
+    }),
+    Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+      namedProjectsRoot: "/projects",
+      ensureScratchProject: Effect.succeed({ projectId }),
     }),
     Layer.mock(PeerForwarding.PeerForwarding)({}),
+<<<<<<< HEAD
     Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
       namedProjectsRoot: "/projects",
       isScratchProject: () => Effect.succeed(false),
     }),
+=======
+>>>>>>> a76db23769 (feat(mcp): let a remote client connect, name a project, or start without one)
     DocumentText.layer.pipe(Layer.provideMerge(NodeServices.layer)),
   ).pipe(
     Layer.provideMerge(GitVcsDriver.layer),
@@ -200,12 +212,14 @@ it.effect(
           readonly message?: string;
           readonly runtimeMode?: RuntimeMode;
           readonly targeted?: false;
+          readonly projectRef?: string;
           readonly overrideModel?: ModelSelection;
           readonly hostedAppUrl?: string;
           readonly refusedByCeiling?: true;
         },
       ) {
-        const { targeted, overrideModel, hostedAppUrl, refusedByCeiling, ...input } = params;
+        const { targeted, overrideModel, projectRef, hostedAppUrl, refusedByCeiling, ...input } =
+          params;
         const launched: Array<ThreadLaunch.ThreadLaunchInput> = [];
         const { projectId, modelSelection, dependencies } = clientLaunchHarness({
           runtimeModeCeiling,
@@ -223,7 +237,10 @@ it.effect(
           ),
         );
         const result = yield* toolkit
-          .handle("t3_thread_launch", targeted === false ? input : { ...input, projectId })
+          .handle(
+            "t3_thread_launch",
+            targeted === false ? input : { ...input, projectId: projectRef ?? projectId },
+          )
           .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
         return { result: result.at(-1)?.result, launched, projectId, modelSelection };
       });
@@ -266,7 +283,21 @@ it.effect(
         title: "Fix",
         targeted: false,
       });
-      expect(untargeted.result).toMatchObject({ code: "target_required" });
+      expect(untargeted.result).toMatchObject({ projectId: untargeted.projectId });
+      expect(untargeted.launched[0]?.projectId).toBe(untargeted.projectId);
+
+      const byTitle = yield* launchWith("full-access", "full-access", {
+        title: "Fix",
+        projectRef: "client target",
+      });
+      expect(byTitle.launched[0]?.projectId).toBe(byTitle.projectId);
+
+      const unknownProject = yield* launchWith("full-access", "full-access", {
+        title: "Fix",
+        projectRef: "nope",
+      });
+      expect(unknownProject.result).toMatchObject({ code: "invalid_request" });
+      expect(unknownProject.launched).toHaveLength(0);
 
       const overrideModel = {
         instanceId: ProviderInstanceId.make("codex"),
