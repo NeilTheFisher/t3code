@@ -54,6 +54,8 @@ import { requestUrl } from "../requestUrl.ts";
 const SIGNING_SECRET_NAME = "mcp-oauth-signing-key";
 const AUTHORIZATION_CODE_TTL_MS = 60_000;
 const MAX_CLIENT_NAME_LENGTH = 100;
+// Gemini Spark registers six oauth-redirect.googleusercontent.com URIs for one
+// client, so the cap has to clear that while still bounding the signed client id.
 const MAX_REDIRECT_URIS = 10;
 const MAX_REDIRECT_URI_LENGTH = 512;
 // The client_id rides in the authorize URL. Past the original five-URI limit, cap it to leave room
