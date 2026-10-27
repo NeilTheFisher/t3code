@@ -1613,6 +1613,8 @@ export const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props
   onHighlight: () => void;
   onSelect: () => void;
   onFileDropThreads: (threadRef: ScopedThreadRef, files: File[]) => void;
+  /** Search rows use the sidebar's pointer sensor directly; they are not sortable. */
+  onDragStart: (event: PointerEvent) => void;
 }) {
   const thread =
     useThreadShell(scopeThreadRef(props.thread.environmentId, props.thread.id)) ?? props.thread;
@@ -1690,6 +1692,11 @@ export const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props
               aria-current={accessibility.current}
               aria-describedby={`${props.resultId}-pr`}
               aria-label={accessibility.label}
+              onPointerDown={(event) => {
+                if (event.nativeEvent.isPrimary && event.nativeEvent.button === 0) {
+                  props.onDragStart(event.nativeEvent);
+                }
+              }}
               onMouseMove={props.onHighlight}
               onClick={props.onSelect}
               className={cn(

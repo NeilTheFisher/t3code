@@ -1,14 +1,28 @@
-import type { ClientSettings, SidebarThreadWorkspace } from "@t3tools/contracts";
+import { useAtomValue } from "@effect/atom-react";
+import { Atom } from "effect/reactivity";
+import {
+  DEFAULT_THREAD_WORKSPACE_ICON,
+  effectiveThreadWorkspaces,
+  threadWorkspaceAssignmentKey,
+  type ServerSettings,
+  type ServerSettingsPatch,
+  type SidebarThreadWorkspace,
+} from "@t3tools/contracts";
+import { runAtomCommand } from "@t3tools/client-runtime/state/runtime";
 
-import { persistClientSettingsUpdate, useClientSettings } from "./useSettings";
+import { appAtomRegistry } from "../rpc/atomRegistry";
+import { primaryEnvironmentIdAtom } from "../state/primaryEnvironment";
+import { usePrimaryEnvironmentId } from "../state/environments";
+import { serverEnvironment } from "../state/server";
+import { useAtomCommand } from "../state/use-atom-command";
+import { getClientSettings, persistClientSettingsUpdate, useClientSettings } from "./useSettings";
 import {
   assignThreadToWorkspace,
   createThreadWorkspaceId,
-  DEFAULT_THREAD_WORKSPACE_ICON,
-  DEFAULT_THREAD_WORKSPACES,
+  isUnsortedWorkspaceSelection,
   removeThreadWorkspaceAssignments,
-  threadWorkspaceKey,
   type ThreadWorkspaceAssignments,
+  type ThreadWorkspaceFilter,
 } from "../components/sidebar/threadWorkspaces";
 
 export type ThreadWorkspacesController = {
@@ -16,6 +30,8 @@ export type ThreadWorkspacesController = {
   readonly workspaces: readonly SidebarThreadWorkspace[];
   readonly activeWorkspaceId: string | null;
   readonly assignments: ThreadWorkspaceAssignments;
+  /** The list and search filter, or null while the strip is off. */
+  readonly filter: ThreadWorkspaceFilter | null;
   readonly activeWorkspace: SidebarThreadWorkspace | null;
   readonly setActiveWorkspaceId: (workspaceId: string | null) => void;
   readonly createWorkspace: (name: string) => string;
@@ -27,87 +43,131 @@ export type ThreadWorkspacesController = {
   readonly assignThreads: (threadKeys: readonly string[], workspaceId: string | null) => void;
 };
 
+const noServerSettingsAtom = Atom.make<ServerSettings | null>(null);
+
+/**
+ * Merges assignments into the live settings rather than the ones captured at the
+ * call site: a drag outlives its render, and thread creation runs outside React.
+ */
+function assignThreadsNow(
+  threadKeys: readonly string[],
+  workspaceId: string | null,
+  command: { readonly label: string; readonly reportFailure?: boolean },
+): void {
+  // Workspaces belong to the primary environment, which is also the list the
+  // strip renders, so a thread from another environment still files into it.
+  const environmentId = appAtomRegistry.get(primaryEnvironmentIdAtom);
+  if (environmentId === null) return;
+  const settings = appAtomRegistry.get(serverEnvironment.settingsValueAtom(environmentId));
+  if (!settings?.sidebarThreadWorkspacesEnabled) return;
+  // A slot selection or a workspace deleted by another client is not a workspace
+  // id; writing one would leave an assignment nothing can resolve.
+  if (
+    workspaceId !== null &&
+    !effectiveThreadWorkspaces(settings).some((workspace) => workspace.id === workspaceId)
+  ) {
+    return;
+  }
+  const patch: ServerSettingsPatch = {
+    sidebarThreadWorkspaceAssignments: assignThreadToWorkspace(
+      settings.sidebarThreadWorkspaceAssignments,
+      threadKeys,
+      workspaceId,
+    ),
+  };
+  void runAtomCommand(
+    appAtomRegistry,
+    serverEnvironment.updateSettings,
+    { environmentId, input: { patch } },
+    command,
+  );
+}
+
 /**
  * Files a thread created while a workspace is active into that workspace. Call
- * sites pass this as `onThreadCreated`, so every way of starting a thread —
- * sidebar, command palette, keybinding, scratch project — agrees on where the
- * thread lands. Assignments are read from the live snapshot, so a workspace
- * switch that happens mid-creation wins.
+ * sites pass this as `onThreadCreated`, so the sidebar, command palette,
+ * keybinding and scratch project all agree on where the thread lands. Reads the
+ * live atoms, so a workspace switch mid-creation wins.
  */
 export function fileThreadInActiveWorkspace(threadRef: {
   readonly environmentId: string;
   readonly threadId: string;
 }): void {
-  void persistClientSettingsUpdate((current) => {
-    const activeWorkspaceId = current.sidebarActiveThreadWorkspaceId;
-    if (!current.sidebarThreadWorkspacesEnabled || activeWorkspaceId === null) return current;
-    return {
-      ...current,
-      sidebarThreadWorkspaceAssignments: assignThreadToWorkspace(
-        current.sidebarThreadWorkspaceAssignments,
-        [threadWorkspaceKey(threadRef.environmentId, threadRef.threadId)],
-        activeWorkspaceId,
-      ),
-    };
-  });
+  const activeWorkspaceId = getClientSettings().sidebarActiveThreadWorkspaceId;
+  if (activeWorkspaceId === null) return;
+  assignThreadsNow(
+    [threadWorkspaceAssignmentKey(threadRef.environmentId, threadRef.threadId)],
+    activeWorkspaceId,
+    { label: "File thread in workspace", reportFailure: false },
+  );
 }
 
 /**
- * Resolves the list a mutator should edit: saved workspaces, or the seeded
- * defaults. The defaults are never written until the user edits the strip.
- */
-function resolveStoredWorkspaces(current: ClientSettings): readonly SidebarThreadWorkspace[] {
-  return current.sidebarThreadWorkspaces.length === 0 && current.sidebarThreadWorkspacesEnabled
-    ? DEFAULT_THREAD_WORKSPACES
-    : current.sidebarThreadWorkspaces;
-}
-
-/**
- * The workspaces strip's view of the client settings that back it. An enabled
- * strip with no saved workspaces falls back to the seeded defaults without
- * writing them, so re-enabling the beta never resurrects a deleted workspace.
+ * The workspaces strip's view of the server settings that back it, with the
+ * active workspace from this device's own client settings. An enabled strip with
+ * no saved workspaces falls back to the seeded defaults without writing them, so
+ * re-enabling the beta never resurrects a deleted workspace.
  */
 export function useThreadWorkspaces(): ThreadWorkspacesController {
-  const settings = useClientSettings((current: ClientSettings) => ({
-    enabled: current.sidebarThreadWorkspacesEnabled,
-    workspaces: current.sidebarThreadWorkspaces,
+  const environmentId = usePrimaryEnvironmentId();
+  const serverSettings = useAtomValue(
+    environmentId === null
+      ? noServerSettingsAtom
+      : serverEnvironment.settingsValueAtom(environmentId),
+  );
+  const client = useClientSettings((current) => ({
     activeWorkspaceId: current.sidebarActiveThreadWorkspaceId,
-    assignments: current.sidebarThreadWorkspaceAssignments,
   }));
+  const updateSettings = useAtomCommand(
+    serverEnvironment.updateSettings,
+    "thread workspaces update",
+  );
 
-  const workspaces =
-    settings.enabled && settings.workspaces.length === 0
-      ? DEFAULT_THREAD_WORKSPACES
-      : settings.workspaces;
+  const source =
+    serverSettings === null
+      ? { enabled: false, workspaces: [], assignments: {} }
+      : {
+          enabled: serverSettings.sidebarThreadWorkspacesEnabled,
+          workspaces: serverSettings.sidebarThreadWorkspaces,
+          assignments: serverSettings.sidebarThreadWorkspaceAssignments,
+        };
+  const savedWorkspaces = () =>
+    effectiveThreadWorkspaces({
+      sidebarThreadWorkspacesEnabled: source.enabled,
+      sidebarThreadWorkspaces: source.workspaces,
+    });
+  const workspaces = savedWorkspaces();
   const activeWorkspaceId =
-    settings.activeWorkspaceId !== null &&
-    workspaces.some((workspace) => workspace.id === settings.activeWorkspaceId)
-      ? settings.activeWorkspaceId
+    client.activeWorkspaceId !== null &&
+    (isUnsortedWorkspaceSelection(client.activeWorkspaceId, workspaces) ||
+      workspaces.some((workspace) => workspace.id === client.activeWorkspaceId))
+      ? client.activeWorkspaceId
       : null;
 
-  const write = (mutate: (current: ClientSettings) => Partial<ClientSettings>) => {
-    void persistClientSettingsUpdate((current) => ({ ...current, ...mutate(current) }));
+  const writeServer = (patch: ServerSettingsPatch) => {
+    if (environmentId === null) return;
+    void updateSettings({ environmentId, input: { patch } });
   };
 
   const setActiveWorkspaceId = (workspaceId: string | null) => {
-    write(() => ({ sidebarActiveThreadWorkspaceId: workspaceId }));
+    void persistClientSettingsUpdate((current) => ({
+      ...current,
+      sidebarActiveThreadWorkspaceId: workspaceId,
+    }));
   };
 
   const createWorkspace = (name: string) => {
     const id = createThreadWorkspaceId(workspaces);
-    write((current) => {
-      const existing = resolveStoredWorkspaces(current);
-      return {
-        sidebarThreadWorkspaces: [
-          ...existing,
-          {
-            id,
-            name: name.trim() || "Workspace",
-            icon: DEFAULT_THREAD_WORKSPACE_ICON,
-            tint: "update" as const,
-          },
-        ],
-      };
+    writeServer({
+      sidebarThreadWorkspaces: [
+        ...savedWorkspaces(),
+        {
+          id,
+          name: name.trim() || "Workspace",
+          icon: DEFAULT_THREAD_WORKSPACE_ICON,
+          tint: "update",
+        },
+      ],
     });
     return id;
   };
@@ -116,44 +176,38 @@ export function useThreadWorkspaces(): ThreadWorkspacesController {
     workspaceId: string,
     patch: Partial<Pick<SidebarThreadWorkspace, "name" | "icon" | "tint">>,
   ) => {
-    write((current) => ({
-      sidebarThreadWorkspaces: resolveStoredWorkspaces(current).map((workspace) =>
+    writeServer({
+      sidebarThreadWorkspaces: savedWorkspaces().map((workspace) =>
         workspace.id === workspaceId ? { ...workspace, ...patch } : workspace,
       ),
-    }));
+    });
   };
 
   const deleteWorkspace = (workspaceId: string) => {
-    write((current) => ({
-      sidebarThreadWorkspaces: resolveStoredWorkspaces(current).filter(
+    writeServer({
+      sidebarThreadWorkspaces: savedWorkspaces().filter(
         (workspace) => workspace.id !== workspaceId,
       ),
       sidebarThreadWorkspaceAssignments: removeThreadWorkspaceAssignments(
-        current.sidebarThreadWorkspaceAssignments,
+        source.assignments,
         workspaceId,
       ),
-      sidebarActiveThreadWorkspaceId:
-        current.sidebarActiveThreadWorkspaceId === workspaceId
-          ? null
-          : current.sidebarActiveThreadWorkspaceId,
-    }));
+    });
+    if (client.activeWorkspaceId === workspaceId) setActiveWorkspaceId(null);
   };
 
   const assignThreads = (threadKeys: readonly string[], workspaceId: string | null) => {
-    write((current) => ({
-      sidebarThreadWorkspaceAssignments: assignThreadToWorkspace(
-        current.sidebarThreadWorkspaceAssignments,
-        threadKeys,
-        workspaceId,
-      ),
-    }));
+    assignThreadsNow(threadKeys, workspaceId, { label: "thread workspaces update" });
   };
 
   return {
-    enabled: settings.enabled,
+    enabled: source.enabled,
     workspaces,
     activeWorkspaceId,
-    assignments: settings.assignments,
+    assignments: source.assignments,
+    filter: source.enabled
+      ? { assignments: source.assignments, workspaces, activeWorkspaceId }
+      : null,
     activeWorkspace: workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? null,
     setActiveWorkspaceId,
     createWorkspace,

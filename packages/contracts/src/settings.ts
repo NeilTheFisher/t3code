@@ -93,6 +93,36 @@ export const SidebarThreadWorkspace = Schema.Struct({
   tint: TrimmedNonEmptyString,
 });
 export type SidebarThreadWorkspace = typeof SidebarThreadWorkspace.Type;
+
+/** What an agent needs to identify a workspace; icons and tints stay a client concern. */
+export const ThreadWorkspaceRef = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  name: TrimmedNonEmptyString,
+});
+export type ThreadWorkspaceRef = typeof ThreadWorkspaceRef.Type;
+
+export const DEFAULT_THREAD_WORKSPACE_ICON = "briefcase";
+export const DEFAULT_THREAD_WORKSPACE_TINT = "info";
+
+/** Shown, without being saved, until the first workspace edit persists a list. */
+export const DEFAULT_THREAD_WORKSPACES: readonly SidebarThreadWorkspace[] = [
+  { id: "work", name: "Work", icon: "building-2", tint: "info" },
+  { id: "personal", name: "Personal", icon: "house", tint: "success" },
+];
+
+/** The list every surface must agree on, including the seeded defaults nobody saved. */
+export function effectiveThreadWorkspaces(
+  settings: Pick<ServerSettings, "sidebarThreadWorkspacesEnabled" | "sidebarThreadWorkspaces">,
+): readonly SidebarThreadWorkspace[] {
+  return settings.sidebarThreadWorkspacesEnabled && settings.sidebarThreadWorkspaces.length === 0
+    ? DEFAULT_THREAD_WORKSPACES
+    : settings.sidebarThreadWorkspaces;
+}
+
+/** Assignment map key. Mirrors `scopedThreadKey`, which clients already use for thread identity. */
+export function threadWorkspaceAssignmentKey(environmentId: string, threadId: string): string {
+  return `${environmentId}:${threadId}`;
+}
 export const MIN_SIDEBAR_AUTO_SETTLE_AFTER_DAYS = 1;
 export const MAX_SIDEBAR_AUTO_SETTLE_AFTER_DAYS = 90;
 export const SidebarAutoSettleAfterDays = Schema.Number.check(
@@ -497,6 +527,7 @@ export const ClientSettingsSchema = Schema.Struct({
 
   planModeEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   contextWindowMeterEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  composerCollapseOnScroll: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   composerRichTextEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   sendShortcut: Schema.Literals(["enter", "mod-enter-multiline", "mod-enter"]).pipe(
     Schema.withDecodingDefault(Effect.succeed("enter")),
@@ -1307,6 +1338,21 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(false)),
   ),
   sidebarAutoSettleOnMerge: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  /**
+   * Thread workspaces live on the server so every device pointed at this
+   * environment files threads the same way. The active workspace stays a client
+   * preference: which one you are looking at belongs to the screen.
+   */
+  sidebarThreadWorkspacesEnabled: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(Effect.succeed(false)),
+  ),
+  sidebarThreadWorkspaces: Schema.Array(SidebarThreadWorkspace).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+  sidebarThreadWorkspaceAssignments: Schema.Record(
+    TrimmedNonEmptyString,
+    TrimmedNonEmptyString,
+  ).pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   backgroundActivity: BackgroundActivitySettings,
 
   automaticGitFetchInterval: Schema.DurationFromMillis.pipe(
@@ -1650,6 +1696,11 @@ export const ServerSettingsPatch = Schema.Struct({
   idleCompaction: Schema.optionalKey(IdleCompactionMode),
   sidebarAutoSettleKeepPullRequests: Schema.optionalKey(Schema.Boolean),
   sidebarAutoSettleOnMerge: Schema.optionalKey(Schema.Boolean),
+  sidebarThreadWorkspacesEnabled: Schema.optionalKey(Schema.Boolean),
+  sidebarThreadWorkspaces: Schema.optionalKey(Schema.Array(SidebarThreadWorkspace)),
+  sidebarThreadWorkspaceAssignments: Schema.optionalKey(
+    Schema.Record(TrimmedNonEmptyString, TrimmedNonEmptyString),
+  ),
   autoResumeLimitedThreads: Schema.optionalKey(Schema.Boolean),
   snoozeLimitedThreads: Schema.optionalKey(Schema.Boolean),
   snoozePresets: Schema.optionalKey(SnoozePresetSettings),
@@ -1806,6 +1857,7 @@ export const ClientSettingsPatch = Schema.Struct({
   pullRequestLinksOpenInApp: Schema.optionalKey(Schema.Boolean),
   planModeEnabled: Schema.optionalKey(Schema.Boolean),
   contextWindowMeterEnabled: Schema.optionalKey(Schema.Boolean),
+  composerCollapseOnScroll: Schema.optionalKey(Schema.Boolean),
   composerRichTextEnabled: Schema.optionalKey(Schema.Boolean),
   sendShortcut: Schema.optionalKey(Schema.Literals(["enter", "mod-enter-multiline", "mod-enter"])),
   followUpBehavior: Schema.optionalKey(Schema.Literals(["queue", "steer"])),
@@ -1817,16 +1869,13 @@ export const ClientSettingsPatch = Schema.Struct({
   threadDetailsItems: Schema.optionalKey(Schema.Record(Schema.String, Schema.Boolean)),
   legacySidebarEnabled: Schema.optionalKey(Schema.Boolean),
   sidebarWorkingShelfEnabled: Schema.optionalKey(Schema.Boolean),
-<<<<<<< HEAD
   sidebarThreadPreviewCount: Schema.optionalKey(SidebarThreadPreviewCount),
-=======
   sidebarThreadWorkspacesEnabled: Schema.optionalKey(Schema.Boolean),
   sidebarThreadWorkspaces: Schema.optionalKey(Schema.Array(SidebarThreadWorkspace)),
   sidebarThreadWorkspaceAssignments: Schema.optionalKey(
     Schema.Record(TrimmedNonEmptyString, TrimmedNonEmptyString),
   ),
   sidebarActiveThreadWorkspaceId: Schema.optionalKey(Schema.NullOr(TrimmedNonEmptyString)),
->>>>>>> c91765fda0 (feat(web): group sidebar threads into workspaces behind a beta flag)
   sidebarProjectGroupingMode: Schema.optionalKey(SidebarProjectGroupingMode),
   sidebarProjectGroupingOverrides: Schema.optionalKey(
     Schema.Record(TrimmedNonEmptyString, SidebarProjectGroupingMode),

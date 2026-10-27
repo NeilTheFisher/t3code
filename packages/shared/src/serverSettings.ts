@@ -362,6 +362,10 @@ export function applyServerSettingsPatch(
     usageModelAliases: usageModelAliasesPatch,
     // Entry replacement: deepMerge would keep keys the client meant to clear.
     projectSettingsOverrides: projectSettingsOverridesPatch,
+    // Same for workspaces: a removed workspace or an unassigned thread has to
+    // disappear, and arrays of workspaces must not merge element-wise.
+    sidebarThreadWorkspaces: sidebarThreadWorkspacesPatch,
+    sidebarThreadWorkspaceAssignments: sidebarThreadWorkspaceAssignmentsPatch,
     projectAgentBrowserAccessOverrides: _legacyBrowserAccess,
     projectAutoPullOverrides: _legacyAutoPull,
     projectScriptOverrides: _legacyScripts,
@@ -536,6 +540,12 @@ export function applyServerSettingsPatch(
             ).filter(([, entry]) => Object.keys(entry).length > 0),
           ),
         }
+      : {}),
+    ...(sidebarThreadWorkspacesPatch !== undefined
+      ? { sidebarThreadWorkspaces: sidebarThreadWorkspacesPatch }
+      : {}),
+    ...(sidebarThreadWorkspaceAssignmentsPatch !== undefined
+      ? { sidebarThreadWorkspaceAssignments: sidebarThreadWorkspaceAssignmentsPatch }
       : {}),
     ...(patch.defaultModelSelection !== undefined
       ? { defaultModelSelection: patch.defaultModelSelection }

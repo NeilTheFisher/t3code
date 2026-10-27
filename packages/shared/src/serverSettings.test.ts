@@ -748,6 +748,35 @@ describe("serverSettings helpers", () => {
   });
 });
 
+describe("thread workspace settings", () => {
+  const work = { id: "work", name: "Work", icon: "building-2", tint: "info" };
+  const personal = { id: "personal", name: "Personal", icon: "house", tint: "success" };
+
+  it("replaces the assignment map so an unfiled thread disappears", () => {
+    const assigned = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+      sidebarThreadWorkspaceAssignments: { "env-a:1": "work", "env-a:2": "personal" },
+    });
+
+    const unfiled = applyServerSettingsPatch(assigned, {
+      sidebarThreadWorkspaceAssignments: { "env-a:2": "personal" },
+    });
+
+    expect(unfiled.sidebarThreadWorkspaceAssignments).toEqual({ "env-a:2": "personal" });
+  });
+
+  it("replaces the workspace list instead of merging it element-wise", () => {
+    const saved = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+      sidebarThreadWorkspaces: [work, personal],
+    });
+
+    const shortened = applyServerSettingsPatch(saved, {
+      sidebarThreadWorkspaces: [personal],
+    });
+
+    expect(shortened.sidebarThreadWorkspaces).toEqual([personal]);
+  });
+});
+
 describe("worktreesDirectory", () => {
   it("remembers previous custom locations so their worktrees stay managed", () => {
     const first = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, { worktreesDirectory: "/a" });

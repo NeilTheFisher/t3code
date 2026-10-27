@@ -6,7 +6,9 @@ import {
   type RunId,
   OrchestratorMcpFailure,
   type OrchestrationV2Command,
+  threadWorkspaceAssignmentKey,
 } from "@t3tools/contracts";
+import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import { modelSelectionCommandType } from "@t3tools/shared/model";
 
@@ -21,7 +23,9 @@ import {
 } from "../../threadAccess.ts";
 import * as ThreadSearch from "../../../orchestration-v2/ThreadSearch.ts";
 import * as ScheduledTasks from "../../../scheduledTasks/ScheduledTaskService.ts";
+import * as ServerSettings from "../../../serverSettings.ts";
 import { queuedRunsInDeliveryOrder } from "../../../orchestration-v2/QueuedRunOrder.ts";
+import { planThreadWorkspaceFile, planThreadWorkspaceUnfile } from "./threadWorkspaceTarget.ts";
 import { ThreadToolkit } from "./tools.ts";
 
 function queueEntry(
@@ -330,6 +334,49 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
   t3_thread_organize: writesThread((input) =>
     Effect.gen(function* () {
       const { threads, projection, caller } = yield* readThread(input.threadId);
+      if (input.action === "file" || input.action === "unfile") {
+        const scope = yield* McpInvocationContext.McpInvocationContext;
+        const settings = yield* ServerSettings.ServerSettingsService;
+        const crypto = yield* Crypto.Crypto;
+        const current = yield* settings.getSettings.pipe(Effect.mapError(unavailable));
+        const threadKey = threadWorkspaceAssignmentKey(scope.environmentId, projection.thread.id);
+        if (input.action === "unfile") {
+          yield* settings
+            .updateSettings(planThreadWorkspaceUnfile({ settings: current, threadKey }))
+            .pipe(Effect.mapError(unavailable));
+          return { threadId: projection.thread.id, workspace: null };
+        }
+        if (input.workspace === undefined) {
+          return yield* new OrchestratorMcpFailure({
+            code: "invalid_request",
+            message: "file requires `workspace`, which is a workspace id or name.",
+          });
+        }
+        const plan = planThreadWorkspaceFile({
+          settings: current,
+          threadKey,
+          workspace: input.workspace,
+          createWorkspace: input.createWorkspace === true,
+          newWorkspaceId: `ws-${yield* crypto.randomUUIDv4().pipe(Effect.orDie)}`,
+        });
+        if (plan.kind === "ambiguous") {
+          return yield* new OrchestratorMcpFailure({
+            code: "invalid_request",
+            message: `More than one workspace is named "${input.workspace}". Pass one of these ids: ${plan.ids.join(", ")}.`,
+          });
+        }
+        if (plan.kind === "missing") {
+          return yield* new OrchestratorMcpFailure({
+            code: "invalid_request",
+            message:
+              plan.names.length === 0
+                ? `No workspace named "${input.workspace}" exists, and there are no workspaces yet.`
+                : `No workspace named "${input.workspace}" exists. Available workspaces: ${plan.names.join(", ")}.`,
+          });
+        }
+        yield* settings.updateSettings(plan.patch).pipe(Effect.mapError(unavailable));
+        return { threadId: projection.thread.id, workspace: plan.workspace };
+      }
       const common = { commandId: yield* newCommandId(), threadId: projection.thread.id };
       if (input.action === "settle") {
         return yield* threads

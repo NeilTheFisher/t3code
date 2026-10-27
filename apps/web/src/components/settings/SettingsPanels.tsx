@@ -17,6 +17,7 @@ import {
   DEFAULT_TTS_SERVER_URL,
   DEFAULT_TTS_VOICE,
   DEFAULT_UNIFIED_SETTINGS,
+  DEFAULT_SERVER_SETTINGS,
   type DiffLayout,
   type EnvironmentIdentificationMode,
   MAX_APPEARANCE_CONTRAST,
@@ -89,6 +90,7 @@ import { EMPTY_SERVER_PROVIDERS } from "../../state/server";
 import { Button } from "../ui/button";
 import { DraftInput } from "../ui/draft-input";
 import { Input } from "../ui/input";
+import { useTtsVoices } from "~/hooks/useTtsVoices";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { ScopedSwitch } from "./ScopedSwitch";
@@ -788,7 +790,6 @@ export function LegacyFeaturesSection() {
 export function GeneralSettingsPanel() {
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
-import { useTtsVoices } from "~/hooks/useTtsVoices";
   const lastEnabledProjectGroupingMode = useRef<SidebarProjectGroupingMode>(
     readLastEnabledProjectGroupingMode(),
   );
@@ -805,6 +806,34 @@ import { useTtsVoices } from "~/hooks/useTtsVoices";
               checked={settings.inAppNotificationsEnabled}
               onCheckedChange={(checked) => updateSettings({ inAppNotificationsEnabled: checked })}
               aria-label="In-app notifications"
+        <SettingsRow
+          serverScoped
+          settingKeys={["sidebarThreadWorkspacesEnabled"]}
+          {...searchableSetting("thread-workspaces")}
+          description="Group threads into named workspaces with a strip in the sidebar footer. Assign threads from their context menu or by dragging them onto a workspace."
+          resetAction={
+            settings.sidebarThreadWorkspacesEnabled !==
+            DEFAULT_SERVER_SETTINGS.sidebarThreadWorkspacesEnabled ? (
+              <SettingResetButton
+                label="thread workspaces"
+                onClick={() =>
+                  updateSettings({
+                    sidebarThreadWorkspacesEnabled:
+                      DEFAULT_SERVER_SETTINGS.sidebarThreadWorkspacesEnabled,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <ScopedSwitch
+              settingKeys={["sidebarThreadWorkspacesEnabled"]}
+              checked={settings.sidebarThreadWorkspacesEnabled}
+              onCheckedChange={(checked) =>
+                updateSettings({ sidebarThreadWorkspacesEnabled: Boolean(checked) })
+              }
+              aria-label="Thread workspaces"
+        />
             />
           }
         />

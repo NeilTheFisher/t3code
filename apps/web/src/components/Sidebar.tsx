@@ -69,6 +69,7 @@ import {
   SettingsIcon,
 } from "lucide-react";
 import {
+  Fragment,
   useEffect,
   useLayoutEffect,
   useReducer,
@@ -244,14 +245,20 @@ import {
 import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { ThreadWorkspaceStrip } from "./sidebar/ThreadWorkspaceStrip";
-import type { SidebarThreadWorkspace } from "@t3tools/contracts";
 import {
   countThreadWorkspaceAttention,
   filterThreadsByWorkspace,
+  orderThreadWorkspaceSearch,
   resolveAssignedWorkspaceId,
   threadNeedsWorkspaceAttention,
-  type ThreadWorkspaceAssignments,
+  threadWorkspaceSettledCount,
+  UNSORTED_WORKSPACE_SELECTION,
+  type ThreadWorkspaceFilter,
 } from "./sidebar/threadWorkspaces";
+import {
+  createSidebarListScrollGuard,
+  type SidebarListScrollGuard,
+} from "./sidebar/sidebarListScrollGuard";
 import { useThreadWorkspaces } from "../hooks/useThreadWorkspaces";
 import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
 import { TooltipProvider } from "./ui/tooltip";
@@ -345,12 +352,6 @@ type SidebarOptimisticDrop = {
   readonly assignedKeys: ReadonlyMap<string, string>;
 };
 
-type WorkspaceFilter = {
-  readonly assignments: ThreadWorkspaceAssignments;
-  readonly workspaces: ReadonlyArray<SidebarThreadWorkspace>;
-  readonly activeWorkspaceId: string | null;
-};
-
 interface SidebarThreadPartitionInput {
   readonly threads: readonly EnvironmentThreadShell[];
   readonly scopedProjectKeys: ReadonlySet<string> | null;
@@ -361,7 +362,7 @@ interface SidebarThreadPartitionInput {
   readonly workingShelfEnabled: boolean;
   /** Boring mode: folders list active threads by the user's latest message. */
   readonly sortActiveBySend: boolean;
-  readonly workspaceFilter: WorkspaceFilter | null;
+  readonly workspaceFilter: ThreadWorkspaceFilter | null;
   // Snooze wakes, the queued-turn grace and the Working shelf's exit grace depend
   // on the clock, so the minute tick, the precise snooze-wake tick and the inbox
   // tracker's expiry version are inputs: a new key repartitions.
@@ -500,8 +501,11 @@ function useSidebarThreads(input: {
   });
   const listedSettledThreads = settledThreads.filter(olderSettledShelf.isListed);
   useOlderSettledShelfGrowth(olderSettledShelf, listedSettledThreads);
-  const settledCount =
-    settledThreads.length + olderSettledShelf.unloadedCount(partition.visibleThreads);
+  const settledCount = threadWorkspaceSettledCount({
+    heldCount: settledThreads.length,
+    unloadedCount: olderSettledShelf.unloadedCount(partition.visibleThreads),
+    filter: workspaceFilter,
+  });
   const visibleSettledThreads = (() => {
     const visible = listedSettledThreads.slice(0, settledVisibleCount);
     if (
@@ -567,13 +571,6 @@ function useSidebarThreads(input: {
     ...partition,
     threads,
     workingShelfEnabled,
-    searchableThreads: [
-      ...pinnedThreads,
-      ...activeThreads,
-      ...workingThreads,
-      ...snoozedThreads,
-      ...settledThreads,
-    ],
     settledVisibleCount,
     settledCount,
     olderSettledShelf,
@@ -624,15 +621,7 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
     sortActiveBySend,
   } = input;
   const preciseNow = new Date().toISOString();
-  const visibleInScope = filterSidebarV2VisibleThreads(
-    threads,
-    scopedProjectKeys,
-    delegatedUnderParent,
-  );
-  const visible =
-    input.workspaceFilter === null
-      ? visibleInScope
-      : filterThreadsByWorkspace(visibleInScope, input.workspaceFilter);
+  const visible = filterSidebarV2VisibleThreads(threads, scopedProjectKeys, delegatedUnderParent);
   const inboxObservation = inboxReturns.observe(workingShelfEnabled ? threads : null);
   const pinned: EnvironmentThreadShell[] = [];
   const active: EnvironmentThreadShell[] = [];
@@ -693,32 +682,47 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
     : workingShelfEnabled
       ? sortInboxThreadsByReturn(active, inboxObservation.returnedAt)
       : sortThreadsForSidebar(active);
+  const orderedPinned =
+    optimisticDrop?.section !== "pinned" || optimisticDrop.order === null
+      ? sortedPinned
+      : orderItemsByPreferredIds({
+          items: sortedPinned,
+          preferredIds: optimisticDrop.order,
+          getId: (thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+        });
+  const orderedActive =
+    optimisticDrop?.section !== "active" || optimisticDrop.order === null
+      ? sortedActive
+      : orderItemsByPreferredIds({
+          items: sortedActive,
+          preferredIds: optimisticDrop.order,
+          getId: (thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+        });
+  const sortedWorking = sortWorkingThreadsBySend(working);
+  const sortedSnoozed = snoozed.toSorted(
+    (left, right) =>
+      firstValidTimestampMs(left.snoozedUntil ?? null) -
+      firstValidTimestampMs(right.snoozedUntil ?? null),
+  );
+  const sortedSettled = sortSettledThreads(settled);
   return {
-    pinnedThreads:
-      optimisticDrop?.section !== "pinned" || optimisticDrop.order === null
-        ? sortedPinned
-        : orderItemsByPreferredIds({
-            items: sortedPinned,
-            preferredIds: optimisticDrop.order,
-            getId: (thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-          }),
+    pinnedThreads: filterThreadsByWorkspace(orderedPinned, input.workspaceFilter),
     draggableThreadKeys: draggable,
     activeReorderableThreadKeys: activeReorderable,
-    activeThreads:
-      optimisticDrop?.section !== "active" || optimisticDrop.order === null
-        ? sortedActive
-        : orderItemsByPreferredIds({
-            items: sortedActive,
-            preferredIds: optimisticDrop.order,
-            getId: (thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-          }),
-    workingThreads: sortWorkingThreadsBySend(working),
-    snoozedThreads: snoozed.toSorted(
-      (left, right) =>
-        firstValidTimestampMs(left.snoozedUntil ?? null) -
-        firstValidTimestampMs(right.snoozedUntil ?? null),
-    ),
-    settledThreads: sortSettledThreads(settled),
+    activeThreads: filterThreadsByWorkspace(orderedActive, input.workspaceFilter),
+    workingThreads: filterThreadsByWorkspace(sortedWorking, input.workspaceFilter),
+    snoozedThreads: filterThreadsByWorkspace(sortedSnoozed, input.workspaceFilter),
+    settledThreads: filterThreadsByWorkspace(sortedSettled, input.workspaceFilter),
+    // Search escapes the active workspace so a filter can never hide a match.
+    searchableThreads: [
+      ...orderedPinned,
+      ...orderedActive,
+      ...sortedWorking,
+      ...sortedSnoozed,
+      ...sortedSettled,
+    ],
+    // Search rows escape the filter, so their settled marker needs the unfiltered set.
+    searchableSettledKeys: new Set(sortedSettled.map(threadShellKey)),
     visibleThreads: visible,
     snoozeNow: preciseNow,
   };
@@ -1268,25 +1272,17 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   );
 
   const threadWorkspaces = useThreadWorkspaces();
-  const threadWorkspacesRef = useRef(threadWorkspaces);
-  useEffect(() => {
-    threadWorkspacesRef.current = threadWorkspaces;
-  }, [threadWorkspaces]);
-  const workspaceFilter = threadWorkspaces.enabled
-    ? {
-        assignments: threadWorkspaces.assignments,
-        workspaces: threadWorkspaces.workspaces,
-        activeWorkspaceId: threadWorkspaces.activeWorkspaceId,
-      }
-    : null;
+  const workspaceFilter = threadWorkspaces.filter;
   const [dragOverWorkspaceId, setDragOverWorkspaceId] = useState<string | null>(null);
-  const workspaceIconElementsRef = useRef(new Map<string, HTMLButtonElement>());
-  const registerWorkspaceIconElement = useStableCallback(
-    (workspaceId: string, element: HTMLButtonElement | null) => {
-      if (element === null) workspaceIconElementsRef.current.delete(workspaceId);
-      else workspaceIconElementsRef.current.set(workspaceId, element);
-    },
-  );
+  const [dragBelowThreadList, setDragBelowThreadList] = useState(false);
+  const listScrollGuardRef = useRef<SidebarListScrollGuard | null>(null);
+  const listScrollGuard = (): SidebarListScrollGuard => {
+    const existing = listScrollGuardRef.current;
+    if (existing !== null) return existing;
+    const guard = createSidebarListScrollGuard(() => threadListRef.current);
+    listScrollGuardRef.current = guard;
+    return guard;
+  };
   const {
     workingShelfEnabled,
     pinnedThreads,
@@ -1317,6 +1313,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     orderedThreadKeys,
     threadByKey,
     settledThreadKeys,
+    searchableSettledKeys,
     snoozedThreadKeys,
     sectionByThreadKey,
     pinnedKeys,
@@ -1340,16 +1337,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     keepEmptyFolders: scopedProjectGroups.length > 0,
   });
 
-  const workspaceAttention = threadWorkspaces.enabled
-    ? countThreadWorkspaceAttention(
-        threads.filter((thread) => thread.archivedAt === null && !isSidebarSubagentThread(thread)),
-        {
-          assignments: threadWorkspaces.assignments,
-          workspaces: threadWorkspaces.workspaces,
-          needsAttention: threadNeedsWorkspaceAttention,
-        },
-      )
-    : { byWorkspace: new Map<string, number>(), total: 0 };
+  const workspaceAttention = countThreadWorkspaceAttention(
+    threads.filter((thread) => thread.archivedAt === null && !isSidebarSubagentThread(thread)),
+    workspaceFilter,
+    threadNeedsWorkspaceAttention,
+  );
 
   // Ranked across environments as the palette ranks them, so one
   // environment's list does not sit above another's better matches; rows
@@ -1391,7 +1383,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   if (messageOrder !== shownMessageOrder) setShownMessageOrder(messageOrder);
   const { titleMatches: threadTitleResults, contentMatches: threadContentResults } =
     searchSidebarThreads(searchableThreads, threadSearchQuery, new Set(messageOrder.keys));
-  const threadSearchResults = [...threadTitleResults, ...threadContentResults];
+  const { results: threadSearchResults, otherWorkspacesStartIndex } = orderThreadWorkspaceSearch(
+    [...threadTitleResults, ...threadContentResults],
+    workspaceFilter,
+  );
   // Only rows listed for their messages show one, and open find on it.
   const threadSearchMatchByKey = new Map(
     threadContentResults.flatMap((thread) => {
@@ -1715,10 +1710,14 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   };
 
   const isContextDrag = dragState?.contextDrag === true || dragState?.activeSection === "working";
-  const dragTargetSection = isContextDrag ? null : (dragState?.targetSection ?? null);
+  const dragTargetSection =
+    isContextDrag || dragBelowThreadList ? null : (dragState?.targetSection ?? null);
   const finishThreadDrag = (started: boolean) => {
     dragSensorRef.current = null;
     contextDragKeyRef.current = null;
+    setDragOverWorkspaceId(null);
+    setDragBelowThreadList(false);
+    listScrollGuard().stop();
     endThreadContextDrag();
     if (started) {
       listMotionRef.current?.release();
@@ -1741,11 +1740,44 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       return ref ? [ref] : [];
     });
   };
+  /** Everything below the visible list is drop-target territory, never a scroll zone. */
+  const pointerBelowThreadList = (point: { x: number; y: number }): boolean =>
+    listScrollGuard().isBelowList(point);
   const pointerOutsideThreadList = (point: { x: number; y: number }) => {
     const bounds = threadListRef.current?.getBoundingClientRect();
     return bounds !== undefined && (point.x < bounds.left || point.x > bounds.right);
   };
+  const workspaceIdAtPoint = (clientX: number, clientY: number): string | null => {
+    if (!threadWorkspaces.enabled) return null;
+    const element = document
+      .elementFromPoint(clientX, clientY)
+      ?.closest<HTMLElement>("[data-workspace-id]");
+    return element?.dataset.workspaceId ?? null;
+  };
+  /** Unsorted is a strip slot, so dropping there clears the assignment instead of writing one. */
+  const dropTargetWorkspaceId = (slotId: string): string | null =>
+    slotId === UNSORTED_WORKSPACE_SELECTION ? null : slotId;
   const moveThreadContextDrag = (point: { x: number; y: number }) => {
+    const belowList = pointerBelowThreadList(point);
+    setDragBelowThreadList((current) => (current === belowList ? current : belowList));
+    if (belowList) listScrollGuard().start();
+    else listScrollGuard().stop();
+    if (belowList) {
+      // The footer is a workspace drop zone, not a list section. Freezing the
+      // target and the scroll offset keeps the rows and the pinned section
+      // exactly where the drag started.
+      setDragOverWorkspaceId(workspaceIdAtPoint(point.x, point.y));
+      setDragState((current) =>
+        current === null || current.targetSection === null
+          ? current
+          : { ...current, targetSection: null },
+      );
+      const threads = contextDragThreads();
+      const title =
+        threadByKeyRef.current.get(contextDragKeyRef.current ?? "")?.title.trim() || "Thread";
+      moveThreadContextDragGhost(point, { title, count: threads.length });
+      return true;
+    }
     const contextDrag = pointerOutsideThreadList(point);
     setDragState((current) =>
       current === null || current.contextDrag === contextDrag
@@ -1763,6 +1795,22 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     return true;
   };
   const dropThreadContextDrag = (point: { x: number; y: number }) => {
+    const belowList = pointerBelowThreadList(point);
+    setDragBelowThreadList(false);
+    listScrollGuard().stop();
+    if (belowList) {
+      setDragOverWorkspaceId(null);
+      const workspaceId = workspaceIdAtPoint(point.x, point.y);
+      if (workspaceId !== null) {
+        threadWorkspaces.assignThreads(
+          contextDragThreads().map(scopedThreadKey),
+          dropTargetWorkspaceId(workspaceId),
+        );
+      }
+      // Consume the release: below the list is workspace territory, so it must
+      // neither reorder the list nor attach chat context.
+      return true;
+    }
     if (!pointerOutsideThreadList(point)) return false;
     dropThreadContext(point, contextDragThreads());
     return true;
@@ -1991,23 +2039,83 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   useLayoutEffect(() => {
     listMotionRef.current?.update(listMotionPass.animate);
   }, [listMotionPass]);
-  // Workspace icons sit outside the sortable list, so a drop on one is found by hit-testing the
-  // pointer rather than by an `over` id dnd-kit knows about.
-  const workspaceIdAtPointer = (event: DragOverEvent | DragEndEvent): string | null => {
-    if (!threadWorkspacesRef.current.enabled) return null;
+  const pointAtPointer = (event: DragOverEvent | DragEndEvent): { x: number; y: number } | null => {
     const activator = event.activatorEvent;
     if (!("clientX" in activator) || typeof activator.clientX !== "number") return null;
     const clientY =
       "clientY" in activator && typeof activator.clientY === "number" ? activator.clientY : null;
     if (clientY === null) return null;
-    const clientX = activator.clientX + event.delta.x + 0;
-    const clientYAtPointer = clientY + event.delta.y;
-    const element = document
-      .elementFromPoint(clientX, clientYAtPointer)
-      ?.closest<HTMLElement>("[data-workspace-id]");
-    return element?.dataset.workspaceId ?? null;
+    return { x: activator.clientX + event.delta.x, y: clientY + event.delta.y };
   };
+  const workspaceIdAtPointer = (event: DragOverEvent | DragEndEvent): string | null => {
+    const point = pointAtPointer(event);
+    return point === null ? null : workspaceIdAtPoint(point.x, point.y);
+  };
+  /**
+   * Search results render outside the sortable list, so their rows cannot be dnd-kit
+   * drags. They use the sidebar's pointer sensor directly and file the thread
+   * through the same workspace hit-test the list drop uses.
+   */
+  const startSearchRowDrag = useStableCallback(
+    (event: PointerEvent, threadKey: string, threadTitle: string) => {
+      if (!event.isPrimary || event.button !== 0 || dragSensorRef.current !== null) return;
+      contextDragKeyRef.current = threadKey;
+      const selection = useThreadSelectionStore.getState().selectedThreadKeys;
+      const count = selection.has(threadKey) ? Math.max(selection.size, 1) : 1;
+      const title = threadTitle.trim() || "Thread";
+      dragSensorRef.current = new SidebarPointerSensor({
+        active: threadKey,
+        event,
+        options: {
+          distance: SIDEBAR_DRAG_DISTANCE,
+          onAttach: attachDragSensor,
+          onFinish: (started) => {
+            setDragOverWorkspaceId(null);
+            finishThreadDrag(started);
+          },
+          onMove: (point) => {
+            setDragOverWorkspaceId(workspaceIdAtPoint(point.x, point.y));
+            moveThreadContextDragGhost(point, { title, count });
+            return true;
+          },
+          onDrop: (point) => {
+            const workspaceId = workspaceIdAtPoint(point.x, point.y);
+            setDragOverWorkspaceId(null);
+            if (workspaceId !== null) {
+              threadWorkspaces.assignThreads(
+                contextDragThreads().map(scopedThreadKey),
+                dropTargetWorkspaceId(workspaceId),
+              );
+            }
+            return true;
+          },
+        },
+        onPending: () => {},
+        onStart: () => {},
+        onMove: () => {},
+        onEnd: () => {},
+        onCancel: () => {},
+        onAbort: () => {},
+      });
+    },
+  );
   const handleThreadDragOver = (event: DragOverEvent) => {
+    const point = pointAtPointer(event);
+    if (point !== null && pointerBelowThreadList(point)) {
+      // The footer is workspace territory: keep the list's target and offset
+      // frozen so no section expands under the pointer.
+      listScrollGuard().start();
+      setDragOverWorkspaceId(workspaceIdAtPoint(point.x, point.y));
+      setDragState((current) =>
+        current === null ||
+        current.activeKey !== String(event.active.id) ||
+        current.targetSection === null
+          ? current
+          : { ...current, targetSection: null },
+      );
+      return;
+    }
+    listScrollGuard().stop();
     setDragOverWorkspaceId(workspaceIdAtPointer(event));
     const target = event.over
       ? resolveSidebarDropTarget(sidebarListItems, String(event.active.id), String(event.over.id))
@@ -2032,7 +2140,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
         });
   const sidebarSortingStrategy = createSidebarSortingStrategy({
     items: sidebarListItems,
-    enabled: !isContextDrag,
+    enabled: !isContextDrag && !dragBelowThreadList,
     boundaryLabelHeight: SIDEBAR_DRAG_LABEL_HEIGHT,
     settledOrder: draggedSettledOrder,
     ...(draggedActiveOrder === undefined ? {} : { activeOrder: draggedActiveOrder }),
@@ -2078,16 +2186,23 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     );
   })();
   const handleThreadDragEnd = (event: DragEndEvent) => {
-    const droppedWorkspaceId = workspaceIdAtPointer(event);
+    const point = pointAtPointer(event);
+    const belowList = point !== null && pointerBelowThreadList(point);
+    const droppedWorkspaceId = point === null ? null : workspaceIdAtPoint(point.x, point.y);
     setDragOverWorkspaceId(null);
+    setDragBelowThreadList(false);
+    listScrollGuard().stop();
     if (droppedWorkspaceId !== null) {
       const activeKey = String(event.active.id);
       const selection = useThreadSelectionStore.getState().selectedThreadKeys;
       const threadKeys =
         selection.has(activeKey) && selection.size > 1 ? [...selection] : [activeKey];
-      threadWorkspacesRef.current.assignThreads(threadKeys, droppedWorkspaceId);
+      threadWorkspaces.assignThreads(threadKeys, dropTargetWorkspaceId(droppedWorkspaceId));
       return;
     }
+    // Below the list but not on an icon: consume the drop so releasing there
+    // neither reorders the list nor attaches chat context.
+    if (belowList) return;
     const activeKey = String(event.active.id);
     const activeSection = sectionByThreadKey.get(activeKey);
     const target =
@@ -2329,16 +2444,15 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
         selectedThreads[0]!.environmentId,
       );
       const bulkWorkspaceMenu = (() => {
-        const workspaces = threadWorkspacesRef.current;
-        if (!workspaces.enabled) return null;
+        if (!threadWorkspaces.enabled) return null;
         return buildBulkMoveToWorkspaceMenuItem({
-          workspaces: workspaces.workspaces,
+          workspaces: threadWorkspaces.workspaces,
           selectedCount: selectedThreads.length,
           assignedWorkspaceIds: selectedThreads.map((thread) =>
             resolveAssignedWorkspaceId(
-              workspaces.assignments,
+              threadWorkspaces.assignments,
               scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-              workspaces.workspaces,
+              threadWorkspaces.workspaces,
             ),
           ),
         });
@@ -2416,10 +2530,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       if (clicked.value !== "mark-unread" && !checkThreadOperations(actionTargets)) return;
       if (clicked.value?.startsWith("move-to-workspace:")) {
         const targetId = clicked.value.slice("move-to-workspace:".length);
-        threadWorkspacesRef.current.assignThreads(
-          threadKeys,
-          targetId === "none" ? null : targetId,
-        );
+        threadWorkspaces.assignThreads(threadKeys, targetId === "none" ? null : targetId);
         clearSelection();
         return;
       }
@@ -2679,17 +2790,16 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
               ),
               canTurnIntoProject: canTurnThreadIntoProject(threadRef),
               workspaceMenu: (() => {
-                const workspaces = threadWorkspacesRef.current;
-                if (!workspaces.enabled) return null;
+                if (!threadWorkspaces.enabled) return null;
                 return {
-                  workspaces: workspaces.workspaces.map((workspace) => ({
+                  workspaces: threadWorkspaces.workspaces.map((workspace) => ({
                     id: workspace.id,
                     name: workspace.name,
                   })),
                   assignedWorkspaceId: resolveAssignedWorkspaceId(
-                    workspaces.assignments,
+                    threadWorkspaces.assignments,
                     threadKey,
-                    workspaces.workspaces,
+                    threadWorkspaces.workspaces,
                   ),
                 };
               })(),
@@ -2709,10 +2819,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
         if (threadActionRequiresOperate(clicked.value) && !checkThreadOperations([thread])) return;
         if (clicked.value?.startsWith("move-to-workspace:")) {
           const targetId = clicked.value.slice("move-to-workspace:".length);
-          threadWorkspacesRef.current.assignThreads(
-            [threadKey],
-            targetId === "none" ? null : targetId,
-          );
+          threadWorkspaces.assignThreads([threadKey], targetId === "none" ? null : targetId);
           return;
         }
         if (clicked.value?.startsWith("snooze:")) {
@@ -3244,9 +3351,21 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                       scopeThreadRef(thread.environmentId, thread.id),
                     );
                     return (
-                      <SidebarSearchResultRow
+                      <Fragment key={threadKey}>
+                        {index === otherWorkspacesStartIndex ? (
+                          <li
+                            aria-hidden="true"
+                            className="flex items-center gap-2 px-2 pt-3 pb-1"
+                            role="presentation"
+                          >
+                            <span className="text-2xs font-medium text-sidebar-muted-foreground">
+                              Other workspaces
+                            </span>
+                            <span className="h-px flex-1 bg-sidebar-border" />
+                          </li>
+                        ) : null}
+                        <SidebarSearchResultRow
                         isSettled={settledThreadKeys.has(threadKey)}
-                        key={threadKey}
                         thread={thread}
                         project={
                           projectByKey.get(`${thread.environmentId}:${thread.projectId}`) ?? null
@@ -3277,10 +3396,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                         }
                         searchQuery={threadSearchQuery}
                         searchMatchQuery={threadSearch.query}
+                          onDragStart={(event) => startSearchRowDrag(event, threadKey, thread.title)}
                         onHighlight={() => setActiveSearchResultIndex(index)}
                         onSelect={() => selectThreadSearchResult(thread)}
                         onFileDropThreads={handleThreadFileDrop}
                       />
+                      </Fragment>
                     );
                   })}
                 </ul>
@@ -3303,7 +3424,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             >
               <DndContext
                 sensors={dndSensors}
-                autoScroll={!isContextDrag}
+                autoScroll={!isContextDrag && !dragBelowThreadList}
                 collisionDetection={dndCollisionDetection}
                 modifiers={dndModifiers}
                 onDragStart={handleThreadDragStart}
@@ -3441,7 +3562,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                           />
                         );
                       };
-                      const from = isContextDrag ? null : (dragState?.activeSection ?? null);
+                      const from =
+                        isContextDrag || dragBelowThreadList
+                          ? null
+                          : (dragState?.activeSection ?? null);
                       const items: ReactNode[] = [
                         <SidebarDraftBlock
                           key="draft-sessions"
@@ -3667,6 +3791,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
               activeWorkspaceId={threadWorkspaces.activeWorkspaceId}
               attentionByWorkspace={workspaceAttention.byWorkspace}
               attentionTotal={workspaceAttention.total}
+              attentionUnsorted={workspaceAttention.unsorted}
               dragOverWorkspaceId={dragOverWorkspaceId}
               onCreate={() => threadWorkspaces.createWorkspace("Workspace")}
               onDelete={(workspaceId) => threadWorkspaces.deleteWorkspace(workspaceId)}
@@ -3674,7 +3799,6 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
               onUpdate={(workspaceId, patch) =>
                 threadWorkspaces.updateWorkspace(workspaceId, patch)
               }
-              registerIconElement={registerWorkspaceIconElement}
               workspaces={threadWorkspaces.workspaces}
             />
           ) : null
