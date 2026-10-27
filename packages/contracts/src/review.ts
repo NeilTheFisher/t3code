@@ -6,7 +6,8 @@ import { VcsError } from "./vcs.ts";
 export const ReviewDiffPreviewSubmodule = Schema.Struct({
   path: TrimmedNonEmptyString,
   from: TrimmedNonEmptyString,
-  to: TrimmedNonEmptyString,
+  /** Omitted compares `from` against the submodule's working tree. */
+  to: Schema.optional(TrimmedNonEmptyString),
 });
 export type ReviewDiffPreviewSubmodule = typeof ReviewDiffPreviewSubmodule.Type;
 
