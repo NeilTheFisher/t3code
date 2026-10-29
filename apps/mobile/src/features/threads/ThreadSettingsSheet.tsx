@@ -55,7 +55,6 @@ import {
   Pressable,
   RefreshControl,
   ScrollView,
-  TextInput,
   View,
 } from "react-native";
 import Animated, {
