@@ -2,6 +2,7 @@ import { makeThreadShellFixture } from "../../test-fixtures";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import {
   AuthOrchestrationOperateScope,
+  AuthSettingsWriteScope,
   EnvironmentId,
   ProjectId,
   ProviderInstanceId,
@@ -31,6 +32,16 @@ const state = vi.hoisted(() => ({
     buttons?: { text: string; onPress?: () => void }[];
   }[],
   afterRequest: undefined as (() => void) | undefined,
+  settings: null as {
+    sidebarThreadWorkspacesEnabled: boolean;
+    sidebarThreadWorkspaces: { id: string; name: string; icon: string; tint: string }[];
+    sidebarThreadWorkspaceAssignments: Record<string, string>;
+  } | null,
+  settingsRequests: [] as {
+    environmentId: string;
+    input: { patch: { sidebarThreadWorkspaceAssignments?: Record<string, string> } };
+  }[],
+  settingsFailure: false,
 }));
 
 vi.mock("react", () => ({
@@ -66,6 +77,10 @@ vi.mock("../../state/presentation", () => ({
 }));
 vi.mock("../../state/server", () => ({
   environmentServerConfigsAtom: "server-configs",
+  serverEnvironment: {
+    updateSettings: "settings-update",
+    settingsValueAtom: (environmentId: string) => `settings:${environmentId}`,
+  },
 }));
 vi.mock("../../state/atom-registry", () => ({
   appAtomRegistry: {
@@ -73,8 +88,10 @@ vi.mock("../../state/atom-registry", () => ({
       state.dropBusy = value;
     },
     get: (atom: string) =>
-      atom === "connected-environments"
-        ? state.connectedEnvironmentIds
+      atom.startsWith("settings:")
+        ? state.settings
+        : atom === "connected-environments"
+          ? state.connectedEnvironmentIds
         : atom === "thread-drop-busy"
           ? state.dropBusy
           : atom === "thread-shells"
@@ -100,7 +117,24 @@ vi.mock("../../state/atom-registry", () => ({
   },
 }));
 vi.mock("../../state/use-atom-command", () => ({
-  useAtomCommand: (command: unknown) => command,
+  useAtomCommand: (command: unknown) =>
+    command === "settings-update"
+      ? async (request: {
+          environmentId: string;
+          input: { patch: { sidebarThreadWorkspaceAssignments?: Record<string, string> } };
+        }) => {
+          state.settingsRequests.push(request);
+          if (state.settingsFailure) {
+            return AsyncResult.failure(Cause.fail(new Error("Server rejected settings")));
+          }
+          state.settings = {
+            ...state.settings!,
+            sidebarThreadWorkspaceAssignments:
+              request.input.patch.sidebarThreadWorkspaceAssignments ?? {},
+          };
+          return AsyncResult.success(state.settings);
+        }
+      : command,
 }));
 vi.mock("../../state/use-thread-outbox", () => ({ queuedThreadKeysAtom: "queued-thread-keys" }));
 vi.mock("../../state/thread-order", () => ({
@@ -192,7 +226,7 @@ beforeEach(() => {
   state.pendingOrder = null;
   state.dropBusy = false;
   state.scopes = new Map([
-    [primaryEnvironmentId, new Set([AuthOrchestrationOperateScope])],
+    [primaryEnvironmentId, new Set([AuthOrchestrationOperateScope, AuthSettingsWriteScope])],
     [otherEnvironmentId, new Set<string>()],
   ]);
   state.requests = [];
@@ -200,6 +234,13 @@ beforeEach(() => {
   state.dialogs = [];
   state.alerts = [];
   state.afterRequest = undefined;
+  state.settingsRequests = [];
+  state.settingsFailure = false;
+  state.settings = {
+    sidebarThreadWorkspacesEnabled: true,
+    sidebarThreadWorkspaces: [{ id: "work", name: "Work", icon: "briefcase", tint: "info" }],
+    sidebarThreadWorkspaceAssignments: {},
+  };
 });
 
 afterEach(() => {
@@ -239,6 +280,38 @@ describe("thread list operation permissions", () => {
     await confirm!();
 
     expect(state.requests).toEqual([]);
+  });
+});
+
+describe("thread workspace moves", () => {
+  it("files a thread into a workspace and can unfile it", async () => {
+    const actions = useThreadListActions();
+    const thread = makeThread();
+
+    expect(await actions.fileThreadInWorkspace(thread, "work")).toBe(true);
+    expect(state.settingsRequests.at(-1)).toMatchObject({
+      environmentId: primaryEnvironmentId,
+      input: {
+        patch: {
+          sidebarThreadWorkspaceAssignments: { "primary:thread": "work" },
+        },
+      },
+    });
+
+    expect(await actions.fileThreadInWorkspace(thread, null)).toBe(true);
+    expect(state.settings!.sidebarThreadWorkspaceAssignments).toEqual({});
+  });
+
+  it("rejects a move without settings write permission", async () => {
+    state.scopes.get(primaryEnvironmentId)!.delete(AuthSettingsWriteScope);
+
+    expect(await useThreadListActions().fileThreadInWorkspace(makeThread(), "work")).toBe(false);
+    expect(state.settingsRequests).toEqual([]);
+  });
+
+  it("rejects a workspace that no longer exists", async () => {
+    expect(await useThreadListActions().fileThreadInWorkspace(makeThread(), "deleted")).toBe(false);
+    expect(state.settingsRequests).toEqual([]);
   });
 });
 

@@ -10,8 +10,11 @@ export function ThreadListFilters(
     | "projects"
     | "selectedEnvironmentId"
     | "selectedProjectKey"
+    | "workspaces"
+    | "selectedWorkspaceId"
     | "onEnvironmentChange"
     | "onProjectChange"
+    | "onWorkspaceChange"
   > & {
     /** List padding the scroller bleeds through so pills start where row content does. */
     readonly gutter: number;
@@ -22,6 +25,9 @@ export function ThreadListFilters(
   );
   const selectedProject = props.projects.find(
     (project) => project.key === props.selectedProjectKey,
+  );
+  const selectedWorkspace = props.workspaces.find(
+    (workspace) => workspace.id === props.selectedWorkspaceId,
   );
   return (
     <ScrollView
@@ -85,7 +91,38 @@ export function ThreadListFilters(
           }
         }}
       />
-      {props.selectedEnvironmentId !== null || props.selectedProjectKey !== null ? (
+      {props.workspaces.length > 0 ? (
+        <ListFilterMenu
+          label={selectedWorkspace?.name ?? "All workspaces"}
+          accessibilityLabel="Filter threads by workspace"
+          active={selectedWorkspace !== undefined}
+          actions={[
+            {
+              id: "all",
+              title: "All workspaces",
+              state: props.selectedWorkspaceId === null ? "on" : "off",
+            },
+            ...props.workspaces.map((workspace) => ({
+              id: JSON.stringify(workspace.id),
+              title: workspace.name,
+              state:
+                workspace.id === props.selectedWorkspaceId ? ("on" as const) : ("off" as const),
+            })),
+          ]}
+          onSelect={(id) => {
+            if (id === "all") props.onWorkspaceChange(null);
+            else {
+              const workspace = props.workspaces.find(
+                (candidate) => JSON.stringify(candidate.id) === id,
+              );
+              if (workspace) props.onWorkspaceChange(workspace.id);
+            }
+          }}
+        />
+      ) : null}
+      {props.selectedEnvironmentId !== null ||
+      props.selectedProjectKey !== null ||
+      props.selectedWorkspaceId !== null ? (
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Reset thread filters"
@@ -93,6 +130,7 @@ export function ThreadListFilters(
           onPress={() => {
             props.onEnvironmentChange(null);
             props.onProjectChange(null);
+            props.onWorkspaceChange(null);
           }}
         >
           <SymbolView name="xmark.circle.fill" size={18} tintColorClassName="accent-icon-muted" />
