@@ -35,6 +35,7 @@ import * as DateTime from "effect/DateTime";
 import { readLocalApi } from "~/localApi";
 import { cn } from "~/lib/utils";
 import { useEnvironmentScope } from "~/state/session";
+import { useThreadShells } from "~/state/entities";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { vcsEnvironment } from "~/state/vcs";
 
@@ -47,8 +48,9 @@ import { PullRequestGlyph } from "../components/pullRequest/pullRequestIcons";
 import { Button } from "../components/ui/button";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { commitDragText } from "./commitDrag";
-import { graphWorktrees } from "./graphWorktrees";
+import { graphWorktrees, type WorktreeThreadLink } from "./graphWorktrees";
 import { layoutGraph, type GraphRow } from "./graphLayout";
+import { Link } from "@tanstack/react-router";
 import {
   partitionCommitRuns,
   resolveGraphSelection,
@@ -86,7 +88,13 @@ const THREAD_COLORS = [
 
 type PanelView = "graph" | "worktrees";
 
-function toGraphData(result: VcsLogGraphResult, repository: string): MockGraphData {
+function toGraphData(
+  result: VcsLogGraphResult,
+  repository: string,
+  threads: ReadonlyArray<MockThread>,
+  threadLinks: ReadonlyArray<WorktreeThreadLink>,
+  projectId: string | null,
+): MockGraphData {
   return {
     repository,
     currentBranch: result.currentBranch ?? "HEAD",
@@ -103,8 +111,8 @@ function toGraphData(result: VcsLogGraphResult, repository: string): MockGraphDa
       turn: null,
       pullRequest: null,
     })),
-    threads: [],
-    worktrees: graphWorktrees(result.worktrees),
+    threads,
+    worktrees: graphWorktrees(result.worktrees, threadLinks, projectId),
     observedAt: new Date(),
   };
 }
@@ -580,27 +588,34 @@ function CommitRow(props: {
 
 function WorktreeRow(props: {
   worktree: MockWorktree;
-  thread: MockThread | null;
-  threadColor: string;
+  threads: ReadonlyArray<MockThread>;
+  threadColor: (id: string) => string;
+  environmentId: string;
   confirming: boolean;
   removing: boolean;
   onAskRemove: () => void;
   onConfirmRemove: () => void;
   onCancelRemove: () => void;
+  onStartThread: () => void;
+  onRevealHead: () => void;
 }) {
   const {
     worktree,
-    thread,
+    threads,
     threadColor,
+    environmentId,
     confirming,
     removing,
     onAskRemove,
     onConfirmRemove,
     onCancelRemove,
+    onStartThread,
+    onRevealHead,
   } = props;
   // The repository's own checkout has no branch of its own to recreate, so it is
   // never removable from this list; a checkout with a live run is unsafe.
-  const blockedByRunningThread = worktree.main || thread?.state === "running";
+  const blockedByRunningThread =
+    worktree.main || threads.some((thread) => thread.state === "running");
   return (
     <div className="group border-b border-border/40 px-3 py-2.5 last:border-b-0 hover:bg-accent/25">
       <div className="flex items-start gap-2">
@@ -630,11 +645,37 @@ function WorktreeRow(props: {
           <div className="mt-0.5 truncate font-mono text-3xs text-muted-foreground/80">
             {worktree.path}
           </div>
-          {thread ? (
-            <div className="mt-1 flex items-center gap-1.5">
-              <ThreadChip thread={thread} color={threadColor} turn={null} active={false} />
+          {threads.length > 0 ? (
+            <div className="mt-1 flex flex-wrap items-center gap-1.5">
+              {threads.slice(0, 2).map((thread) => (
+                <Link
+                  key={thread.id}
+                  to="/$environmentId/$threadId"
+                  params={{ environmentId, threadId: thread.id }}
+                  className="no-underline"
+                >
+                  <ThreadChip
+                    thread={thread}
+                    color={threadColor(thread.id)}
+                    turn={null}
+                    active={false}
+                  />
+                </Link>
+              ))}
+              {threads.length > 2 ? (
+                <span className="rounded-full bg-muted/70 px-1.5 py-px text-3xs tabular-nums text-muted-foreground">
+                  +{threads.length - 2}
+                </span>
+              ) : null}
             </div>
-          ) : null}
+          ) : (
+            <div className="mt-1 flex items-center gap-2">
+              <span className="text-3xs text-muted-foreground">No thread in this checkout</span>
+              <Button size="micro" variant="secondary" onClick={onStartThread}>
+                Start thread here
+              </Button>
+            </div>
+          )}
         </div>
         {confirming ? (
           <div className="flex shrink-0 items-center gap-1">
@@ -646,22 +687,31 @@ function WorktreeRow(props: {
             </Button>
           </div>
         ) : (
-          <span
-            className={cn(
-              "shrink-0",
-              !blockedByRunningThread &&
-                "opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100",
-            )}
-          >
+          <span className="flex shrink-0 items-center gap-0.5">
             <Button
-              variant="ghost-destructive"
+              variant="ghost-muted"
               size="icon-xs"
-              aria-label={`Remove ${worktree.branch}`}
-              disabled={blockedByRunningThread}
-              onClick={onAskRemove}
+              aria-label={`Show ${worktree.branch} in the graph`}
+              onClick={onRevealHead}
             >
-              <Trash2Icon />
+              <GitCommitHorizontalIcon />
             </Button>
+            <span
+              className={cn(
+                !blockedByRunningThread &&
+                  "opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100",
+              )}
+            >
+              <Button
+                variant="ghost-destructive"
+                size="icon-xs"
+                aria-label={`Remove ${worktree.branch}`}
+                disabled={blockedByRunningThread}
+                onClick={onAskRemove}
+              >
+                <Trash2Icon />
+              </Button>
+            </span>
           </span>
         )}
       </div>
@@ -675,6 +725,10 @@ export function GitGraphPanel(props: {
   readonly cwd: string | null;
   readonly onOpenCommitDiff: (range: { from: string; to: string; label: string }) => void;
   readonly onOpenWorkingTreeDiff: () => void;
+  /** The project this repository belongs to, so root-checkout threads can match. */
+  readonly projectId: string | null;
+  /** Starts a thread bound to an existing checkout. */
+  readonly onStartThreadInWorktree: (input: { path: string; branch: string | null }) => void;
 }) {
   const [graph, setGraph] = useState<VcsLogGraphResult | null>(null);
   const [workingTree, setWorkingTree] = useState<VcsGraphWorkingTree | null>(null);
@@ -753,7 +807,28 @@ export function GitGraphPanel(props: {
     showRemotes,
   ]);
 
-  const data = graph === null ? null : toGraphData(graph, props.repositoryLabel ?? "");
+  // Threads in this environment, so a checkout can name the thread that lives in
+  // it (and a checkout without one can offer to start it).
+  const environmentThreads = useThreadShells().filter(
+    (thread) => thread.environmentId === props.environmentId && thread.archivedAt === null,
+  );
+  const graphThreads: MockThread[] = environmentThreads.map((thread) => ({
+    id: thread.id,
+    title: thread.title,
+    branch: thread.branch ?? "",
+    turns: 0,
+    state: thread.latestRun?.status === "running" ? "running" : "idle",
+    isSubagent: false,
+  }));
+  const threadLinks: WorktreeThreadLink[] = environmentThreads.map((thread) => ({
+    id: thread.id,
+    projectId: thread.projectId,
+    worktreePath: thread.worktreePath,
+  }));
+  const data =
+    graph === null
+      ? null
+      : toGraphData(graph, props.repositoryLabel ?? "", graphThreads, threadLinks, props.projectId);
   const commits = data?.commits ?? [];
   const threads = data?.threads ?? [];
   const worktrees = data?.worktrees ?? [];
@@ -916,6 +991,19 @@ export function GitGraphPanel(props: {
     setConfirmPath(null);
     showNotice(`Removed ${target.branch}`);
     setReloadToken((token) => token + 1);
+  };
+
+  // Jumps to the commit a checkout has checked out, which is the fastest way to
+  // answer "what is this worktree on?".
+  const revealCheckoutHead = (worktree: MockWorktree) => {
+    setView("graph");
+    setSelectedSha(worktree.head);
+    setSelectionHeadSha(worktree.head);
+    window.setTimeout(() => {
+      document
+        .querySelector<HTMLElement>(`[data-sha="${worktree.head}"]`)
+        ?.scrollIntoView({ block: "center" });
+    }, 0);
   };
 
   const openCommitMenu = async (commit: MockCommit, position: { x: number; y: number }) => {
@@ -1244,13 +1332,16 @@ export function GitGraphPanel(props: {
             </span>
           </div>
           {worktrees.map((worktree) => {
-            const thread = worktree.threadId ? (threadsById.get(worktree.threadId) ?? null) : null;
+            const worktreeThreads = worktree.threadIds
+              .map((id) => threadsById.get(id))
+              .filter((thread): thread is MockThread => thread !== undefined);
             return (
               <WorktreeRow
                 key={worktree.path}
                 worktree={worktree}
-                thread={thread}
-                threadColor={thread ? threadColor(thread.id) : THREAD_COLORS[0]}
+                threads={worktreeThreads}
+                threadColor={threadColor}
+                environmentId={props.environmentId}
                 confirming={confirmPath === worktree.path}
                 removing={confirmingRemoval}
                 onAskRemove={() => setConfirmPath(worktree.path)}
@@ -1258,6 +1349,13 @@ export function GitGraphPanel(props: {
                   void confirmRemoveWorktree();
                 }}
                 onCancelRemove={() => setConfirmPath(null)}
+                onStartThread={() =>
+                  props.onStartThreadInWorktree({
+                    path: worktree.path,
+                    branch: worktree.branch === "detached" ? null : worktree.branch,
+                  })
+                }
+                onRevealHead={() => revealCheckoutHead(worktree)}
               />
             );
           })}
