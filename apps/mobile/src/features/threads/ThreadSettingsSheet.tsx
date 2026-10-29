@@ -139,56 +139,31 @@ const PRIMARY_PROVIDER_DRIVERS: ReadonlySet<string> = new Set([
 ]);
 /** Keep measured size changes stable; let catalog mutations return underflowing filtered lists to the top. */
 
-// Blocks in-thread model changes for providers that cannot resume their own
-// thread with a different model (`requiresNewThreadForModelChange`). Selecting
-// a *different* provider instance is never blocked: the server treats that as
-// a handoff and starts a fresh provider session with the prior conversation
-// replayed as context. Mirrors `getStartedThreadModelChangeBlockReason` in
-// `apps/web/src/components/ChatView.logic.ts:585`.
+// Switching provider instances inside one driver is a handoff the server replays
+// as context; only a cross-driver switch needs a fresh thread.
 function getStartedThreadModelChangeBlockReason(input: {
   providers: ReadonlyArray<
-    Pick<
-      import("@t3tools/contracts").ServerProvider,
-      "instanceId" | "requiresNewThreadForModelChange"
-    > &
-      Partial<Pick<import("@t3tools/contracts").ServerProvider, "driver" | "continuation">>
+    Pick<import("@t3tools/contracts").ServerProvider, "instanceId"> &
+      Partial<Pick<import("@t3tools/contracts").ServerProvider, "driver">>
   >;
   hasStartedSession: boolean;
   currentModelSelection: ModelSelection;
   nextModelSelection: ModelSelection;
 }): { title: string; description: string } | null {
-  if (!input.hasStartedSession) {
-    return null;
-  }
+  if (!input.hasStartedSession) return null;
+  if (input.currentModelSelection.instanceId === input.nextModelSelection.instanceId) return null;
   const currentProvider = input.providers.find(
     (snapshot) => snapshot.instanceId === input.currentModelSelection.instanceId,
   );
   const nextProvider = input.providers.find(
     (snapshot) => snapshot.instanceId === input.nextModelSelection.instanceId,
   );
-
-  if (input.currentModelSelection.instanceId !== input.nextModelSelection.instanceId) {
-    const sameDriver =
-      currentProvider?.driver !== undefined && currentProvider.driver === nextProvider?.driver;
-    const currentKey = currentProvider?.continuation?.groupKey ?? null;
-    const nextKey = nextProvider?.continuation?.groupKey ?? null;
-    const sameContinuation = currentKey !== null && currentKey === nextKey;
-    if (!sameDriver || !sameContinuation) {
-      return null;
-    }
-  } else if (input.currentModelSelection.model === input.nextModelSelection.model) {
-    return null;
-  }
-
-  if (
-    currentProvider?.requiresNewThreadForModelChange !== true &&
-    nextProvider?.requiresNewThreadForModelChange !== true
-  ) {
+  if (currentProvider?.driver !== undefined && currentProvider.driver === nextProvider?.driver) {
     return null;
   }
   return {
-    title: "Start a new chat to change models",
-    description: "This provider does not allow switching models after a conversation has started.",
+    title: "Start a new chat to switch providers",
+    description: "This thread cannot switch providers after it has started.",
   };
 }
 
