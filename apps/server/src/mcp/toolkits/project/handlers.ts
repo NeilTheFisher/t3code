@@ -316,7 +316,9 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
           }),
         );
         const thread = result.projection.thread;
-        if (projectDefaultWorkspaceId !== null) {
+        // A replay keeps the filing the first launch chose, even if the project
+        // default changed since.
+        if (!replaying && projectDefaultWorkspaceId !== null) {
           const settings = yield* ServerSettings.ServerSettingsService;
           const current = yield* settings.getSettings.pipe(Effect.mapError(unavailable));
           yield* settings
