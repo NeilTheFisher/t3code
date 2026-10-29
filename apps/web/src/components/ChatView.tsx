@@ -1126,6 +1126,28 @@ export default function ChatView(props: ChatViewProps) {
     startNewThreadForProject(activeProjectRef, handleNewThread);
   };
   const handleNewThreadInActiveProjectStable = useStableCallback(handleNewThreadInActiveProject);
+  // Starting a thread in an existing checkout is what links a worktree to a
+  // thread: the thread records that path, so the graph can name it there.
+  const startThreadInWorktree = (input: { path: string; branch: string | null }) => {
+    if (!activeProjectRef) return;
+    void (async () => {
+      const created = await handleNewThread(activeProjectRef, {
+        branch: input.branch,
+        worktreePath: input.path,
+        envMode: "worktree",
+        startFromOrigin: false,
+        replace: true,
+      });
+      if (created === null) {
+        toastManager.add({
+          type: "error",
+          title: "Could not start a thread in that checkout",
+          description: "The checkout could not be opened for a new thread.",
+        });
+      }
+    })();
+  };
+  const startThreadInWorktreeStable = useStableCallback(startThreadInWorktree);
   const projectGroupingSettings = selectProjectGroupingSettings(settings);
   const activeDraftLogicalProjectKey =
     !isServerThread && activeProject
@@ -3230,6 +3252,8 @@ export default function ChatView(props: ChatViewProps) {
       sideChatParentPanel={sideChatParentPanel}
       onOpenCommitRangeDiff={onOpenCommitRangeDiffStable}
       onOpenWorkingTreeDiff={onOpenWorkingTreeDiffStable}
+      projectId={activeProject?.id ?? null}
+      onStartThreadInWorktree={startThreadInWorktreeStable}
       terminal={{
         launchContext: activeTerminalLaunchContext ?? null,
         keybindings,
