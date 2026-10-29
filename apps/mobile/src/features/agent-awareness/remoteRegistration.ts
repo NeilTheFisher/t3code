@@ -746,10 +746,6 @@ const registerDevice = Effect.fn("remoteRegistration.registerDevice")(function* 
     // a new phone starts receiving without any setup on the host.
     subscribeAndroidAgentNotificationsTopic(ANDROID_PUSH_TOPIC);
   }
-  logRegistrationDebug("device registration local state ready", {
-    expectedGeneration,
-    notificationsEnabled: pushTokenRegistration.notificationsEnabled,
-  });
   const bundleId =
     Platform.OS === "android"
       ? Constants.expoConfig?.android?.package?.trim()
