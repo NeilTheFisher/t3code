@@ -47,6 +47,7 @@ vi.mock("./androidNotifications", () => ({
   supportsAndroidAgentNotifications: vi.fn(() => true),
   configureAndroidAgentNotifications: vi.fn(),
   clearAndroidAgentNotifications: vi.fn(),
+  subscribeAndroidAgentNotificationsTopic: vi.fn(),
 }));
 
 const secureStore = vi.hoisted(() => new Map<string, string>());
