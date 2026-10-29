@@ -1,4 +1,5 @@
 import type { OlderSettledScope } from "@t3tools/client-runtime/state/threads";
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useMemo, useSyncExternalStore } from "react";
 
@@ -65,6 +66,7 @@ export function useThreadListV2(input: {
   readonly snoozedShelfExpanded: boolean;
   readonly settledShelfExpanded: boolean;
   readonly selectedThreadKey: string | null;
+  readonly workspaceFilter?: ((thread: EnvironmentThreadShell) => boolean) | null;
 }) {
   const { threads, workingShelfEnabled } = input;
   const layoutTime = useMemo(
@@ -153,17 +155,21 @@ export function useThreadListV2(input: {
         settledShelfExpanded: input.settledShelfExpanded,
         selectedThreadKey: input.selectedThreadKey,
         isListedSettled: isListed,
-        unloadedSettledCount: unloadedCount(
-          threads.filter(
-            (thread) =>
-              thread.archivedAt === null &&
-              scopes.some(
-                (scope) =>
-                  scope.environmentId === thread.environmentId &&
-                  (scope.projectIds === null || scope.projectIds.includes(thread.projectId)),
-              ),
-          ),
-        ),
+        unloadedSettledCount:
+          input.workspaceFilter == null
+            ? unloadedCount(
+                threads.filter(
+                  (thread) =>
+                    thread.archivedAt === null &&
+                    scopes.some(
+                      (scope) =>
+                        scope.environmentId === thread.environmentId &&
+                        (scope.projectIds === null || scope.projectIds.includes(thread.projectId)),
+                    ),
+                ),
+              )
+            : 0,
+        workspaceFilter: input.workspaceFilter ?? null,
       }),
     [
       input.pendingOrder,
@@ -187,6 +193,7 @@ export function useThreadListV2(input: {
       isListed,
       unloadedCount,
       scopes,
+      input.workspaceFilter,
     ],
   );
   useOlderSettledShelfGrowth(olderSettledShelf, layout.listedSettledThreads);

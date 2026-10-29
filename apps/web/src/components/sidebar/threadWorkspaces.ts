@@ -1,4 +1,8 @@
-import { threadWorkspaceAssignmentKey, type SidebarThreadWorkspace } from "@t3tools/contracts";
+import {
+  resolveAssignedWorkspaceId,
+  threadWorkspaceAssignmentKey,
+  type SidebarThreadWorkspace,
+} from "@t3tools/contracts";
 
 import { resolveSidebarThreadStatus } from "../Sidebar.logic";
 import type { SidebarThreadSummary } from "../../types";
@@ -89,16 +93,7 @@ export function isThreadWorkspaceTint(value: string): value is ThreadWorkspaceTi
   return (THREAD_WORKSPACE_TINTS as readonly string[]).includes(value);
 }
 
-/** Assignments to a deleted workspace are treated as unassigned, not as dangling. */
-export function resolveAssignedWorkspaceId(
-  assignments: ThreadWorkspaceAssignments,
-  threadKey: string,
-  workspaces: readonly SidebarThreadWorkspace[],
-): string | null {
-  const assigned = assignments[threadKey];
-  if (assigned === undefined) return null;
-  return workspaces.some((workspace) => workspace.id === assigned) ? assigned : null;
-}
+export { resolveAssignedWorkspaceId };
 
 export function isUnsortedWorkspaceSelection(
   activeWorkspaceId: string | null,

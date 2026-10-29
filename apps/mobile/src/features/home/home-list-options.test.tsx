@@ -47,3 +47,57 @@ it("saves the scope from every update made in one event", async () => {
   expect(controls!.options.selectedProjectKey).toBe("env-1:project-1");
   act(() => root.unmount());
 });
+
+it("saves a workspace selection per device", async () => {
+  harness.saved = [];
+  let controls: ReturnType<typeof useHomeListOptions> | undefined;
+  function Probe() {
+    const result = useHomeListOptions(AVAILABLE, new Set(["work"]));
+    useLayoutEffect(() => {
+      controls = result;
+    });
+    return null;
+  }
+
+  const root = createRoot(document.createElement("div"));
+  await act(async () =>
+    root.render(
+      <HomeListOptionsProvider projectGroupingMode="repository">
+        <Probe />
+      </HomeListOptionsProvider>,
+    ),
+  );
+  act(() => controls!.setSelectedWorkspaceId("work"));
+
+  expect(harness.saved.at(-1)).toEqual({
+    threadListFilters: { environmentId: null, projectKey: null, workspaceId: "work" },
+  });
+  expect(controls!.options.selectedWorkspaceId).toBe("work");
+  act(() => root.unmount());
+});
+
+it("drops a workspace that is no longer available", async () => {
+  let controls: ReturnType<typeof useHomeListOptions> | undefined;
+  function Probe() {
+    const result = useHomeListOptions(AVAILABLE, new Set());
+    useLayoutEffect(() => {
+      controls = result;
+    });
+    return null;
+  }
+
+  const root = createRoot(document.createElement("div"));
+  await act(async () =>
+    root.render(
+      <HomeListOptionsProvider
+        projectGroupingMode="repository"
+        savedFilters={{ environmentId: null, projectKey: null, workspaceId: "work" }}
+      >
+        <Probe />
+      </HomeListOptionsProvider>,
+    ),
+  );
+
+  expect(controls!.options.selectedWorkspaceId).toBeNull();
+  act(() => root.unmount());
+});
