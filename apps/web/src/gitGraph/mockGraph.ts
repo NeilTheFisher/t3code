@@ -33,8 +33,11 @@ export interface MockThread {
 
 export interface MockWorktree {
   readonly path: string;
+  /** The commit this checkout has checked out, for jumping to it in the graph. */
+  readonly head: string;
   readonly branch: string;
-  readonly threadId: string | null;
+  /** Threads whose checkout is this worktree. */
+  readonly threadIds: ReadonlyArray<string>;
   /** The repository's own checkout, which is never removed from here. */
   readonly main: boolean;
   /** The checkout this graph was read from. */
@@ -423,8 +426,9 @@ const THREADS: ReadonlyArray<MockThread> = [
 const WORKTREES: ReadonlyArray<MockWorktree> = [
   {
     path: "/home/nfisher/repos/t3code-web-setup/t3code",
+    head: "g7h8i9j0",
     branch: "main",
-    threadId: "thread-gerrit",
+    threadIds: ["thread-gerrit"],
     main: true,
     current: true,
     dirty: false,
@@ -432,8 +436,9 @@ const WORKTREES: ReadonlyArray<MockWorktree> = [
   },
   {
     path: "~/.t3/worktrees/git-graph-ui",
+    head: "d4e5f6g7",
     branch: "feat/git-graph",
-    threadId: "thread-graph",
+    threadIds: ["thread-graph"],
     main: false,
     current: false,
     dirty: true,
@@ -441,8 +446,9 @@ const WORKTREES: ReadonlyArray<MockWorktree> = [
   },
   {
     path: "~/.t3/worktrees/worktree-cleanup",
+    head: "c3d4e5f6",
     branch: "fix/worktree-cleanup",
-    threadId: "thread-worktree",
+    threadIds: ["thread-worktree"],
     main: false,
     current: false,
     dirty: false,
@@ -450,8 +456,9 @@ const WORKTREES: ReadonlyArray<MockWorktree> = [
   },
   {
     path: "~/.t3/worktrees/tts-narration",
+    head: "b2c3d4e5",
     branch: "feat/tts-narration",
-    threadId: null,
+    threadIds: [],
     main: false,
     current: false,
     dirty: false,

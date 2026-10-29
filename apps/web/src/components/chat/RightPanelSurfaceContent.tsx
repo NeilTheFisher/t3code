@@ -69,6 +69,10 @@ export function RightPanelSurfaceContent(props: {
   readonly onOpenCommitRangeDiff: (range: { from: string; to: string; label: string }) => void;
   /** Opens the diff panel on the checkout's uncommitted changes. */
   readonly onOpenWorkingTreeDiff: () => void;
+  /** The project whose repository the graph reads, for matching root-checkout threads. */
+  readonly projectId: string | null;
+  /** Starts a thread bound to an existing checkout. */
+  readonly onStartThreadInWorktree: (input: { path: string; branch: string | null }) => void;
   readonly composerDraftTarget: ScopedThreadRef | DraftId;
   readonly keybindings: ResolvedKeybindingsConfig;
   readonly configuredPreviewUrls: ReadonlyArray<string>;
@@ -181,6 +185,8 @@ export function RightPanelSurfaceContent(props: {
             cwd={props.files.workspaceRoot ?? null}
             onOpenCommitDiff={props.onOpenCommitRangeDiff}
             onOpenWorkingTreeDiff={props.onOpenWorkingTreeDiff}
+            projectId={props.projectId}
+            onStartThreadInWorktree={props.onStartThreadInWorktree}
           />
         </Suspense>
       );
