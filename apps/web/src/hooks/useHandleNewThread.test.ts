@@ -178,6 +178,8 @@ vi.mock("@t3tools/shared/projectSettings", () => ({
   resolveNewThreadEnvMode: (input: {
     projectSettings: { settings: { defaultThreadEnvMode: "local" | "worktree" } };
   }) => input.projectSettings.settings.defaultThreadEnvMode,
+  resolveProjectDefaultThreadWorkspaceId: (settings: Record<string, unknown>) =>
+    (settings.defaultThreadWorkspaceId as string | null | undefined) ?? null,
 }));
 vi.mock("@tanstack/react-router", () => ({
   useParams: () => null,
@@ -259,7 +261,7 @@ vi.mock("../uiStateStore", () => ({
   useUiStateStore: () => [],
 }));
 vi.mock("./useSettings", () => ({ getClientSettings: () => ({}) }));
-vi.mock("./useThreadWorkspaces", () => ({ fileThreadInActiveWorkspace: () => {} }));
+vi.mock("./useThreadWorkspaces", () => ({ fileNewThreadInWorkspace: () => {} }));
 
 import { useNewThreadHandler } from "./useHandleNewThread";
 
