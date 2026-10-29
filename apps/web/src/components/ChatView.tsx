@@ -2407,6 +2407,7 @@ export default function ChatView(props: ChatViewProps) {
     onOpenCommitRangeDiffStable,
     onOpenTurnDiffStable,
     onOpenWorkingTreeDiffStable,
+    onOpenCheckoutUncommittedStable,
     openChangesFromThreadPanelStable,
     openFileSurfaceStable,
     toggleRightPanelMaximizedStable,
@@ -3252,6 +3253,7 @@ export default function ChatView(props: ChatViewProps) {
       sideChatParentPanel={sideChatParentPanel}
       onOpenCommitRangeDiff={onOpenCommitRangeDiffStable}
       onOpenWorkingTreeDiff={onOpenWorkingTreeDiffStable}
+      onOpenCheckoutUncommitted={onOpenCheckoutUncommittedStable}
       projectId={activeProject?.id ?? null}
       onStartThreadInWorktree={startThreadInWorktreeStable}
       terminal={{
