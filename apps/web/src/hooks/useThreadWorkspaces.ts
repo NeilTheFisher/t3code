@@ -84,22 +84,43 @@ function assignThreadsNow(
 }
 
 /**
- * Files a thread created while a workspace is active into that workspace. Call
- * sites pass this as `onThreadCreated`, so the sidebar, command palette,
- * keybinding and scratch project all agree on where the thread lands. Reads the
- * live atoms, so a workspace switch mid-creation wins.
+ * Files a new thread into its project's default workspace, falling back to the
+ * workspace selected on this device. Call sites pass the project default so a
+ * project's choice wins over the per-device view. Reads the live atoms, so a
+ * workspace switch mid-creation wins.
  */
+export function fileNewThreadInWorkspace(
+  threadRef: {
+    readonly environmentId: string;
+    readonly threadId: string;
+  },
+  projectWorkspaceId: string | null,
+): void {
+  const environmentId = appAtomRegistry.get(primaryEnvironmentIdAtom);
+  if (environmentId === null) return;
+  const settings = appAtomRegistry.get(serverEnvironment.settingsValueAtom(environmentId));
+  if (!settings?.sidebarThreadWorkspacesEnabled) return;
+  const workspaces = effectiveThreadWorkspaces(settings);
+  const projectTarget =
+    projectWorkspaceId !== null &&
+    workspaces.some((workspace) => workspace.id === projectWorkspaceId)
+      ? projectWorkspaceId
+      : null;
+  const target = projectTarget ?? getClientSettings().sidebarActiveThreadWorkspaceId;
+  if (target === null || !workspaces.some((workspace) => workspace.id === target)) return;
+  assignThreadsNow(
+    [threadWorkspaceAssignmentKey(threadRef.environmentId, threadRef.threadId)],
+    target,
+    { label: "File thread in workspace", reportFailure: false },
+  );
+}
+
+/** Files a thread created while a workspace is active into that workspace. */
 export function fileThreadInActiveWorkspace(threadRef: {
   readonly environmentId: string;
   readonly threadId: string;
 }): void {
-  const activeWorkspaceId = getClientSettings().sidebarActiveThreadWorkspaceId;
-  if (activeWorkspaceId === null) return;
-  assignThreadsNow(
-    [threadWorkspaceAssignmentKey(threadRef.environmentId, threadRef.threadId)],
-    activeWorkspaceId,
-    { label: "File thread in workspace", reportFailure: false },
-  );
+  fileNewThreadInWorkspace(threadRef, null);
 }
 
 /**

@@ -22,7 +22,7 @@ import {
 } from "../composerDraftStore";
 import { newDraftId, newThreadId } from "../lib/utils";
 import { orderItemsByPreferredIds } from "../components/Sidebar.logic";
-import { fileThreadInActiveWorkspace } from "./useThreadWorkspaces";
+import { fileNewThreadInWorkspace } from "./useThreadWorkspaces";
 import {
   deriveLogicalProjectKeyFromSettings,
   getProjectOrderKey,
@@ -30,7 +30,11 @@ import {
   selectProjectGroupingSettings,
   type ProjectGroupingSettings,
 } from "@t3tools/client-runtime/state/project-grouping";
-import { resolveNewThreadEnvMode, resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import {
+  resolveNewThreadEnvMode,
+  resolveProjectDefaultThreadWorkspaceId,
+  resolveProjectSettings,
+} from "@t3tools/shared/projectSettings";
 import {
   readProjects,
   readThreadShell,
@@ -499,10 +503,22 @@ export function createNewThreadHandler(router: AnyRouter) {
   ) => {
     const created = await startNewThread(projectRef, options);
     if (created !== null) {
-      fileThreadInActiveWorkspace({
-        environmentId: projectRef.environmentId,
-        threadId: created.threadId,
-      });
+      const project = readProject(projectRef);
+      const environmentSettings =
+        appAtomRegistry.get(environmentServerConfigsAtom).get(projectRef.environmentId)?.settings ??
+        DEFAULT_SERVER_SETTINGS;
+      const projectWorkspaceId = resolveProjectDefaultThreadWorkspaceId(
+        environmentSettings,
+        projectRef.projectId,
+        project,
+      );
+      fileNewThreadInWorkspace(
+        {
+          environmentId: projectRef.environmentId,
+          threadId: created.threadId,
+        },
+        projectWorkspaceId,
+      );
     }
     return created;
   };
