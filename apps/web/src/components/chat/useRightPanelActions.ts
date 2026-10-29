@@ -306,13 +306,8 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
     onDiffPanelOpen?.();
   });
   const onOpenTurnDiffStable = useStableCallback(onOpenTurnDiff);
-  // Same explicit-open bookkeeping as a turn diff: without it the diff panel's
-  // activation effect resets the scope to the branch and discards the range.
   const onOpenCommitRangeDiff = (range: { from: string; to: string; label: string }) => {
     if (!activeThreadRef) return;
-    const diffOpen =
-      selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, activeThreadRef) === "diff";
-    explicitDiffOpenRef.current = diffOpen ? null : activeThreadRef;
     useDiffPanelStore.getState().selectCommitRange(activeThreadRef, range);
     useRightPanelStore.getState().open(activeThreadRef, "diff");
     onDiffPanelOpen?.();
@@ -320,14 +315,19 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
   const onOpenCommitRangeDiffStable = useStableCallback(onOpenCommitRangeDiff);
   const onOpenWorkingTreeDiff = () => {
     if (!activeThreadRef) return;
-    const diffOpen =
-      selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, activeThreadRef) === "diff";
-    explicitDiffOpenRef.current = diffOpen ? null : activeThreadRef;
     useDiffPanelStore.getState().selectGitScope(activeThreadRef, "unstaged");
     useRightPanelStore.getState().open(activeThreadRef, "diff");
     onDiffPanelOpen?.();
   };
   const onOpenWorkingTreeDiffStable = useStableCallback(onOpenWorkingTreeDiff);
+  // One checkout's uncommitted work, which may be a worktree this thread is not in.
+  const onOpenCheckoutUncommitted = (input: { cwd: string; label: string }) => {
+    if (!activeThreadRef) return;
+    useDiffPanelStore.getState().selectCheckoutUncommitted(activeThreadRef, input);
+    useRightPanelStore.getState().open(activeThreadRef, "diff");
+    onDiffPanelOpen?.();
+  };
+  const onOpenCheckoutUncommittedStable = useStableCallback(onOpenCheckoutUncommitted);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes to the preview action bus to toggle the preview panel
   useEffect(
     () =>
@@ -370,6 +370,7 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
     onOpenCommitRangeDiffStable,
     onOpenTurnDiffStable,
     onOpenWorkingTreeDiffStable,
+    onOpenCheckoutUncommittedStable,
     onToggleDiffStable,
     openChangesFromThreadPanelStable,
     openFileSurfaceStable,

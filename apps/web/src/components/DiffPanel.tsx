@@ -299,7 +299,8 @@ export default function DiffPanel({
   const isGitSelection =
     diffSelection.kind === "branch" ||
     diffSelection.kind === "unstaged" ||
-    diffSelection.kind === "commit";
+    diffSelection.kind === "commit" ||
+    diffSelection.kind === "checkout-uncommitted";
   const toolCallItems = useQuietThreadVisibleTurnItems(toolCallSelection ? routeThreadRef : null);
   const toolCallDetail = useTurnItemDetail(
     toolCallSelection && routeThreadRef
@@ -343,6 +344,8 @@ export default function DiffPanel({
       : null;
   const selectedCommitRange = diffSelection.kind === "commit-range" ? diffSelection : null;
   const selectedSubmodule = diffSelection.kind === "submodule" ? diffSelection : null;
+  // One checkout's own uncommitted work, which may not be the thread's checkout.
+  const selectedCheckout = diffSelection.kind === "checkout-uncommitted" ? diffSelection : null;
   const selectedFilePath = diffSelection.kind === "turn" ? diffSelection.filePath : null;
   const selectedFileRevealRequestId =
     diffSelection.kind === "turn" ? diffSelection.revealRequestId : 0;
@@ -355,6 +358,7 @@ export default function DiffPanel({
   const latestTurn = orderedTurnDiffSummaries[0];
   const selectedScopeLabel = (() => {
     if (toolCallSelection !== null) return "Tool call";
+    if (selectedCheckout !== null) return `${selectedCheckout.label} uncommitted`;
     if (selectedSubmodule !== null) return selectedSubmodule.label;
     if (selectedCommitRange !== null) return selectedCommitRange.label;
     if (selectedCommitSha !== null) return `Commit ${selectedCommitSha.slice(0, 7)}`;
@@ -367,28 +371,32 @@ export default function DiffPanel({
   })();
   const reviewSectionId = toolCallSelection
     ? `tool-call:${toolCallSelection.threadId}:${toolCallSelection.itemId}`
-    : selectedSubmodule
-      ? `submodule:${selectedSubmodule.path}:${selectedSubmodule.from}..${selectedSubmodule.to ?? "worktree"}`
-      : selectedCommitRange
-        ? `commit:${selectedCommitRange.from}..${selectedCommitRange.to}`
-        : selectedTurn
-          ? `turn:${selectedTurn.runId}`
-          : selectedCommitSha !== null
-            ? `commit:${selectedCommitSha}`
-            : selectedGitScope;
+    : selectedCheckout
+      ? `checkout:${selectedCheckout.cwd}`
+      : selectedSubmodule
+        ? `submodule:${selectedSubmodule.path}:${selectedSubmodule.from}..${selectedSubmodule.to ?? "worktree"}`
+        : selectedCommitRange
+          ? `commit:${selectedCommitRange.from}..${selectedCommitRange.to}`
+          : selectedTurn
+            ? `turn:${selectedTurn.runId}`
+            : selectedCommitSha !== null
+              ? `commit:${selectedCommitSha}`
+              : selectedGitScope;
   const collapseScopeKey = routeThreadRef
     ? `${routeThreadRef.environmentId}:${routeThreadRef.threadId}:${reviewSectionId}`
     : null;
   const codeViewMountKey = `${collapseScopeKey ?? reviewSectionId}:${codeViewRevision}`;
   const reviewSectionTitle = toolCallSelection
     ? "Tool call"
-    : selectedSubmodule
-      ? selectedSubmodule.label
-      : selectedCommitRange
-        ? selectedCommitRange.label
-        : selectedTurn
-          ? `Turn ${selectedCheckpointTurnCount ?? "?"}`
-          : selectedScopeLabel;
+    : selectedCheckout
+      ? `${selectedCheckout.label} uncommitted`
+      : selectedSubmodule
+        ? selectedSubmodule.label
+        : selectedCommitRange
+          ? selectedCommitRange.label
+          : selectedTurn
+            ? `Turn ${selectedCheckpointTurnCount ?? "?"}`
+            : selectedScopeLabel;
   const selectedCheckpointRange =
     typeof selectedCheckpointTurnCount === "number"
       ? {
@@ -410,7 +418,7 @@ export default function DiffPanel({
   const branchDiffPreviewInput =
     canReadFiles && isGitSelection && activeThread && activeCwd
       ? {
-          cwd: activeCwd,
+          cwd: selectedCheckout?.cwd ?? activeCwd,
           ...(selectedBaseRef ? { baseRef: selectedBaseRef } : {}),
           ...(selectedCommitSha !== null ? { commitSha: selectedCommitSha } : {}),
           ...(selectedCommitRange
@@ -470,15 +478,17 @@ export default function DiffPanel({
     ? `${routeThreadRef.environmentId}:${routeThreadRef.threadId}`
     : null;
 
-  const selectedGitSourceKind: ReviewDiffPreviewSourceKind = selectedSubmodule
-    ? "submodule-range"
-    : selectedCommitRange
-      ? "commit-range"
-      : selectedGitScope === "commit"
-        ? "commit"
-        : selectedGitScope === "unstaged"
-          ? "working-tree"
-          : "branch-range";
+  const selectedGitSourceKind: ReviewDiffPreviewSourceKind = selectedCheckout
+    ? "working-tree"
+    : selectedSubmodule
+      ? "submodule-range"
+      : selectedCommitRange
+        ? "commit-range"
+        : selectedGitScope === "commit"
+          ? "commit"
+          : selectedGitScope === "unstaged"
+            ? "working-tree"
+            : "branch-range";
   const selectedGitSource = branchDiffPreview.data?.sources.find(
     (source) => source.kind === selectedGitSourceKind,
   );
@@ -517,6 +527,7 @@ export default function DiffPanel({
       return;
     event.preventDefault();
     void openLink(url, { event });
+  };
   const refreshPreviewQuery = branchDiffPreview.refresh;
   const refreshDiffFromUserAction = refreshPreviewQuery;
 
@@ -848,17 +859,19 @@ export default function DiffPanel({
   const selectedCommitValue = selectedCommitSha !== null ? `commit:${selectedCommitSha}` : "";
   const selectedScopeValue = toolCallSelection
     ? ""
-    : selectedSubmodule
-      ? selectedSubmodule.to === null
-        ? "submodule-working-tree"
-        : "submodule-range"
-      : selectedCommitRange
-        ? "commit-range"
-        : selectedRunId === null
-          ? selectedCommitValue || selectedGitScope
-          : selectedTurn?.runId === latestTurn?.runId
-            ? "latest"
-            : selectedTurnValue;
+    : selectedCheckout
+      ? "checkout-uncommitted"
+      : selectedSubmodule
+        ? selectedSubmodule.to === null
+          ? "submodule-working-tree"
+          : "submodule-range"
+        : selectedCommitRange
+          ? "commit-range"
+          : selectedRunId === null
+            ? selectedCommitValue || selectedGitScope
+            : selectedTurn?.runId === latestTurn?.runId
+              ? "latest"
+              : selectedTurnValue;
   const selectScopeValue = (value: string) => {
     if (value === "submodule-working-tree") {
       if (selectedSubmodule && routeThreadRef) {
@@ -926,6 +939,11 @@ export default function DiffPanel({
           ) : null}
           <DropdownMenuContent align="start">
             <DropdownMenuRadioGroup value={selectedScopeValue} onValueChange={selectScopeValue}>
+              {selectedCheckout ? (
+                <DropdownMenuRadioItem value="checkout-uncommitted" closeOnClick>
+                  <span>{`${selectedCheckout.label} uncommitted`}</span>
+                </DropdownMenuRadioItem>
+              ) : null}
               {selectedCommitRange ? (
                 <DropdownMenuRadioItem value="commit-range" closeOnClick>
                   <span>{selectedCommitRange.label}</span>
