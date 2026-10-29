@@ -82,14 +82,22 @@ import * as PreviewManager from "./Manager.ts";
 import * as ServerBrowserPage from "./ServerBrowserPage.ts";
 import * as PreviewBrowser from "./PreviewBrowser.ts";
 import * as PreviewBrowserHost from "./PreviewBrowserHost.ts";
-import { presentAsChrome, ServerBrowserContexts } from "./ServerBrowserContexts.ts";
+import {
+  presentAsChrome,
+  previewRenderScale,
+  ServerBrowserContexts,
+} from "./ServerBrowserContexts.ts";
 import { BrowserControlInterrupted, SessionControl } from "./SessionControl.ts";
 import { installPdfDocumentNavigation, isPdfAssetUrl } from "./PdfDocumentNavigation.ts";
 
 const SERVER_HOST_CLIENT_ID = SERVER_BROWSER_AUTOMATION_CLIENT_ID;
-const RENDER_SCALE = 2;
-// Chromium allows three unacked frames, so 100 ms pacing caps viewers near 30 fps.
+const RENDER_SCALE = previewRenderScale(process.env);
+// An ack is what lets Chromium send the next frame, so a paced ack is also a
+// latency floor: the newest repaint waits behind every unacked frame. Padding
+// acks keeps an idle viewer cheap; an operator's own clicks must not queue.
 const SCREENCAST_ACK_PACE_MS = 100;
+const SCREENCAST_FRAMES_IN_FLIGHT = 3;
+const SCREENCAST_FRAMES_IN_FLIGHT_IN_CONTROL = 6;
 const SCREENCAST_SETTLE_MS = 200;
 const SCREENCAST_MOTION_FRAMES = 4;
 const SCREENCAST_MOTION_WINDOW_MS = 300;
@@ -2271,22 +2279,28 @@ const make = Effect.gen(function* () {
     let framesInFlight = 0;
     let mayHaveDropped = false;
     let motion = false;
+    let screencastInControl = false;
     const recentFrames: Array<number> = [];
     let screencastParams = Promise.resolve();
     let screencastScale = 1;
+    const viewerInControl = () => tab.control.controller === viewer.id;
     const startScreencast = (scale: number) => {
       screencastScale = scale;
+      screencastInControl = viewerInControl();
       screencastParams = screencastParams.then(async () => {
         if (tab.capturing > 0) return;
         await session.send("Page.stopScreencast").catch(constVoid);
-        await session
-          .send("Page.startScreencast", {
-            format: "jpeg",
-            quality: screencastScale < 1 ? Math.min(quality, SCREENCAST_MOTION_QUALITY) : quality,
-            maxWidth: Math.max(1, Math.round(input.maxWidth * screencastScale)),
-            maxHeight: Math.max(1, Math.round(input.maxHeight * screencastScale)),
-          })
-          .catch(constVoid);
+        // Playwright's protocol types predate `maxFramesInFlight`; the bundled Chromium has it.
+        const params = {
+          format: "jpeg",
+          quality: screencastScale < 1 ? Math.min(quality, SCREENCAST_MOTION_QUALITY) : quality,
+          maxWidth: Math.max(1, Math.round(input.maxWidth * screencastScale)),
+          maxHeight: Math.max(1, Math.round(input.maxHeight * screencastScale)),
+          maxFramesInFlight: screencastInControl
+            ? SCREENCAST_FRAMES_IN_FLIGHT_IN_CONTROL
+            : SCREENCAST_FRAMES_IN_FLIGHT,
+        } as const;
+        await session.send("Page.startScreencast", params).catch(constVoid);
       });
       return screencastParams;
     };
@@ -2354,9 +2368,12 @@ const make = Effect.gen(function* () {
     let screencastStarted = false;
     session.on("Page.screencastFrame", (frame) => {
       screencastStarted = true;
+      // Control can change between frames; re-ask for the window that matches it.
+      if (viewerInControl() !== screencastInControl) void startScreencast(screencastScale);
       if (framesInFlight > 0) mayHaveDropped = true;
       framesInFlight += 1;
       const arrivedAt = Date.now();
+      const ackPace = viewerInControl() ? 0 : SCREENCAST_ACK_PACE_MS;
       recentFrames.push(arrivedAt);
       while (recentFrames[0]! < arrivedAt - SCREENCAST_MOTION_WINDOW_MS) recentFrames.shift();
       if (
@@ -2386,14 +2403,15 @@ const make = Effect.gen(function* () {
       viewer.push({
         _tag: "frame",
         data: Buffer.from(frame.data, "base64"),
-        ack: Effect.promise(() =>
-          sleepUntil(arrivedAt + SCREENCAST_ACK_PACE_MS).then(() => {
+        ack: Effect.promise(() => {
+          const acknowledge = () => {
             framesInFlight -= 1;
             return session
               .send("Page.screencastFrameAck", { sessionId: frame.sessionId })
               .catch(constVoid);
-          }),
-        ),
+          };
+          return ackPace === 0 ? acknowledge() : sleepUntil(arrivedAt + ackPace).then(acknowledge);
+        }),
       });
     });
     broadcastViewport(tab);

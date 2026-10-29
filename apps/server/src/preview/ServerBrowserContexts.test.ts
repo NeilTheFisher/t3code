@@ -4,7 +4,11 @@ import { INCOGNITO_BROWSER_PROFILE_ID } from "@t3tools/contracts";
 import { chromium, type Browser, type BrowserContext, type BrowserType } from "playwright-core";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { ServerBrowserContexts } from "./ServerBrowserContexts.ts";
+import {
+  previewBrowserArgs,
+  previewRenderScale,
+  ServerBrowserContexts,
+} from "./ServerBrowserContexts.ts";
 
 const launches = vi.hoisted(() => ({
   launch: vi.fn<BrowserType["launch"]>(),
@@ -63,6 +67,26 @@ beforeEach(() => {
 });
 
 describe("ServerBrowserContexts", () => {
+  it("launches software raster at scale 2 unless the operator opts out", () => {
+    expect(previewBrowserArgs({})).toEqual([
+      "--disable-gpu",
+      "--force-device-scale-factor=2",
+      "--disable-blink-features=AutomationControlled",
+    ]);
+    expect(previewRenderScale({})).toBe(2);
+  });
+
+  it("uses hardware raster at the requested scale when the operator opts in", () => {
+    const env = { T3CODE_SERVER_BROWSER_GPU: "1", T3CODE_SERVER_BROWSER_SCALE: "1" };
+    expect(previewBrowserArgs(env)).toEqual([
+      "--ignore-gpu-blocklist",
+      "--enable-gpu",
+      "--force-device-scale-factor=1",
+      "--disable-blink-features=AutomationControlled",
+    ]);
+    expect(previewRenderScale(env)).toBe(1);
+  });
+
   it("lazily shares one browser across concurrent isolated sessions and reuses each context", async () => {
     const browser = makeBrowser();
     const launch = Promise.withResolvers<Browser>();

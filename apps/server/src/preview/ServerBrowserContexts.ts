@@ -67,6 +67,18 @@ export const presentAsChrome = async (
   if (identity) await cdp.send("Emulation.setUserAgentOverride", identity);
 };
 
+/** Software raster is the safe default: whether the host GL stack is real hardware varies. */
+const GPU_ARGS = ["--ignore-gpu-blocklist", "--enable-gpu"];
+
+export const previewRenderScale = (env: Readonly<Record<string, string | undefined>>) =>
+  env.T3CODE_SERVER_BROWSER_SCALE === "1" ? 1 : 2;
+
+export const previewBrowserArgs = (env: Readonly<Record<string, string | undefined>>) => [
+  ...(env.T3CODE_SERVER_BROWSER_GPU === "1" ? GPU_ARGS : ["--disable-gpu"]),
+  `--force-device-scale-factor=${previewRenderScale(env)}`,
+  "--disable-blink-features=AutomationControlled",
+];
+
 export class ServerBrowserContexts {
   private readonly options: Options;
   private readonly contexts = new Map<string, Promise<BrowserContext>>();
@@ -84,11 +96,7 @@ export class ServerBrowserContexts {
     return {
       executablePath,
       env,
-      args: [
-        "--disable-gpu",
-        "--force-device-scale-factor=2",
-        "--disable-blink-features=AutomationControlled",
-      ],
+      args: previewBrowserArgs(env),
       ignoreDefaultArgs: ["--enable-automation"],
       headless: true,
       // Only an explicit operator opt-out disables sandboxing. Launch errors never do.

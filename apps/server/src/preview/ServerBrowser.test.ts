@@ -38,6 +38,7 @@ import * as PreviewBrowser from "./PreviewBrowser.ts";
 
 vi.mock("./ServerBrowserContexts.ts", () => ({
   presentAsChrome: async () => {},
+  previewRenderScale: () => 2,
   ServerBrowserContexts: class {
     private readonly onClose: ((context: BrowserContext) => void) | undefined;
     constructor(options: { onContextClose?: (context: BrowserContext) => void }) {
@@ -87,7 +88,7 @@ function makeSession(frame?: ReturnType<typeof makeFrame>) {
   const events = new NodeEvents.EventEmitter();
   return {
     on: vi.fn((name: string, listener: () => void) => events.on(name, listener)),
-    emit: (name: string) => events.emit(name),
+    emit: (name: string, ...args: unknown[]) => events.emit(name, ...args),
     detach: vi.fn(async () => {}),
     send: vi.fn(async (method: string, input?: unknown): Promise<Record<string, unknown>> => {
       if (method === "Page.getNavigationHistory") return { currentIndex: 0, entries: [{}] };
@@ -644,6 +645,44 @@ it.live("enforces provider ownership and explicit targets when a session has mul
       });
       expect(result).toBe("evaluated");
       expect(contexts).toHaveLength(2);
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
+it.live("keeps a passive viewer on the paced three-frame window", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { browser, tabId } = yield* ready;
+      yield* browser.attachViewer(viewerInput(tabId, false));
+      const session = contexts[0]!.sessions.at(-1)!;
+      expect(session.send).toHaveBeenCalledWith(
+        "Page.startScreencast",
+        expect.objectContaining({ format: "jpeg", quality: 70, maxFramesInFlight: 3 }),
+      );
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
+it.live("acks the operator's frames at once and widens the window while in control", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { browser, tabId } = yield* ready;
+      const viewer = yield* browser.attachViewer(viewerInput(tabId, true));
+      yield* viewer.input({ type: "takeControl" });
+      const session = contexts[0]!.sessions.at(-1)!;
+      yield* Queue.takeAll(viewer.output);
+      session.send.mockClear();
+      session.emit("Page.screencastFrame", { data: "ZnJhbWU=", sessionId: 7, metadata: {} });
+      yield* Effect.sleep("25 millis");
+      expect(session.send).toHaveBeenCalledWith(
+        "Page.startScreencast",
+        expect.objectContaining({ maxFramesInFlight: 6 }),
+      );
+      const outputs = yield* Queue.takeAll(viewer.output);
+      const frame = outputs.find((item) => item._tag === "frame");
+      expect(frame).toBeDefined();
+      yield* frame!.ack;
+      expect(session.send).toHaveBeenCalledWith("Page.screencastFrameAck", { sessionId: 7 });
     }),
   ).pipe(Effect.provide(layer)),
 );
