@@ -134,6 +134,17 @@ export function effectiveThreadWorkspaces(
 export function threadWorkspaceAssignmentKey(environmentId: string, threadId: string): string {
   return `${environmentId}:${threadId}`;
 }
+
+/** An assignment to a deleted workspace is unassigned, not a dangling id. */
+export function resolveAssignedWorkspaceId(
+  assignments: Readonly<Record<string, string>>,
+  threadKey: string,
+  workspaces: readonly SidebarThreadWorkspace[],
+): string | null {
+  const assigned = assignments[threadKey];
+  if (assigned === undefined) return null;
+  return workspaces.some((workspace) => workspace.id === assigned) ? assigned : null;
+}
 export const MIN_SIDEBAR_AUTO_SETTLE_AFTER_DAYS = 1;
 export const MAX_SIDEBAR_AUTO_SETTLE_AFTER_DAYS = 90;
 export const SidebarAutoSettleAfterDays = Schema.Number.check(
@@ -567,7 +578,6 @@ export const ClientSettingsSchema = Schema.Struct({
 
   pullRequestLinksOpenInApp: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
 
-  contextWindowMeterEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   composerCollapseOnScroll: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   composerRichTextEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   sendShortcut: Schema.Literals(["enter", "mod-enter-multiline", "mod-enter"]).pipe(
@@ -1258,6 +1268,7 @@ export const PROJECT_SCOPED_SERVER_SETTING_KEYS = [
   "defaultModelSelection",
   "defaultRuntimeMode",
   "defaultThreadEnvMode",
+  "defaultThreadWorkspaceId",
   "newWorktreesStartFromOrigin",
   "worktreeSubmodules",
   "defaultAutoPull",
@@ -1296,6 +1307,7 @@ export const ProjectSettingsOverrides = Schema.Struct({
   defaultModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
   defaultRuntimeMode: Schema.optionalKey(RuntimeMode),
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
+  defaultThreadWorkspaceId: Schema.optionalKey(Schema.NullOr(TrimmedNonEmptyString)),
   newWorktreesStartFromOrigin: Schema.optionalKey(Schema.Boolean),
   worktreeSubmodules: ForwardCompatibleOptional(WorktreeSubmodules),
   defaultAutoPull: Schema.optionalKey(Schema.Boolean),
@@ -1345,6 +1357,7 @@ const NULLABLE_PROJECT_SETTINGS_OVERRIDES: ReadonlySet<ProjectScopedServerSettin
   }[ProjectScopedServerSettingKey]
 >([
   "defaultModelSelection",
+  "defaultThreadWorkspaceId",
   "sourceControlWriterModelSelection",
   "reviewGuideModelSelection",
   "pullRequestMergeMethod",
@@ -1600,6 +1613,10 @@ export const ServerSettings = Schema.Struct({
   ),
   /** Null inherits t3.json, then local; omit it on the wire for older clients requiring a literal. */
   defaultThreadEnvMode: OmittedWhenNull(ThreadEnvMode),
+  /** Null leaves a new thread unfiled; a project override makes it explicit. */
+  defaultThreadWorkspaceId: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   newWorktreesStartFromOrigin: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(true)),
   ),
@@ -2009,6 +2026,7 @@ export const ServerSettingsPatch = Schema.Struct({
   backgroundActivityProfile: Schema.optionalKey(BackgroundActivityProfile),
   environmentIcon: Schema.optionalKey(Schema.NullOr(EnvironmentMachineKind)),
   defaultThreadEnvMode: Schema.optionalKey(Schema.NullOr(ThreadEnvMode)),
+  defaultThreadWorkspaceId: Schema.optionalKey(Schema.NullOr(TrimmedNonEmptyString)),
   newWorktreesStartFromOrigin: Schema.optionalKey(Schema.Boolean),
   worktreeSubmodules: Schema.optionalKey(Schema.NullOr(WorktreeSubmodules)),
   addProjectBaseDirectory: Schema.optionalKey(TrimmedString),
@@ -2162,7 +2180,6 @@ export const ClientSettingsPatch = Schema.Struct({
     Schema.Record(TrimmedNonEmptyString, PullRequestMergeMethod),
   ),
   pullRequestLinksOpenInApp: Schema.optionalKey(Schema.Boolean),
-  contextWindowMeterEnabled: Schema.optionalKey(Schema.Boolean),
   composerCollapseOnScroll: Schema.optionalKey(Schema.Boolean),
   composerRichTextEnabled: Schema.optionalKey(Schema.Boolean),
   sendShortcut: Schema.optionalKey(Schema.Literals(["enter", "mod-enter-multiline", "mod-enter"])),
@@ -2209,7 +2226,6 @@ export const ClientSettingsPatch = Schema.Struct({
   showProviderUsageInContextPopover: Schema.optionalKey(Schema.Boolean),
   wordWrap: Schema.optionalKey(Schema.Boolean),
   mathRenderingEnabled: Schema.optionalKey(Schema.Boolean),
-  showProviderUsageInContextPopover: Schema.optionalKey(Schema.Boolean),
   sidebarProjectIconColors: Schema.optionalKey(Schema.Boolean),
   redesignEnabled: Schema.optionalKey(Schema.Boolean),
   enableExternalFilePreview: Schema.optionalKey(Schema.Boolean),

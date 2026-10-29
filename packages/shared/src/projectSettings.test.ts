@@ -10,6 +10,7 @@ import {
   clearProjectSettingsOverrides,
   hasProjectSettingsOverrides,
   resolveNewThreadEnvMode,
+  resolveProjectDefaultThreadWorkspaceId,
   resolveProjectSettings,
   resolveSendEnvMode,
   resolveWorktreeCleanup,
@@ -429,4 +430,44 @@ it("keeps project speech vocabulary on its originating project and clears it to 
     projectSettingsOverrides: { [projectId]: cleared },
   });
   expect(resolveProjectSettings(restored, projectId).settings.speechProjectCustomWords).toEqual([]);
+});
+
+describe("resolveProjectDefaultThreadWorkspaceId", () => {
+  const workspaces = [
+    { id: "work", name: "Work", icon: "briefcase", tint: "info" },
+    { id: "personal", name: "Personal", icon: "house", tint: "success" },
+  ];
+  const settings = {
+    ...DEFAULT_SERVER_SETTINGS,
+    sidebarThreadWorkspacesEnabled: true,
+    sidebarThreadWorkspaces: workspaces,
+  };
+
+  it("reads a project override", () => {
+    expect(
+      resolveProjectDefaultThreadWorkspaceId(
+        {
+          ...settings,
+          projectSettingsOverrides: { [projectId]: { defaultThreadWorkspaceId: "work" } },
+        },
+        projectId,
+      ),
+    ).toBe("work");
+  });
+
+  it("ignores a workspace that no longer exists", () => {
+    expect(
+      resolveProjectDefaultThreadWorkspaceId(
+        {
+          ...settings,
+          projectSettingsOverrides: { [projectId]: { defaultThreadWorkspaceId: "deleted" } },
+        },
+        projectId,
+      ),
+    ).toBeNull();
+  });
+
+  it("returns null without an override", () => {
+    expect(resolveProjectDefaultThreadWorkspaceId(settings, projectId)).toBeNull();
+  });
 });
