@@ -1,5 +1,6 @@
 import {
   CloudIcon,
+  FileDiffIcon,
   FolderGit2Icon,
   GitBranchIcon,
   GitCommitHorizontalIcon,
@@ -598,6 +599,7 @@ function WorktreeRow(props: {
   onCancelRemove: () => void;
   onStartThread: () => void;
   onRevealHead: () => void;
+  onShowUncommitted: () => void;
 }) {
   const {
     worktree,
@@ -611,6 +613,7 @@ function WorktreeRow(props: {
     onCancelRemove,
     onStartThread,
     onRevealHead,
+    onShowUncommitted,
   } = props;
   // The repository's own checkout has no branch of its own to recreate, so it is
   // never removable from this list; a checkout with a live run is unsafe.
@@ -688,6 +691,16 @@ function WorktreeRow(props: {
           </div>
         ) : (
           <span className="flex shrink-0 items-center gap-0.5">
+            {worktree.dirty ? (
+              <Button
+                variant="ghost-muted"
+                size="icon-xs"
+                aria-label={`Show ${worktree.branch} uncommitted changes`}
+                onClick={onShowUncommitted}
+              >
+                <FileDiffIcon />
+              </Button>
+            ) : null}
             <Button
               variant="ghost-muted"
               size="icon-xs"
@@ -729,6 +742,8 @@ export function GitGraphPanel(props: {
   readonly projectId: string | null;
   /** Starts a thread bound to an existing checkout. */
   readonly onStartThreadInWorktree: (input: { path: string; branch: string | null }) => void;
+  /** Opens the diff panel on one checkout's own uncommitted work. */
+  readonly onOpenCheckoutUncommitted: (input: { cwd: string; label: string }) => void;
 }) {
   const [graph, setGraph] = useState<VcsLogGraphResult | null>(null);
   const [workingTree, setWorkingTree] = useState<VcsGraphWorkingTree | null>(null);
@@ -754,7 +769,7 @@ export function GitGraphPanel(props: {
   const canCheckout = useEnvironmentScope(props.environmentId, AuthSourceControlWriteScope);
   const loadGraphEvent = useEffectEvent(loadGraph);
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- The graph is read from the repository over RPC.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- The graph is read from the repository over RPC.
   useEffect(() => {
     const cwd = props.cwd;
     if (cwd === null) {
@@ -835,7 +850,7 @@ export function GitGraphPanel(props: {
   const currentBranch = data?.currentBranch ?? "HEAD";
   const showWorktrees = worktrees.length > 0;
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- A notice timer is cleared on unmount.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- A notice timer is cleared on unmount.
   useEffect(
     () => () => {
       if (noticeTimer.current !== null) window.clearTimeout(noticeTimer.current);
@@ -1356,6 +1371,12 @@ export function GitGraphPanel(props: {
                   })
                 }
                 onRevealHead={() => revealCheckoutHead(worktree)}
+                onShowUncommitted={() =>
+                  props.onOpenCheckoutUncommitted({
+                    cwd: worktree.path,
+                    label: worktree.branch,
+                  })
+                }
               />
             );
           })}
