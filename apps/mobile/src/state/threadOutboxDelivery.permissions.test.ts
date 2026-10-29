@@ -80,7 +80,10 @@ vi.mock("./workspace", async () => {
 vi.mock("./server", async () => {
   const { Atom } = await import("effect/reactivity");
   return {
-    serverEnvironment: { configValueAtom: Atom.family((_id: string) => Atom.make(state.config)) },
+    serverEnvironment: {
+      configValueAtom: Atom.family((_id: string) => Atom.make(state.config)),
+      settingsValueAtom: Atom.family((_id: string) => Atom.make(null)),
+    },
     environmentServerConfigsAtom: Atom.make(new Map([["secondary", state.config]])),
   };
 });

@@ -47,6 +47,7 @@ import {
 } from "./pending-thread-creation";
 import { environmentProjects } from "./projects";
 import { environmentServerConfigsAtom, serverEnvironment } from "./server";
+import { fileThreadInProjectDefaultWorkspace } from "./threadWorkspaces";
 import { gitEnvironment } from "./git";
 import { environmentSession, readEnvironmentScope, sessionHasScope } from "./session";
 import {
@@ -1065,6 +1066,11 @@ export function createThreadOutboxDelivery(): {
       return restoreQueuedMessage(persistedMessage, failure.message);
     }
     recordPendingThreadCreationOutcome({ kind: "delivered", message: persistedMessage });
+    fileThreadInProjectDefaultWorkspace({
+      environmentId: queuedMessage.environmentId,
+      projectId: creation.projectId,
+      threadId: queuedMessage.threadId,
+    });
     const outcome = await completeQueuedMessageDelivery(
       persistedMessage,
       deliveryRevision,

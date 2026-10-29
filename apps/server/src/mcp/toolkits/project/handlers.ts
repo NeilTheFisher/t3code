@@ -4,6 +4,7 @@ import {
   ThreadId,
   OrchestratorMcpFailure,
   ProjectId,
+  threadWorkspaceAssignmentKey,
 } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -21,7 +22,10 @@ import * as ServerSettings from "../../../serverSettings.ts";
 import * as ProviderRegistry from "../../../provider/ProviderRegistry.ts";
 import * as DateTime from "effect/DateTime";
 import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
-import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import {
+  resolveProjectDefaultThreadWorkspaceId,
+  resolveProjectSettings,
+} from "@t3tools/shared/projectSettings";
 import { resolveRuntimeMode } from "../../delegatedTaskModes.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
@@ -50,39 +54,42 @@ function projectFailure(error: Project.ProjectServiceError) {
  * path first, then fall back to an exact case-insensitive title, so a launch
  * into an unknown project fails loudly instead of landing somewhere else.
  */
-const resolveProjectReference = (context: Caller, reference: ProjectId | undefined) =>
-  Effect.gen(function* () {
-    if (reference === undefined) return yield* resolveProjectId(context, reference);
-    const projects = yield* Project.ProjectService;
-    const project = yield* projects.getById(reference).pipe(Effect.mapError(unavailable));
-    if (Option.isSome(project)) return reference;
-    // Title matching is a convenience on top of the id; a shell listing that
-    // cannot be read must not fail a launch that named an id.
-    const shells = yield* projects
-      .listShells()
-      .pipe(Effect.mapError(unavailable), Effect.catchCause(() => Effect.succeed([])));
-    const wanted = reference.trim().toLowerCase();
-    const matches = shells.filter(
-      (shell) =>
-        shell.title.trim().toLowerCase() === wanted ||
-        shell.workspaceRoot?.replace(/\/+$/u, "").toLowerCase() === wanted.replace(/\/+$/u, ""),
-    );
-    const only = matches[0];
-    if (matches.length === 1 && only !== undefined) return only.id;
-    // An id the service does not list here (a client-supplied project the shell
-    // projection has not caught up with) is still the id that was asked for;
-    // only a human-readable name has to resolve, because a wrong one would
-    // otherwise land work in the wrong project.
-    if (!/[\s/\\]/u.test(reference)) return reference;
-    const known = shells.map((shell) => `"${shell.title}"`).join(", ");
-    return yield* new OrchestratorMcpFailure({
-      code: "invalid_request",
-      message:
-        matches.length === 0
-          ? `No project is named "${reference}". Projects: ${known}.`
-          : `"${reference}" names ${matches.length} projects; pass the project id instead.`,
-    });
+const resolveProjectReference = Effect.fn("mcp.resolveProjectReference")(function* (
+  context: Caller,
+  reference: ProjectId | undefined,
+) {
+  if (reference === undefined) return yield* resolveProjectId(context, reference);
+  const projects = yield* Project.ProjectService;
+  const project = yield* projects.getById(reference).pipe(Effect.mapError(unavailable));
+  if (Option.isSome(project)) return reference;
+  // Title matching is a convenience on top of the id; a shell listing that
+  // cannot be read must not fail a launch that named an id.
+  const shells = yield* projects.listShells().pipe(
+    Effect.mapError(unavailable),
+    Effect.catchCause(() => Effect.succeed([])),
+  );
+  const wanted = reference.trim().toLowerCase();
+  const matches = shells.filter(
+    (shell) =>
+      shell.title.trim().toLowerCase() === wanted ||
+      shell.workspaceRoot?.replace(/\/+$/u, "").toLowerCase() === wanted.replace(/\/+$/u, ""),
+  );
+  const only = matches[0];
+  if (matches.length === 1 && only !== undefined) return only.id;
+  // An id the service does not list here (a client-supplied project the shell
+  // projection has not caught up with) is still the id that was asked for;
+  // only a human-readable name has to resolve, because a wrong one would
+  // otherwise land work in the wrong project.
+  if (!/[\s/\\]/u.test(reference)) return reference;
+  const known = shells.map((shell) => `"${shell.title}"`).join(", ");
+  return yield* new OrchestratorMcpFailure({
+    code: "invalid_request",
+    message:
+      matches.length === 0
+        ? `No project is named "${reference}". Projects: ${known}.`
+        : `"${reference}" names ${matches.length} projects; pass the project id instead.`,
   });
+});
 
 /** Require project worktrees so launches cannot target arbitrary host directories. */
 const assertProjectWorktree = Effect.fn("mcp.assertProjectWorktree")(function* (
@@ -174,6 +181,15 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
           Effect.flatMap((projects) => projects.getById(projectId)),
           Effect.mapError(unavailable),
           Effect.map(Option.getOrUndefined),
+        );
+        const projectDefaultWorkspaceId = yield* ServerSettings.ServerSettingsService.pipe(
+          Effect.flatMap((settings) => settings.getSettings),
+          Effect.mapError(unavailable),
+          Effect.flatMap((settings) =>
+            Effect.map(readProject, (project) =>
+              resolveProjectDefaultThreadWorkspaceId(settings, projectId, project),
+            ),
+          ),
         );
         // A retry of an accepted launch replays it: it keeps the model it started
         // with and skips the checks only a new launch needs, which the project
@@ -300,6 +316,26 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
           }),
         );
         const thread = result.projection.thread;
+        if (projectDefaultWorkspaceId !== null) {
+          const settings = yield* ServerSettings.ServerSettingsService;
+          const current = yield* settings.getSettings.pipe(Effect.mapError(unavailable));
+          yield* settings
+            .updateSettings({
+              sidebarThreadWorkspaceAssignments: {
+                ...current.sidebarThreadWorkspaceAssignments,
+                [threadWorkspaceAssignmentKey(scope.environmentId, thread.id)]:
+                  projectDefaultWorkspaceId,
+              },
+            })
+            .pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning(
+                  "Could not file a launched thread into its project workspace",
+                  cause,
+                ),
+              ),
+            );
+        }
         const run = result.projection.runs.find((run) => run.userMessageId === messageId);
         return {
           threadId: thread.id,

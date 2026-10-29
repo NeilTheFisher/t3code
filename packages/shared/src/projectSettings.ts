@@ -12,6 +12,7 @@ import {
   type T3ProjectFile,
   type ThreadEnvMode,
   type WorktreeCleanupRules,
+  effectiveThreadWorkspaces,
 } from "@t3tools/contracts";
 import { normalizeProjectPathForComparison } from "./path.ts";
 import { fallbackTextGenerationModelSelection } from "./serverSettings.ts";
@@ -210,6 +211,20 @@ export function clearProjectSettingsOverrides(
   const next = { ...current };
   for (const key of keys) delete next[key];
   return Object.keys(next).length === 0 ? null : next;
+}
+
+/** A project's default thread workspace, or null when unset or no longer a workspace. */
+export function resolveProjectDefaultThreadWorkspaceId(
+  settings: ServerSettings,
+  projectId: ProjectId | null,
+  project?: LegacyProjectSettingsFields | null,
+): string | null {
+  const workspaceId = resolveProjectSettings(settings, projectId, project).settings
+    .defaultThreadWorkspaceId;
+  if (workspaceId === null) return null;
+  return effectiveThreadWorkspaces(settings).some((workspace) => workspace.id === workspaceId)
+    ? workspaceId
+    : null;
 }
 
 export function resolveWorktreeCleanup(

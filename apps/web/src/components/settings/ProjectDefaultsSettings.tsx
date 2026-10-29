@@ -88,6 +88,7 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
   const mixedPermissions = useScopedSettingsMixed(["defaultRuntimeMode"]);
   const PermissionIcon = runtimeModeConfig[settings.defaultRuntimeMode].icon;
   const mixedWorkspace = useScopedSettingsMixed(["defaultThreadEnvMode"]);
+  const mixedThreadWorkspace = useScopedSettingsMixed(["defaultThreadWorkspaceId"]);
   const mixedAutoPull = useScopedSettingsMixed(["defaultAutoPull"]);
   const mixedAgentCredits = useScopedSettingsMixed(["removeAgentCreditsOnMerge"]);
   const mixedMergeMethod = useScopedSettingsMixed(["pullRequestMergeMethod"]);
@@ -224,6 +225,56 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
     />
   );
 
+  const threadWorkspaceRow = isProjectScope ? (
+    <SettingsRow
+      serverScoped
+      settingKeys={["defaultThreadWorkspaceId"]}
+      mixed={mixedThreadWorkspace}
+      id="default-thread-workspace"
+      title="Thread workspace"
+      description="File new threads in this project into this workspace. No workspace leaves them unfiled."
+      resetAction={
+        !mixedThreadWorkspace && settings.defaultThreadWorkspaceId !== null ? (
+          <SettingResetButton
+            label="default thread workspace"
+            onClick={() => updateSettings({ defaultThreadWorkspaceId: null })}
+          />
+        ) : null
+      }
+      control={
+        <Select
+          value={mixedThreadWorkspace ? null : (settings.defaultThreadWorkspaceId ?? "none")}
+          onValueChange={(value) =>
+            updateSettings({
+              defaultThreadWorkspaceId: value === "none" ? null : value,
+            })
+          }
+        >
+          <SelectTrigger size="sm" aria-label="Default thread workspace">
+            <SelectValue>
+              {(value: string | null) => {
+                if (mixedThreadWorkspace) return "Mixed";
+                if (value === null || value === "none") return "No workspace";
+                return (
+                  settings.sidebarThreadWorkspaces.find((workspace) => workspace.id === value)
+                    ?.name ?? "Unknown workspace"
+                );
+              }}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectPopup align="end" alignItemWithTrigger={false}>
+            <SelectItem value="none">No workspace</SelectItem>
+            {settings.sidebarThreadWorkspaces.map((workspace) => (
+              <SelectItem key={workspace.id} value={workspace.id}>
+                {workspace.name}
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
+      }
+    />
+  ) : null;
+
   const fallbackRow = !isProjectScope ? (
     <SettingsRow
       serverScoped
@@ -287,6 +338,7 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
           {modelRow}
           {fallbackRow}
           {workspaceRow}
+          {threadWorkspaceRow}
         </>
       ) : category === "general" ? (
         <>

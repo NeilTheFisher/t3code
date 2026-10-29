@@ -1,6 +1,7 @@
 import * as ProviderRegistry from "../../../provider/ProviderRegistry.ts";
 import { expect, it } from "@effect/vitest";
 import {
+  DEFAULT_SERVER_SETTINGS,
   EnvironmentId,
   ProjectId,
   ProviderInstanceId,
@@ -11,6 +12,7 @@ import {
   type OrchestrationProjectShell,
   type RuntimeMode,
   type OrchestrationV2ThreadShell,
+  type ServerSettings as ServerSettingsShape,
 } from "@t3tools/contracts";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -22,6 +24,8 @@ import * as Path from "effect/Path";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
+import * as Ref from "effect/Ref";
+import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
 
 import * as DocumentText from "../../../provider/DocumentText.ts";
 import * as ThreadLaunch from "../../../orchestration-v2/ThreadLaunchService.ts";
@@ -45,6 +49,8 @@ const clientLaunchHarness = (input: {
   readonly providers?: readonly ServerProvider[];
   /** Where Settings saves a project's model; the legacy project field stays null. */
   readonly overrideModel?: ModelSelection;
+  readonly defaultThreadWorkspaceId?: string;
+  readonly settingsRef?: Ref.Ref<ServerSettingsShape>;
   readonly launched: Array<ThreadLaunch.ThreadLaunchInput>;
   readonly workspaceRoot?: string;
   readonly checkWorktreeBase?: ThreadLaunch.ThreadLaunchService["Service"]["checkWorktreeBase"];
@@ -63,20 +69,46 @@ const clientLaunchHarness = (input: {
     Layer.mock(ProviderRegistry.ProviderRegistry)({
       getProviders: Effect.succeed(input.providers ?? []),
     }),
-    ServerSettings.layerTest({
-      fallbackModelSelection: input.fallbackModel ?? null,
-      ...(input.defaultRuntimeMode === undefined
-        ? {}
-        : { defaultRuntimeMode: input.defaultRuntimeMode }),
-      ...(input.overrideModel === undefined
-        ? {}
-        : {
-            projectSettingsFolded: true,
-            projectSettingsOverrides: {
-              [projectId]: { defaultModelSelection: input.overrideModel },
-            },
-          }),
-    }),
+    input.settingsRef === undefined
+      ? ServerSettings.layerTest({
+          fallbackModelSelection: input.fallbackModel ?? null,
+          ...(input.defaultRuntimeMode === undefined
+            ? {}
+            : { defaultRuntimeMode: input.defaultRuntimeMode }),
+          ...(input.defaultThreadWorkspaceId === undefined
+            ? {}
+            : {
+                sidebarThreadWorkspacesEnabled: true,
+                sidebarThreadWorkspaces: [
+                  { id: "work", name: "Work", icon: "briefcase", tint: "info" },
+                ],
+              }),
+          ...(input.overrideModel === undefined && input.defaultThreadWorkspaceId === undefined
+            ? {}
+            : {
+                projectSettingsFolded: input.overrideModel !== undefined,
+                projectSettingsOverrides: {
+                  [projectId]: {
+                    ...(input.overrideModel === undefined
+                      ? {}
+                      : { defaultModelSelection: input.overrideModel }),
+                    ...(input.defaultThreadWorkspaceId === undefined
+                      ? {}
+                      : { defaultThreadWorkspaceId: input.defaultThreadWorkspaceId }),
+                  },
+                },
+              }),
+        })
+      : Layer.mock(ServerSettings.ServerSettingsService)({
+          getSettings: Ref.get(input.settingsRef),
+          updateSettings: (patch) =>
+            Effect.gen(function* () {
+              const current = yield* Ref.get(input.settingsRef!);
+              const next = applyServerSettingsPatch(current, patch);
+              yield* Ref.set(input.settingsRef!, next);
+              return next;
+            }),
+        }),
     NodeCrypto.layer,
     Layer.succeed(McpInvocationContext.McpInvocationContext, {
       environmentId: EnvironmentId.make("environment"),
@@ -360,6 +392,42 @@ it.effect("a retried launch replays after the project loses its default model", 
       launched[0]?.threadId,
       launched[0]?.threadId,
     ]);
+  }),
+);
+
+it.effect("a launch files the thread into the project's default workspace", () =>
+  Effect.gen(function* () {
+    const projectId = ProjectId.make("project:client-target");
+    const settingsRef = yield* Ref.make<ServerSettingsShape>({
+      ...DEFAULT_SERVER_SETTINGS,
+      sidebarThreadWorkspacesEnabled: true,
+      sidebarThreadWorkspaces: [{ id: "work", name: "Work", icon: "briefcase", tint: "info" }],
+      projectSettingsFolded: false,
+      projectSettingsOverrides: { [projectId]: { defaultThreadWorkspaceId: "work" } },
+    });
+    const launched: Array<ThreadLaunch.ThreadLaunchInput> = [];
+    const { dependencies } = clientLaunchHarness({
+      runtimeModeCeiling: "auto",
+      launched,
+      defaultThreadWorkspaceId: "work",
+      settingsRef,
+    });
+    const toolkit = yield* ProjectToolkit.pipe(
+      Effect.provide(
+        McpToolAccess.HandlersLayer.layer(ProjectHandlers.layer).pipe(Layer.provide(dependencies)),
+      ),
+    );
+    const events = yield* toolkit
+      .handle("t3_thread_launch", { title: "Fix", projectId })
+      .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
+
+    expect(events.at(-1)?.result).toMatchObject({ threadId: expect.anything() });
+    const settings = yield* Ref.get(settingsRef);
+    const threadId = launched[0]?.threadId;
+    expect(threadId).toBeDefined();
+    expect(settings.sidebarThreadWorkspaceAssignments[`environment:${String(threadId)}`]).toBe(
+      "work",
+    );
   }),
 );
 
