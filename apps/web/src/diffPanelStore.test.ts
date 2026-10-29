@@ -182,6 +182,22 @@ describe("diff panel history", () => {
     expect(selection()).toEqual({ kind: "branch", baseRef: null });
   });
 
+  it("scopes the diff to another checkout's uncommitted work", () => {
+    useDiffPanelStore.getState().selectGitScope(REF, "branch");
+    useDiffPanelStore.getState().selectCheckoutUncommitted(REF, {
+      cwd: "/home/me/.t3/worktrees/feature",
+      label: "feat/feature",
+    });
+
+    expect(selection()).toEqual({
+      kind: "checkout-uncommitted",
+      cwd: "/home/me/.t3/worktrees/feature",
+      label: "feat/feature",
+    });
+    useDiffPanelStore.getState().goBack(REF);
+    expect(selection()).toEqual({ kind: "branch", baseRef: null });
+  });
+
   it("does not record the same scope twice in a row", () => {
     useDiffPanelStore.getState().selectGitScope(REF, "branch");
     useDiffPanelStore.getState().selectGitScope(REF, "branch");

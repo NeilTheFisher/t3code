@@ -340,6 +340,17 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
     onDiffPanelOpen?.();
   };
   const onOpenWorkingTreeDiffStable = useStableCallback(onOpenWorkingTreeDiff);
+  // One checkout's uncommitted work, which may be a worktree this thread is not in.
+  const onOpenCheckoutUncommitted = (input: { cwd: string; label: string }) => {
+    if (!activeThreadRef) return;
+    const diffOpen =
+      selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, activeThreadRef) === "diff";
+    explicitDiffOpenRef.current = diffOpen ? null : activeThreadRef;
+    useDiffPanelStore.getState().selectCheckoutUncommitted(activeThreadRef, input);
+    useRightPanelStore.getState().open(activeThreadRef, "diff");
+    onDiffPanelOpen?.();
+  };
+  const onOpenCheckoutUncommittedStable = useStableCallback(onOpenCheckoutUncommitted);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes to the preview action bus to toggle the preview panel
   useEffect(
     () =>
@@ -380,6 +391,7 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
     onOpenCommitRangeDiffStable,
     onOpenTurnDiffStable,
     onOpenWorkingTreeDiffStable,
+    onOpenCheckoutUncommittedStable,
     onToggleDiffStable,
     openChangesFromThreadPanelStable,
     openFileSurfaceStable,
