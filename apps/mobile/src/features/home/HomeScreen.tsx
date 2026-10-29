@@ -74,7 +74,10 @@ import {
   type ThreadListV2ListItem,
 } from "../threads/threadListV2";
 import { useThreadListV2ShelfPreferences } from "../threads/use-thread-list-v2-shelf-preferences";
-import type { HomeListFilterMenuEnvironment } from "./home-list-filter-menu";
+import type {
+  HomeListFilterMenuEnvironment,
+  HomeListFilterMenuWorkspace,
+} from "./home-list-filter-menu";
 import {
   buildHomeProjectScopes,
   findHomeProjectScope,
@@ -98,11 +101,15 @@ interface HomeScreenProps {
   readonly searchQuery: string;
   readonly selectedEnvironmentId: EnvironmentId | null;
   readonly selectedProjectKey: string | null;
+  readonly workspaces: ReadonlyArray<HomeListFilterMenuWorkspace>;
+  readonly selectedWorkspaceId: string | null;
   readonly projectSortOrder: HomeProjectSortOrder;
   readonly projectGroupingMode: SidebarProjectGroupingMode;
   readonly onSearchQueryChange: (query: string) => void;
   readonly onEnvironmentChange: (environmentId: EnvironmentId | null) => void;
   readonly onProjectChange: (projectKey: string | null) => void;
+  readonly onWorkspaceChange: (workspaceId: string | null) => void;
+  readonly workspaceFilter: ((thread: EnvironmentThreadShell) => boolean) | null;
   readonly onAddConnection: () => void;
   readonly onOpenSettings: () => void;
   readonly onStartNewTask: () => void;
@@ -407,7 +414,7 @@ export function HomeScreen(props: HomeScreenProps) {
   const [settledVisibleCount, setSettledVisibleCount] = useState(
     THREAD_LIST_V2_SETTLED_INITIAL_COUNT,
   );
-  const settledResetKey = `${props.selectedEnvironmentId ?? "all"}:${v2ProjectScopeKey ?? "all"}:${props.searchQuery.trim()}`;
+  const settledResetKey = `${props.selectedEnvironmentId ?? "all"}:${v2ProjectScopeKey ?? "all"}:${props.selectedWorkspaceId ?? "all"}:${props.searchQuery.trim()}`;
   const [lastSettledResetKey, setLastSettledResetKey] = useState(settledResetKey);
   if (lastSettledResetKey !== settledResetKey) {
     setLastSettledResetKey(settledResetKey);
@@ -467,6 +474,7 @@ export function HomeScreen(props: HomeScreenProps) {
     snoozedShelfExpanded,
     settledShelfExpanded,
     selectedThreadKey,
+    workspaceFilter: props.workspaceFilter,
   });
   // Called as `props.onSelectThread(...)`, the compiler would cache this handler on the whole
   // props object, which is new on every render of Home's parent.
@@ -714,8 +722,11 @@ export function HomeScreen(props: HomeScreenProps) {
           projects={projectScopes.map((scope) => ({ key: scope.key, label: scope.title }))}
           selectedEnvironmentId={props.selectedEnvironmentId}
           selectedProjectKey={props.selectedProjectKey}
+          workspaces={props.workspaces}
+          selectedWorkspaceId={props.selectedWorkspaceId}
           onEnvironmentChange={props.onEnvironmentChange}
           onProjectChange={props.onProjectChange}
+          onWorkspaceChange={props.onWorkspaceChange}
         />
       ) : null}
     </>

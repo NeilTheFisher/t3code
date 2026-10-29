@@ -277,6 +277,27 @@ describe("getThreadListV2OrderedSection", () => {
 });
 
 describe("buildThreadListV2Items", () => {
+  it("lists only threads accepted by the workspace filter", () => {
+    const layout = buildThreadListV2Items({
+      threads: [
+        makeThread({ id: ThreadId.make("active"), title: "Active" }),
+        makeThread({
+          id: ThreadId.make("settled"),
+          title: "Settled",
+          settledOverride: "settled",
+        }),
+        makeThread({ id: ThreadId.make("other"), title: "Other" }),
+      ],
+      environmentId: null,
+      searchQuery: "",
+      now: NOW,
+      workspaceFilter: (thread) => thread.id !== "other",
+    });
+
+    expect(layout.items.map((item) => item.thread.id)).toEqual(["active", "settled"]);
+    expect(layout.settledCount).toBe(1);
+  });
+
   it("hides snoozed threads and counts them — visibility parity with web", () => {
     const layout = buildThreadListV2Items({
       threads: [

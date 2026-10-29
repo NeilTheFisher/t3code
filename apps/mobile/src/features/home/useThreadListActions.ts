@@ -3,10 +3,14 @@ import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell
 import * as ThreadUndo from "@t3tools/client-runtime/state/thread-undo";
 import { showThreadUndoNotice } from "./thread-undo-notice";
 import { canSnooze } from "@t3tools/client-runtime/state/thread-settled";
-import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
+import {
+  AuthOrchestrationOperateScope,
+  AuthSettingsWriteScope,
+  threadWorkspaceAssignmentKey,
+} from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Haptics from "expo-haptics";
-import { useRef } from "react";
+import { useCallback, useRef } from "react";
 
 import { withThreadDismissal } from "./thread-dismissal";
 import * as Dialog from "../../components/ui/Dialog";
@@ -14,7 +18,7 @@ import { scopedThreadKey } from "../../lib/scopedEntities";
 import { refreshArchivedThreadsForEnvironment } from "../archive/useArchivedThreadSnapshots";
 import { pinOrderKeyBetween } from "@t3tools/client-runtime/state/thread-sort";
 import { appAtomRegistry } from "../../state/atom-registry";
-import { environmentServerConfigsAtom } from "../../state/server";
+import { environmentServerConfigsAtom, serverEnvironment } from "../../state/server";
 import { readEnvironmentScope } from "../../state/session";
 import { environmentThreadShells, threadEnvironment } from "../../state/threads";
 import { queuedThreadKeysAtom } from "../../state/use-thread-outbox";
@@ -32,6 +36,7 @@ import {
 import { getThreadListV2OrderedSection } from "../threads/threadListV2";
 import { threadCanArchive } from "./threadArchive";
 import { resolveThreadTitleRename } from "../threads/thread-title-rename";
+import { planThreadWorkspaceAssignment } from "../../state/threadWorkspaces";
 
 function environmentConfigLoaded(environmentId: EnvironmentThreadShell["environmentId"]) {
   return appAtomRegistry.get(environmentServerConfigsAtom).has(environmentId);
@@ -207,6 +212,10 @@ export function useThreadListActions(): {
   ) => Promise<boolean>;
   readonly renameThread: (thread: EnvironmentThreadShell) => void;
   readonly regenerateThreadTitle: (thread: EnvironmentThreadShell) => Promise<boolean>;
+  readonly fileThreadInWorkspace: (
+    thread: EnvironmentThreadShell,
+    workspaceId: string | null,
+  ) => Promise<boolean>;
 } {
   const executeAction = useThreadActionExecutor();
   const snoozeMutation = useAtomCommand(threadEnvironment.snooze, { reportFailure: false });
@@ -217,6 +226,9 @@ export function useThreadListActions(): {
     reportFailure: false,
   });
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
+    reportFailure: false,
+  });
+  const updateServerSettings = useAtomCommand(serverEnvironment.updateSettings, {
     reportFailure: false,
   });
   const snoozeInFlightThreadKeys = useRef(new Set<string>());
@@ -701,9 +713,50 @@ export function useThreadListActions(): {
   const confirmDeleteThread = (thread: EnvironmentThreadShell) =>
     confirmThreadDeletion(executeAction, thread);
 
+  const fileThreadInWorkspace = useCallback(
+    async (thread: EnvironmentThreadShell, workspaceId: string | null) => {
+      if (!readEnvironmentScope(thread.environmentId, AuthSettingsWriteScope)) {
+        Dialog.alert("Could not move thread", "This connection cannot change workspace settings.");
+        return false;
+      }
+      const settings = appAtomRegistry.get(
+        serverEnvironment.settingsValueAtom(thread.environmentId),
+      );
+      if (settings === null || settings === undefined) {
+        Dialog.alert("Could not move thread", "This environment's settings are not loaded.");
+        return false;
+      }
+      const patch = planThreadWorkspaceAssignment({
+        settings,
+        threadKey: threadWorkspaceAssignmentKey(thread.environmentId, thread.id),
+        workspaceId,
+      });
+      if (patch === null) {
+        Dialog.alert("Could not move thread", "That workspace no longer exists.");
+        return false;
+      }
+      selectionHaptic();
+      const result = await updateServerSettings({
+        environmentId: thread.environmentId,
+        input: { patch },
+      });
+      if (result._tag === "Failure") {
+        const error = Cause.squash(result.cause);
+        Dialog.alert(
+          "Could not move thread",
+          error instanceof Error ? error.message : "Try again.",
+        );
+        return false;
+      }
+      return true;
+    },
+    [updateServerSettings],
+  );
+
   return {
     archiveThread,
     confirmDeleteThread,
+    fileThreadInWorkspace,
     settleThread,
     snoozeThread,
     unsnoozeThread,

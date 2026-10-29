@@ -1,4 +1,5 @@
 import type { OlderSettledScope } from "@t3tools/client-runtime/state/threads";
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useMemo, useSyncExternalStore } from "react";
 
@@ -54,6 +55,7 @@ export function useThreadListV2(input: {
   readonly snoozedShelfExpanded: boolean;
   readonly settledShelfExpanded: boolean;
   readonly selectedThreadKey: string | null;
+  readonly workspaceFilter?: ((thread: EnvironmentThreadShell) => boolean) | null;
 }) {
   const { threads, workingShelfEnabled } = input;
   // A thread can stop working when the threads change, or when its exit grace expires.
@@ -118,17 +120,21 @@ export function useThreadListV2(input: {
     settledShelfExpanded: input.settledShelfExpanded,
     selectedThreadKey: input.selectedThreadKey,
     isListedSettled: olderSettledShelf.isListed,
-    unloadedSettledCount: olderSettledShelf.unloadedCount(
-      threads.filter(
-        (thread) =>
-          thread.archivedAt === null &&
-          scopes.some(
-            (scope) =>
-              scope.environmentId === thread.environmentId &&
-              (scope.projectIds === null || scope.projectIds.includes(thread.projectId)),
-          ),
-      ),
-    ),
+    unloadedSettledCount:
+      input.workspaceFilter == null
+        ? olderSettledShelf.unloadedCount(
+            threads.filter(
+              (thread) =>
+                thread.archivedAt === null &&
+                scopes.some(
+                  (scope) =>
+                    scope.environmentId === thread.environmentId &&
+                    (scope.projectIds === null || scope.projectIds.includes(thread.projectId)),
+                ),
+            ),
+          )
+        : 0,
+    workspaceFilter: input.workspaceFilter ?? null,
   });
   useOlderSettledShelfGrowth(olderSettledShelf, layout.listedSettledThreads);
   const contentOnlyThreadKeys = useKeySet([...layout.contentOnlyThreadKeys].sort().join("\n"));

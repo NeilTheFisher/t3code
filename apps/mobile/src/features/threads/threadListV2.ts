@@ -617,6 +617,8 @@ export function buildThreadListV2Items(input: {
   readonly isListedSettled?: (thread: EnvironmentThreadShell) => boolean;
   /** Settled threads in scope that are not local (older settled threads not loaded). */
   readonly unloadedSettledCount?: number;
+  /** Null shows every workspace; otherwise only threads filed into the selected one. */
+  readonly workspaceFilter?: ((thread: EnvironmentThreadShell) => boolean) | null;
 }): ThreadListV2Layout {
   const now = input.now;
   const pending =
@@ -649,7 +651,8 @@ export function buildThreadListV2Items(input: {
       thread.archivedAt === null &&
       thread.lineage.relationshipToParent !== "subagent" &&
       (input.environmentId === null || thread.environmentId === input.environmentId) &&
-      (projectKeys === null || projectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
+      (projectKeys === null || projectKeys.has(`${thread.environmentId}:${thread.projectId}`)) &&
+      (input.workspaceFilter == null || input.workspaceFilter(thread)),
   );
   // The same matches as the command palette, typo fallback included. Only
   // listed threads are ranked: a hidden exact match must not turn typos off.

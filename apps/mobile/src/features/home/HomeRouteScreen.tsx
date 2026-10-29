@@ -24,6 +24,10 @@ import { WorkspaceEmptyDetail } from "../layout/WorkspaceEmptyDetail";
 import { AndroidScreenHeader } from "../../components/ui/AndroidScreenHeader";
 import { AndroidHomeFabLayout } from "./AndroidHomeFab";
 import { HomeScreen } from "./HomeScreen";
+
+import { HomeWorkspaceRoot } from "./HomeWorkspaceContext";
+import { useHomeWorkspaces } from "./useHomeWorkspaces";
+import { threadWorkspaceIdForThread } from "../../state/threadWorkspaces";
 import { HomeHeader } from "./HomeHeader";
 import { useHomeListOptions } from "./home-list-options";
 import { useAtomValueWhileVisible, useHomeRouteVisible } from "./home-route-visibility";
@@ -99,6 +103,7 @@ export function HomeRouteScreen() {
     renameThread,
     regenerateThreadTitle,
     unsettleThread,
+    fileThreadInWorkspace,
   } = useThreadListActions();
   const pendingTasks = usePendingNewTasks();
   const { openPendingTask, confirmDeletePendingTask } =
@@ -120,12 +125,27 @@ export function HomeRouteScreen() {
     () => new Set(environments.map((environment) => environment.environmentId)),
     [environments],
   );
+  const homeWorkspaces = useHomeWorkspaces();
+  const availableWorkspaceIds = useMemo(
+    () => new Set(homeWorkspaces.workspaces.map((workspace) => workspace.id)),
+    [homeWorkspaces.workspaces],
+  );
   const {
     options: listOptions,
     setSelectedEnvironmentId,
     setSelectedProjectKey,
-  } = useHomeListOptions(availableEnvironmentIds);
+    setSelectedWorkspaceId,
+  } = useHomeListOptions(availableEnvironmentIds, availableWorkspaceIds);
   const selectedEnvironmentId = listOptions.selectedEnvironmentId;
+  const selectedWorkspaceId = listOptions.selectedWorkspaceId;
+  const workspaceFilter =
+    selectedWorkspaceId === null
+      ? null
+      : (thread: Parameters<typeof threadWorkspaceIdForThread>[0]) =>
+          threadWorkspaceIdForThread(
+            thread,
+            homeWorkspaces.byEnvironment.get(thread.environmentId),
+          ) === selectedWorkspaceId;
   // A legacy per-environment scratch key resolves here on every render; the stored
   // value is only rewritten when the user picks a filter.
   const resolvedProjectKey = resolveScratchProjectScopeKey(
@@ -221,59 +241,68 @@ export function HomeRouteScreen() {
           searchQuery={searchQuery}
           selectedEnvironmentId={selectedEnvironmentId}
           selectedProjectKey={selectedProjectKey}
+          workspaces={homeWorkspaces.workspaces}
+          selectedWorkspaceId={selectedWorkspaceId}
           onEnvironmentChange={setSelectedEnvironmentId}
           onProjectChange={setSelectedProjectKey}
+          onWorkspaceChange={setSelectedWorkspaceId}
           onOpenEnvironments={() => openSettings(navigation, "SettingsEnvironments")}
           onOpenSettings={() => selectTab("settings")}
           onSearchQueryChange={setSearchQuery}
           onStartNewTask={startNewTask}
         />
 
-        <HomeScreen
-          catalogState={catalogState}
-          environments={environments}
-          onAddConnection={() => openSettings(navigation, "SettingsEnvironmentNew")}
-          onArchiveThread={archiveThread}
-          onDeleteThread={confirmDeleteThread}
-          onSettleThread={settleThread}
-          onSnoozeThread={snoozeThread}
-          onUnsnoozeThread={unsnoozeThread}
-          onUnsettleThread={unsettleThread}
-          onPinThread={pinThread}
-          onUnpinThread={unpinThread}
-          onSetThreadAutoSettle={setThreadAutoSettle}
-          onMoveThread={moveThread}
-          onRenameThread={renameThread}
-          onRegenerateThreadTitle={regenerateThreadTitle}
-          onEnvironmentChange={setSelectedEnvironmentId}
-          onProjectChange={setSelectedProjectKey}
-          onOpenSettings={() => selectTab("settings")}
-          onSearchQueryChange={setSearchQuery}
-          onSelectThread={handleSelectThread}
-          onSelectPendingTask={openPendingTask}
-          onDeletePendingTask={confirmDeletePendingTask}
-          onNewThreadOnBranch={handleNewThreadOnBranch}
-          onNewThreadInProject={(project) => {
-            selectThreadRoute({
-              draft: {
-                requestId: uuidv4(),
-                environmentId: String(project.environmentId),
-                projectId: String(project.id),
-                title: project.title,
-              },
-            });
-          }}
-          onStartNewTask={startNewTask}
-          pendingTasks={pendingTasks}
-          projectGroupingMode={listOptions.projectGroupingMode}
-          projects={projects}
-          projectSortOrder={listOptions.projectSortOrder}
-          savedConnectionsById={savedConnectionsById}
-          searchQuery={searchQuery}
-          selectedEnvironmentId={selectedEnvironmentId}
-          selectedProjectKey={selectedProjectKey}
-          threads={threads}
-        />
+        <HomeWorkspaceRoot onFileThreadInWorkspace={fileThreadInWorkspace}>
+          <HomeScreen
+            catalogState={catalogState}
+            environments={environments}
+            onAddConnection={() => openSettings(navigation, "SettingsEnvironmentNew")}
+            onArchiveThread={archiveThread}
+            onDeleteThread={confirmDeleteThread}
+            onSettleThread={settleThread}
+            onSnoozeThread={snoozeThread}
+            onUnsnoozeThread={unsnoozeThread}
+            onUnsettleThread={unsettleThread}
+            onPinThread={pinThread}
+            onUnpinThread={unpinThread}
+            onSetThreadAutoSettle={setThreadAutoSettle}
+            onMoveThread={moveThread}
+            onRenameThread={renameThread}
+            onRegenerateThreadTitle={regenerateThreadTitle}
+            onEnvironmentChange={setSelectedEnvironmentId}
+            onProjectChange={setSelectedProjectKey}
+            onOpenSettings={() => selectTab("settings")}
+            onSearchQueryChange={setSearchQuery}
+            onSelectThread={handleSelectThread}
+            onSelectPendingTask={openPendingTask}
+            onDeletePendingTask={confirmDeletePendingTask}
+            onNewThreadOnBranch={handleNewThreadOnBranch}
+            onNewThreadInProject={(project) => {
+              selectThreadRoute({
+                draft: {
+                  requestId: uuidv4(),
+                  environmentId: String(project.environmentId),
+                  projectId: String(project.id),
+                  title: project.title,
+                },
+              });
+            }}
+            onStartNewTask={startNewTask}
+            pendingTasks={pendingTasks}
+            projectGroupingMode={listOptions.projectGroupingMode}
+            projects={projects}
+            projectSortOrder={listOptions.projectSortOrder}
+            savedConnectionsById={savedConnectionsById}
+            searchQuery={searchQuery}
+            selectedEnvironmentId={selectedEnvironmentId}
+            selectedProjectKey={selectedProjectKey}
+            workspaces={homeWorkspaces.workspaces}
+            selectedWorkspaceId={selectedWorkspaceId}
+            onWorkspaceChange={setSelectedWorkspaceId}
+            workspaceFilter={workspaceFilter}
+            threads={threads}
+          />
+        </HomeWorkspaceRoot>
         <ThreadUndoNotice visible={visible} />
       </>
     </AndroidHomeFabLayout>

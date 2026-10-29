@@ -61,6 +61,7 @@ import {
 import { useThreadPr } from "../../state/use-thread-pr";
 import { useSwipeRowDormant } from "../home/swipe-row-activation";
 import { ThreadSwipeable } from "../home/thread-swipe-actions";
+import { useThreadWorkspaceMenu } from "../home/HomeWorkspaceContext";
 import { buildThreadTitleRegenerationMenuItems } from "./thread-title-regeneration-menu";
 import { canTurnThreadIntoProject, turnThreadIntoProject } from "./turnThreadIntoProject";
 import { threadCanArchive } from "../home/threadArchive";
@@ -746,6 +747,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const handleMoveDown = useCallback(() => onMoveThread?.(thread, "down"), [onMoveThread, thread]);
   const handleArchive = useCallback(() => onArchiveThread(thread), [onArchiveThread, thread]);
 
+  const threadWorkspaceMenu = useThreadWorkspaceMenu(thread);
   const canUnsettle = variant === "slim";
   // The gate's only time-dependent edge is the queued-turn grace window, so its
   // expiry is known without a clock: evaluate at the message's own timestamp.
@@ -839,6 +841,32 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         : [],
     [props.autoSettleOptOutSupported, thread.autoSettleDisabledAt],
   );
+  const workspaceMenuActions = useMemo<MenuAction[]>(() => {
+    if (threadWorkspaceMenu === null) return [];
+    return [
+      {
+        id: "move-to-workspace",
+        title: "Move to workspace",
+        image: "folder",
+        subactions: [
+          ...threadWorkspaceMenu.workspaces.map((workspace) => ({
+            id: `move-to-workspace:${workspace.id}`,
+            title: workspace.name,
+            state:
+              threadWorkspaceMenu.assignedWorkspaceId === workspace.id
+                ? ("on" as const)
+                : ("off" as const),
+          })),
+          {
+            id: "move-to-workspace:none",
+            title: "No workspace",
+            state:
+              threadWorkspaceMenu.assignedWorkspaceId === null ? ("on" as const) : ("off" as const),
+          },
+        ],
+      } satisfies MenuAction,
+    ];
+  }, [threadWorkspaceMenu]);
   const canTurnIntoProject = canTurnThreadIntoProject(thread);
   const titleMenuItems = useMemo<MenuAction[]>(
     () => [
@@ -875,23 +903,31 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         subactions: snoozePresetActions,
       },
       ...arrangementMenuItems,
+      ...workspaceMenuActions,
       ...titleMenuItems,
       ...autoSettleMenuItems,
       LEGACY_MENU_ACTIONS[0]!,
       { id: "delete", title: "Delete", image: "trash", attributes: { destructive: true } },
     ],
-    [arrangementMenuItems, autoSettleMenuItems, snoozePresetActions, titleMenuItems],
+    [
+      arrangementMenuItems,
+      autoSettleMenuItems,
+      snoozePresetActions,
+      titleMenuItems,
+      workspaceMenuActions,
+    ],
   );
   const cardMenuActions = useMemo<MenuAction[]>(
     () => [
       CARD_MENU_ACTIONS[0]!,
       ...arrangementMenuItems,
+      ...workspaceMenuActions,
       ...titleMenuItems,
       ...autoSettleMenuItems,
       LEGACY_MENU_ACTIONS[0]!,
       ...CARD_MENU_ACTIONS.slice(1),
     ],
-    [arrangementMenuItems, autoSettleMenuItems, titleMenuItems],
+    [arrangementMenuItems, autoSettleMenuItems, titleMenuItems, workspaceMenuActions],
   );
   const slimMenuActions = useMemo<MenuAction[]>(
     () => [
@@ -899,31 +935,34 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       ...arrangementMenuItems.filter(
         (action) => action.id !== "move-up" && action.id !== "move-down",
       ),
+      ...workspaceMenuActions,
       ...titleMenuItems,
       ...autoSettleMenuItems,
       LEGACY_MENU_ACTIONS[0]!,
       SLIM_MENU_ACTIONS[1]!,
     ],
-    [arrangementMenuItems, autoSettleMenuItems, titleMenuItems],
+    [arrangementMenuItems, autoSettleMenuItems, titleMenuItems, workspaceMenuActions],
   );
   const snoozedMenuActions = useMemo<MenuAction[]>(
     () => [
       SNOOZED_MENU_ACTIONS[0]!,
+      ...workspaceMenuActions,
       ...titleMenuItems,
       ...autoSettleMenuItems,
       LEGACY_MENU_ACTIONS[0]!,
       SNOOZED_MENU_ACTIONS[1]!,
     ],
-    [autoSettleMenuItems, titleMenuItems],
+    [autoSettleMenuItems, titleMenuItems, workspaceMenuActions],
   );
   const legacyMenuActions = useMemo<MenuAction[]>(
     () => [
       LEGACY_MENU_ACTIONS[0]!,
       ...arrangementMenuItems,
+      ...workspaceMenuActions,
       ...titleMenuItems,
       LEGACY_MENU_ACTIONS[1]!,
     ],
-    [arrangementMenuItems, titleMenuItems],
+    [arrangementMenuItems, titleMenuItems, workspaceMenuActions],
   );
   const handleMenuAction = useCallback(
     ({ nativeEvent }: { readonly nativeEvent: { readonly event: string } }) => {
@@ -955,6 +994,11 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         copyTextWithHaptic(thread.id, { target: "thread-id" });
       }
       if (nativeEvent.event === "delete") handleDelete();
+      if (nativeEvent.event.startsWith("move-to-workspace:")) {
+        const workspaceId = nativeEvent.event.slice("move-to-workspace:".length);
+        threadWorkspaceMenu?.onFile(workspaceId === "none" ? null : workspaceId);
+        return;
+      }
       if (nativeEvent.event === "snooze:custom") {
         setCustomSnoozeOpen(true);
         return;
@@ -977,6 +1021,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     [
       onNewThreadOnBranch,
       thread,
+      threadWorkspaceMenu,
       handleArchive,
       handleDelete,
       handleRegenerateTitle,

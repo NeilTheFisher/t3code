@@ -49,6 +49,9 @@ import { requestThreadMessageJump } from "./threadMessageJump";
 import { useThreadListSearchMatches } from "./useThreadListSearchMatches";
 import { useHomeListOptions } from "../home/home-list-options";
 import { buildHomeListFilterMenu } from "../home/home-list-filter-menu";
+import { HomeWorkspaceRoot } from "../home/HomeWorkspaceContext";
+import { useHomeWorkspaces } from "../home/useHomeWorkspaces";
+import { threadWorkspaceIdForThread } from "../../state/threadWorkspaces";
 import { buildHomeProjectScopes } from "../home/homeThreadList";
 import { SwipeableScrollGateProvider, useSwipeableScrollGate } from "../home/thread-swipe-actions";
 import { usePendingTaskListActions } from "../home/usePendingTaskListActions";
@@ -115,10 +118,16 @@ interface ThreadNavigationSidebarProps {
 }
 
 export function ThreadNavigationSidebar(props: ThreadNavigationSidebarProps) {
-  if (Platform.OS !== "ios") {
-    return <ThreadNavigationSidebarPane {...props} nativeChrome={false} />;
-  }
-  return <NativeSidebarContainer {...props} />;
+  const { fileThreadInWorkspace } = useThreadListActions();
+  return (
+    <HomeWorkspaceRoot onFileThreadInWorkspace={fileThreadInWorkspace}>
+      {Platform.OS !== "ios" ? (
+        <ThreadNavigationSidebarPane {...props} nativeChrome={false} />
+      ) : (
+        <NativeSidebarContainer {...props} />
+      )}
+    </HomeWorkspaceRoot>
+  );
 }
 
 function NativeSidebarContainer(props: ThreadNavigationSidebarProps) {
@@ -184,8 +193,22 @@ function ThreadNavigationSidebarPane(
   const availableEnvironmentIds = new Set(
     environments.map((environment) => environment.environmentId),
   );
-  const { options, setSelectedEnvironmentId, setSelectedProjectKey } =
-    useHomeListOptions(availableEnvironmentIds);
+  const homeWorkspaces = useHomeWorkspaces();
+  const availableWorkspaceIds = useMemo(
+    () => new Set(homeWorkspaces.workspaces.map((workspace) => workspace.id)),
+    [homeWorkspaces.workspaces],
+  );
+  const { options, setSelectedEnvironmentId, setSelectedProjectKey, setSelectedWorkspaceId } =
+    useHomeListOptions(availableEnvironmentIds, availableWorkspaceIds);
+  const selectedWorkspaceId = options.selectedWorkspaceId;
+  const workspaceFilter =
+    selectedWorkspaceId === null
+      ? null
+      : (thread: Parameters<typeof threadWorkspaceIdForThread>[0]) =>
+          threadWorkspaceIdForThread(
+            thread,
+            homeWorkspaces.byEnvironment.get(thread.environmentId),
+          ) === selectedWorkspaceId;
   const searchEnvironmentIds =
     options.selectedEnvironmentId === null
       ? workspaceEnvironments
@@ -316,6 +339,7 @@ function ThreadNavigationSidebarPane(
     snoozedShelfExpanded,
     settledShelfExpanded,
     selectedThreadKey: props.selectedThreadKey ?? null,
+    workspaceFilter,
   });
   const listItems: readonly SidebarListItem[] =
     settledShelfExpanded && threadListV2Layout.hiddenSettledCount > 0
@@ -656,17 +680,23 @@ function ThreadNavigationSidebarPane(
         );
     }
   };
-  const filterCustomized = options.selectedEnvironmentId !== null || selectedProjectKey !== null;
+  const filterCustomized =
+    options.selectedEnvironmentId !== null ||
+    selectedProjectKey !== null ||
+    selectedWorkspaceId !== null;
   const filterIcon = filterCustomized
     ? "line.3.horizontal.decrease.circle.fill"
     : "line.3.horizontal.decrease.circle";
   const filterMenu = buildHomeListFilterMenu({
     environments,
     projects: projectFilterOptions,
+    workspaces: homeWorkspaces.workspaces,
     selectedEnvironmentId: options.selectedEnvironmentId,
     selectedProjectKey,
+    selectedWorkspaceId,
     onEnvironmentChange: setSelectedEnvironmentId,
     onProjectChange: setSelectedProjectKey,
+    onWorkspaceChange: setSelectedWorkspaceId,
   });
   const nativeHeaderItems = createSidebarHeaderItems({
     filterIcon,

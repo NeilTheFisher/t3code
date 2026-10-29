@@ -10,6 +10,11 @@ export interface HomeListFilterMenuProject {
   readonly label: string;
 }
 
+export interface HomeListFilterMenuWorkspace {
+  readonly id: string;
+  readonly name: string;
+}
+
 type HomeListFilterMenuAction = {
   readonly type: "action";
   readonly title: string;
@@ -32,10 +37,13 @@ export interface HomeListFilterMenu {
 export function buildHomeListFilterMenu(props: {
   readonly environments: ReadonlyArray<HomeListFilterMenuEnvironment>;
   readonly projects: ReadonlyArray<HomeListFilterMenuProject>;
+  readonly workspaces?: ReadonlyArray<HomeListFilterMenuWorkspace>;
   readonly selectedEnvironmentId: EnvironmentId | null;
   readonly selectedProjectKey: string | null;
+  readonly selectedWorkspaceId?: string | null;
   readonly onEnvironmentChange: (environmentId: EnvironmentId | null) => void;
   readonly onProjectChange: (projectKey: string | null) => void;
+  readonly onWorkspaceChange?: (workspaceId: string | null) => void;
 }): HomeListFilterMenu {
   const items: Array<HomeListFilterMenuAction | HomeListFilterMenuSubmenu> = [];
 
@@ -79,6 +87,29 @@ export function buildHomeListFilterMenu(props: {
           title: project.label,
           state: props.selectedProjectKey === project.key ? ("on" as const) : ("off" as const),
           onPress: () => props.onProjectChange(project.key),
+        })),
+      ],
+    });
+  }
+
+  const workspaces = props.workspaces ?? [];
+  if (workspaces.length > 0 && props.onWorkspaceChange !== undefined) {
+    items.push({
+      type: "submenu",
+      title: "Workspace",
+      items: [
+        {
+          type: "action",
+          title: "All workspaces",
+          subtitle: "Show threads from every workspace",
+          state: (props.selectedWorkspaceId ?? null) === null ? "on" : "off",
+          onPress: () => props.onWorkspaceChange?.(null),
+        },
+        ...workspaces.map((workspace) => ({
+          type: "action" as const,
+          title: workspace.name,
+          state: props.selectedWorkspaceId === workspace.id ? ("on" as const) : ("off" as const),
+          onPress: () => props.onWorkspaceChange?.(workspace.id),
         })),
       ],
     });
