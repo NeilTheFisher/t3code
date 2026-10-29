@@ -12,6 +12,7 @@ import type { HomeProjectSortOrder } from "./homeThreadList";
 export interface HomeListOptions {
   readonly selectedEnvironmentId: EnvironmentId | null;
   readonly selectedProjectKey: string | null;
+  readonly selectedWorkspaceId: string | null;
   readonly projectSortOrder: HomeProjectSortOrder;
 }
 
@@ -23,6 +24,7 @@ function defaultHomeListOptions(filters?: ThreadListFilters): HomeListOptions {
   return {
     selectedEnvironmentId: filters?.environmentId ?? null,
     selectedProjectKey: filters?.projectKey ?? null,
+    selectedWorkspaceId: filters?.workspaceId ?? null,
     projectSortOrder:
       DEFAULT_SIDEBAR_PROJECT_SORT_ORDER === "manual"
         ? "updated_at"
@@ -58,12 +60,14 @@ export function HomeListOptionsProvider({
     registry.set(optionsAtom, next);
     if (
       next.selectedEnvironmentId !== current.selectedEnvironmentId ||
-      next.selectedProjectKey !== current.selectedProjectKey
+      next.selectedProjectKey !== current.selectedProjectKey ||
+      next.selectedWorkspaceId !== current.selectedWorkspaceId
     ) {
       void savePreferences({
         threadListFilters: {
           environmentId: next.selectedEnvironmentId,
           projectKey: next.selectedProjectKey,
+          ...(next.selectedWorkspaceId === null ? {} : { workspaceId: next.selectedWorkspaceId }),
         },
       });
     }
@@ -72,7 +76,10 @@ export function HomeListOptionsProvider({
   return createElement(HomeListOptionsContext, { value }, children);
 }
 
-export function useHomeListOptions(availableEnvironmentIds: ReadonlySet<EnvironmentId>) {
+export function useHomeListOptions(
+  availableEnvironmentIds: ReadonlySet<EnvironmentId>,
+  availableWorkspaceIds: ReadonlySet<string> | null = null,
+) {
   const shared = useContext(HomeListOptionsContext);
   const [localOptions, setLocalOptions] = useState<HomeListOptions>(defaultHomeListOptions);
   const options = shared?.options ?? localOptions;
@@ -84,10 +91,16 @@ export function useHomeListOptions(availableEnvironmentIds: ReadonlySet<Environm
     availableEnvironmentIds.has(options.selectedEnvironmentId)
       ? options.selectedEnvironmentId
       : null;
+  const selectedWorkspaceId =
+    options.selectedWorkspaceId !== null &&
+    (availableWorkspaceIds === null || availableWorkspaceIds.has(options.selectedWorkspaceId))
+      ? options.selectedWorkspaceId
+      : null;
   const availableOptions =
-    selectedEnvironmentId === options.selectedEnvironmentId
+    selectedEnvironmentId === options.selectedEnvironmentId &&
+    selectedWorkspaceId === options.selectedWorkspaceId
       ? options
-      : { ...options, selectedEnvironmentId };
+      : { ...options, selectedEnvironmentId, selectedWorkspaceId };
   const resolvedOptions: ResolvedHomeListOptions = {
     ...availableOptions,
     projectGroupingMode: shared?.projectGroupingMode ?? "repository",
@@ -102,10 +115,14 @@ export function useHomeListOptions(availableEnvironmentIds: ReadonlySet<Environm
   const setProjectSortOrder = (value: HomeProjectSortOrder) => {
     updateOptions({ projectSortOrder: value });
   };
+  const setSelectedWorkspaceId = (value: string | null) => {
+    updateOptions({ selectedWorkspaceId: value });
+  };
   return {
     options: resolvedOptions,
     setSelectedEnvironmentId,
     setSelectedProjectKey,
+    setSelectedWorkspaceId,
     setProjectSortOrder,
   } as const;
 }

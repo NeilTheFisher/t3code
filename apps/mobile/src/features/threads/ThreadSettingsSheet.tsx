@@ -53,7 +53,6 @@ import {
   Platform,
   Pressable,
   ScrollView,
-  TextInput,
   View,
 } from "react-native";
 import { READABLE_WIDTH_STYLE, ROW_MIN_HEIGHT } from "../../components/ui/listMetrics";
