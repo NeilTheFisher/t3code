@@ -79,6 +79,8 @@ export function RightPanelSurfaceContent(props: {
   readonly projectId: string | null;
   /** Starts a thread bound to an existing checkout. */
   readonly onStartThreadInWorktree: (input: { path: string; branch: string | null }) => void;
+  /** Opens the diff panel on one checkout's uncommitted work. */
+  readonly onOpenCheckoutUncommitted: (input: { cwd: string; label: string }) => void;
   readonly composerDraftTarget: ScopedThreadRef | DraftId;
   readonly keybindings: ResolvedKeybindingsConfig;
   readonly configuredPreviewUrls: ReadonlyArray<string>;
@@ -233,6 +235,7 @@ export function RightPanelSurfaceContent(props: {
           parentPanel={props.sideChatParentPanel}
           onClose={() => onCloseSurface(surface)}
         />
+      );
     case "git-graph":
       return (
         <Suspense fallback={null}>
@@ -244,6 +247,7 @@ export function RightPanelSurfaceContent(props: {
             onOpenWorkingTreeDiff={props.onOpenWorkingTreeDiff}
             projectId={props.projectId}
             onStartThreadInWorktree={props.onStartThreadInWorktree}
+            onOpenCheckoutUncommitted={props.onOpenCheckoutUncommitted}
           />
         </Suspense>
       );
