@@ -11,7 +11,9 @@ function checkedMenuState(checked: boolean) {
 
 export function HomeHeader(props: HomeHeaderProps) {
   const hasCustomListOptions =
-    props.selectedEnvironmentId !== null || props.selectedProjectKey !== null;
+    props.selectedEnvironmentId !== null ||
+    props.selectedProjectKey !== null ||
+    props.selectedWorkspaceId !== null;
   const menuActions: MenuAction[] = [
     {
       id: "environment",
@@ -49,6 +51,26 @@ export function HomeHeader(props: HomeHeaderProps) {
             ],
           },
         ] satisfies MenuAction[])),
+    ...(props.workspaces.length === 0
+      ? []
+      : ([
+          {
+            id: "workspace",
+            title: "Workspace",
+            subactions: [
+              {
+                id: "workspace:all",
+                title: "All workspaces",
+                state: checkedMenuState(props.selectedWorkspaceId === null),
+              },
+              ...props.workspaces.map((workspace) => ({
+                id: `workspace:${workspace.id}`,
+                title: workspace.name,
+                state: checkedMenuState(props.selectedWorkspaceId === workspace.id),
+              })),
+            ],
+          },
+        ] satisfies MenuAction[])),
   ];
   const handleMenuAction = (event: { nativeEvent: { event: string } }) => {
     const id = event.nativeEvent.event;
@@ -77,6 +99,19 @@ export function HomeHeader(props: HomeHeaderProps) {
       const projectKey = id.slice("project:".length);
       if (props.projects.some((project) => project.key === projectKey)) {
         props.onProjectChange(projectKey);
+      }
+      return;
+    }
+
+    if (id === "workspace:all") {
+      props.onWorkspaceChange(null);
+      return;
+    }
+
+    if (id.startsWith("workspace:")) {
+      const workspaceId = id.slice("workspace:".length);
+      if (props.workspaces.some((workspace) => workspace.id === workspaceId)) {
+        props.onWorkspaceChange(workspaceId);
       }
       return;
     }
