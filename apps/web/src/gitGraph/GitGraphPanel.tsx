@@ -1008,6 +1008,13 @@ export function GitGraphPanel(props: {
     setReloadToken((token) => token + 1);
   };
 
+  // The graph is read, not subscribed: a refresh re-reads it at the current limit
+  // and keeps what is on screen until the new read lands.
+  const reloadGraph = () => {
+    setLoadError(null);
+    setReloadToken((token) => token + 1);
+  };
+
   // Jumps to the commit a checkout has checked out, which is the fastest way to
   // answer "what is this worktree on?".
   const revealCheckoutHead = (worktree: MockWorktree) => {
@@ -1172,8 +1179,14 @@ export function GitGraphPanel(props: {
           >
             <CloudIcon />
           </Button>
-          <Button variant="ghost-muted" size="icon-sm" aria-label="Refresh graph">
-            <RefreshCwIcon />
+          <Button
+            variant="ghost-muted"
+            size="icon-sm"
+            aria-label="Refresh graph"
+            disabled={loading}
+            onClick={reloadGraph}
+          >
+            <RefreshCwIcon className={cn(loadingMore && "animate-spin")} />
           </Button>
         </div>
       </div>
