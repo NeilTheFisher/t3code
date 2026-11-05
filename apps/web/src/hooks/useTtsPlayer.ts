@@ -16,6 +16,7 @@ import {
   type ChunkSpan,
 } from "~/lib/ttsPlaybackMath";
 import { streamSpeechChunks, TTS_PCM_SAMPLE_RATE } from "~/lib/ttsClient";
+import { resolveTtsServerUrl } from "~/lib/ttsServerUrl";
 
 const TITLE_MAX_CHARS = 80;
 
@@ -425,6 +426,7 @@ export async function startPlayback(
     useAudioPlayerStore.getState().setError("Nothing to read aloud.", id);
     return;
   }
+  const speechServerUrl = resolveTtsServerUrl(options.serverUrl, threadRef?.environmentId ?? null);
   // teardown() clears `paragraphCues`, so the new cues must be assigned after
   // it — assigning first left every cue null and suppressed all highlighting.
   teardown();
@@ -557,7 +559,7 @@ export async function startPlayback(
             {
               text: unitText,
               voice: options.voice,
-              serverUrl: options.serverUrl,
+              serverUrl: speechServerUrl,
               speed: e.rate,
               signal: owner.signal,
               onWakingUp: () => {

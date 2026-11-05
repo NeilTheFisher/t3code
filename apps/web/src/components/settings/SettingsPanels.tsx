@@ -87,6 +87,7 @@ import { Button } from "../ui/button";
 import { DraftInput } from "../ui/draft-input";
 import { Input } from "../ui/input";
 import { useTtsVoices } from "~/hooks/useTtsVoices";
+import { resolveTtsServerUrl } from "~/lib/ttsServerUrl";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { ScopedSwitch } from "./ScopedSwitch";
@@ -1117,7 +1118,9 @@ export function ChatSettingsPanel() {
   const updateSettings = useUpdateScopedSettings();
   const ttsPlayer = useTtsPlayer();
   const ttsPreviewMessageId = MessageId.make("__tts_settings_preview__");
-  const ttsVoices = useTtsVoices(settings.tts.serverUrl);
+  // An empty setting means the request goes to this environment's own server.
+  const ttsServerUrl = resolveTtsServerUrl(settings.tts.serverUrl, null);
+  const ttsVoices = useTtsVoices(ttsServerUrl);
 
   return (
     <SettingsPageContainer>
@@ -1399,7 +1402,7 @@ export function ChatSettingsPanel() {
           }
         />
 
-        <TtsModelPicker serverUrl={settings.tts.serverUrl} />
+        <TtsModelPicker serverUrl={ttsServerUrl} />
 
         {ttsVoices.length > 1 ? (
           <SettingsRow

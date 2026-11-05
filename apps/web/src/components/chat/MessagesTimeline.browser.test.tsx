@@ -2,6 +2,7 @@ import { injectHtmlRenderBootstrap } from "@t3tools/shared/htmlRender";
 import { HtmlRenderDocument } from "../files/BrowserDocumentFrame";
 import { flushSync } from "react-dom";
 import { AudioPreview } from "../files/AudioPreview";
+import { useAudioPlayerStore } from "~/audioPlayerStore";
 import { cdp, page } from "vite-plus/test/browser";
 import {
   ComposerContextId,
@@ -38,6 +39,7 @@ import { act, fakeTimers, render, stubGlobal } from "../../../test/render";
 import { ChangedFilesCard } from "./ChangedFilesTree";
 import { MessagesTimeline } from "./MessagesTimeline";
 import { resolveTimelineIsAtEnd } from "./MessagesTimeline.logic";
+import { __resetTtsPlayerForTests } from "../../hooks/useTtsPlayer";
 import { makeStreamingTimelineFixture } from "../../test-fixtures";
 import {
   type PendingApproval,
@@ -2071,4 +2073,38 @@ it("keeps concurrent approvals actionable outside collapsed work and restores se
   await expect
     .element(screen.getByRole("button", { name: "Open the current tab", exact: true }))
     .toBeVisible();
+});
+
+describe("MessagesTimeline TTS wiring", () => {
+  it("mounts the paragraph highlight and plays through local synthesis", async () => {
+    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(
+      async () =>
+        new Response(new Uint8Array(4_800), {
+          status: 200,
+          headers: { "content-type": "audio/pcm" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    onTestFinished(() => {
+      __resetTtsPlayerForTests();
+      vi.unstubAllGlobals();
+    });
+
+    await using screen = await renderTimeline(
+      [message("First paragraph.\n\nSecond paragraph.", { role: "assistant" })],
+      { ttsEnabled: true },
+    );
+    // The highlight probe is the render -> cue wire for highlighting and seek.
+    expect(screen.container.querySelector(".chat-markdown div[aria-hidden].hidden")).not.toBeNull();
+
+    await click(screen.button("Play with TTS"));
+    // The click has to reach the player, which takes the message for local
+    // synthesis; no request is made to a server speech route.
+    await vi.waitFor(() =>
+      expect(useAudioPlayerStore.getState().playingMessageId).toBe("message-1"),
+    );
+    expect(["waking", "loading"]).toContain(useAudioPlayerStore.getState().status);
+    const urls = fetchMock.mock.calls.map(([url]) => String(url));
+    expect(urls.some((url) => url.includes("/v1/audio/speech"))).toBe(false);
+  });
 });

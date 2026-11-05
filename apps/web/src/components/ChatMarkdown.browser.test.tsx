@@ -1,11 +1,13 @@
-import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, MessageId, ThreadId } from "@t3tools/contracts";
 import { AsyncResult } from "effect/reactivity";
 import { type ReactElement } from "react";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, onTestFinished, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
 
 import { act, render } from "../../test/render";
 import "../index.css";
+
+import { useAudioPlayerStore } from "../audioPlayerStore";
 
 import { filesystemEnvironment } from "../state/filesystem";
 import { useRightPanelStore } from "../rightPanelStore";
@@ -620,5 +622,82 @@ describe("ChatMarkdown Windows file links", () => {
       expect(container.innerHTML).not.toContain("d:alert");
       expect(fileHrefs(container)).toEqual([]);
     }
+  });
+});
+
+const ttsHighlight = vi.hoisted(() => ({
+  cues: [] as string[],
+  seek: vi.fn<(index: number) => void>(),
+}));
+vi.mock(import("~/hooks/useTtsPlayer"), () => ({
+  canSeekToParagraph: () => true,
+  getActiveParagraphCues: () => ttsHighlight.cues,
+  seekToParagraph: (index: number) => ttsHighlight.seek(index),
+}));
+
+describe("ChatMarkdown TTS paragraph highlight", () => {
+  it("marks the speaking paragraph and seeks to a clicked one", async () => {
+    setup();
+    const messageId = MessageId.make("msg-tts");
+    ttsHighlight.cues = ["first paragraph", "second paragraph"];
+    ttsHighlight.seek.mockReset();
+    useAudioPlayerStore.setState({
+      status: "playing",
+      playingMessageId: messageId,
+      activeParagraph: 1,
+      activeParagraphCue: "second paragraph",
+    });
+    onTestFinished(() => {
+      useAudioPlayerStore.getState().setIdle();
+      ttsHighlight.seek.mockReset();
+    });
+
+    await using screen = await renderText("First paragraph.\n\nSecond paragraph.", {
+      ttsMessageId: messageId,
+    });
+    const blocks = [...screen.container.querySelectorAll<HTMLElement>(".chat-markdown p")];
+    expect(blocks).toHaveLength(2);
+    await vi.waitFor(() =>
+      expect(blocks[1]!.classList.contains("tts-active-paragraph")).toBe(true),
+    );
+    expect(blocks[0]!.classList.contains("tts-active-paragraph")).toBe(false);
+
+    await act(() => {
+      blocks[1]!.click();
+    });
+    expect(ttsHighlight.seek).toHaveBeenCalledWith(1);
+  });
+
+  it("highlights and seeks a list item whose code path renders as a file chip", async () => {
+    setup();
+    const messageId = MessageId.make("msg-tts-chip");
+    ttsHighlight.cues = [
+      "what it is minimally",
+      "apps/web/src/lib/ttsServerUrl.ts (new, 17 lines) — empty tts.serverUrl resolves",
+    ];
+    ttsHighlight.seek.mockReset();
+    useAudioPlayerStore.setState({
+      status: "playing",
+      playingMessageId: messageId,
+      activeParagraph: 1,
+      activeParagraphCue: ttsHighlight.cues[1]!,
+    });
+    onTestFinished(() => {
+      useAudioPlayerStore.getState().setIdle();
+      ttsHighlight.seek.mockReset();
+    });
+
+    await using screen = await renderText(
+      "What it is, minimally:\n\n- `apps/web/src/lib/ttsServerUrl.ts` (new, 17 lines) — empty `tts.serverUrl` resolves.",
+      { cwd: "/home/example/repo", ttsMessageId: messageId },
+    );
+    const item = screen.container.querySelector<HTMLElement>(".chat-markdown li");
+    expect(item).not.toBeNull();
+    await vi.waitFor(() => expect(item!.classList.contains("tts-active-paragraph")).toBe(true));
+
+    await act(() => {
+      item!.click();
+    });
+    expect(ttsHighlight.seek).toHaveBeenCalledWith(1);
   });
 });
