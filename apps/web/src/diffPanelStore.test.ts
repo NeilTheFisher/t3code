@@ -5,6 +5,7 @@ import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import {
+  isGitDiffSelection,
   resolveToolCallDiffTarget,
   useDiffPanelSessionStore,
   useDiffPanelStore,
@@ -180,6 +181,21 @@ describe("diff panel history", () => {
     expect(history()?.entries).toHaveLength(2);
     useDiffPanelStore.getState().goBack(REF);
     expect(selection()).toEqual({ kind: "branch", baseRef: null });
+  });
+
+  it("treats every git-backed scope as a git selection", () => {
+    // A git scope missing here renders an empty diff, because the panel never
+    // asks the preview RPC for it.
+    expect(
+      [
+        { kind: "branch", baseRef: null },
+        { kind: "unstaged" },
+        { kind: "commit", sha: "a", baseRef: null },
+        { kind: "commit-range", from: "a", to: "b", label: "a..b" },
+        { kind: "checkout-uncommitted", cwd: "/repo", label: "main" },
+      ].map((selection) => isGitDiffSelection(selection as never)),
+    ).toEqual([true, true, true, true, true]);
+    expect(isGitDiffSelection({ kind: "turn", turnId: "t" as never, filePath: null, revealRequestId: 0 })).toBe(false);
   });
 
   it("scopes the diff to another checkout's uncommitted work", () => {
