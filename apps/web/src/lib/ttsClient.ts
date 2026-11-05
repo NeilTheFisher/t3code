@@ -20,6 +20,17 @@ export type TtsRequest = {
 export const TTS_WAKE_TIMEOUT_MS = 150_000;
 const WAKE_POLL_INTERVAL_MS = 2_000;
 
+/**
+ * A request aimed at the wrong origin answers with a page or a JSON error, not
+ * audio. Reject that here so playback fails visibly instead of decoding HTML.
+ */
+function assertAudioResponse(res: Response): void {
+  const contentType = (res.headers.get("content-type") ?? "").toLowerCase();
+  if (contentType.includes("text/html") || contentType.includes("application/json")) {
+    throw new TtsServerError(res.status, res.statusText, `expected audio, got ${contentType}`);
+  }
+}
+
 const stripTrailingSlash = (url: string): string => url.replace(/\/+$/, "");
 
 const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
@@ -91,6 +102,7 @@ async function postUntilAwake(req: TtsRequest, stream: boolean): Promise<Respons
 
 export async function synthesizeSpeech(req: TtsRequest): Promise<Blob> {
   const res = await postUntilAwake(req, false);
+  assertAudioResponse(res);
   return await res.blob();
 }
 
@@ -107,6 +119,7 @@ export async function streamSpeechChunks(
   onChunk: (chunk: ArrayBuffer) => void,
 ): Promise<void> {
   const res = await postUntilAwake(req, true);
+  assertAudioResponse(res);
   const reader = res.body?.getReader();
   if (reader === undefined) {
     throw new Error("TTS server returned no stream body.");
