@@ -696,6 +696,36 @@ it.effect.each(["on a branch", "detached", "unborn"] as const)(
     ).pipe(Effect.provide(layerTest)),
 );
 
+it.effect("reads the diff for a commit range", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const driver = yield* GitVcsDriver.GitVcsDriver;
+      const cwd = yield* makeTmpDir();
+      yield* initRepoWithCommit(cwd);
+      yield* writeTextFile(cwd, "second.txt", "second\n");
+      yield* git(cwd, ["add", "."]);
+      yield* git(cwd, ["commit", "-m", "second"]);
+      const head = (yield* git(cwd, ["rev-parse", "HEAD"])).trim();
+      const parent = (yield* git(cwd, ["rev-parse", "HEAD^"])).trim();
+
+      const preview = yield* driver.getReviewDiffPreview({
+        cwd,
+        commitRange: { from: parent, to: head },
+      });
+
+      assert.deepStrictEqual(
+        preview.sources.map((source) => source.kind),
+        ["commit-range"],
+      );
+      assert.include(preview.sources[0]!.diff, "+second");
+      assert.deepStrictEqual(
+        preview.sources[0]!.files?.map((file) => file.path),
+        ["second.txt"],
+      );
+    }),
+  ).pipe(Effect.provide(layerTest)),
+);
+
 it.effect.each([
   { kind: "working-tree", request: { sourceKind: "working-tree" } },
   { kind: "commit", request: { sourceKind: "commit", commitSha: "HEAD" } },
