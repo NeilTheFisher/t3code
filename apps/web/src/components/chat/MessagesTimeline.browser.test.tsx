@@ -37,6 +37,7 @@ import { environmentThreadDetails } from "../../state/threads";
 import { act, fakeTimers, render, stubGlobal } from "../../../test/render";
 import { ChangedFilesCard } from "./ChangedFilesTree";
 import { MessagesTimeline } from "./MessagesTimeline";
+import { __resetTtsPlayerForTests } from "../../hooks/useTtsPlayer";
 import { makeStreamingTimelineFixture } from "../../test-fixtures";
 import {
   type PendingApproval,
@@ -1816,4 +1817,34 @@ it("keeps concurrent approvals actionable outside collapsed work and restores se
   await expect
     .element(screen.getByRole("button", { name: "Open the current tab", exact: true }))
     .toBeVisible();
+});
+
+describe("MessagesTimeline TTS wiring", () => {
+  it("mounts the paragraph highlight and plays through the speech endpoint", async () => {
+    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(
+      async () =>
+        new Response(new Uint8Array(4_800), {
+          status: 200,
+          headers: { "content-type": "audio/pcm" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    onTestFinished(() => {
+      __resetTtsPlayerForTests();
+      vi.unstubAllGlobals();
+    });
+
+    await using screen = await renderTimeline(
+      [message("First paragraph.\n\nSecond paragraph.", { role: "assistant" })],
+      { ttsEnabled: true },
+    );
+    // The highlight probe is the render -> cue wire for highlighting and seek.
+    expect(screen.container.querySelector(".chat-markdown div[aria-hidden].hidden")).not.toBeNull();
+
+    await click(screen.button("Play with TTS"));
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toMatch(/\/v1\/audio\/speech$/);
+    expect(JSON.parse(String(init?.body)).input).toContain("First paragraph.");
+  });
 });
