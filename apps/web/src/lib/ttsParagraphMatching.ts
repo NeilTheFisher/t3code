@@ -55,6 +55,22 @@ function bestWindowMatch(words: readonly string[], cueWords: readonly string[]):
 }
 
 /**
+ * File chips drop the cue's leading directory words, so the cue may start later
+ * than its first word; a shifted cue needs two shared words to claim a block.
+ */
+function bestCueMatch(
+  cueWords: readonly string[],
+  match: (shiftedCue: readonly string[]) => number,
+): number {
+  let best = match(cueWords);
+  for (let start = 1; start < cueWords.length; start++) {
+    const lead = match(cueWords.slice(start));
+    if (lead >= 2 && lead > best) best = lead;
+  }
+  return best;
+}
+
+/**
  * Index of the candidate block whose normalized text shares the longest run of
  * words with `cue`, or -1 when no block contains it. Ties keep the earliest
  * block, so document order breaks them predictably.
@@ -66,7 +82,8 @@ export function findActiveBlockIndex(blockTexts: readonly string[], cue: string)
   let bestIndex = -1;
   let bestLead = 0;
   for (let index = 0; index < blockTexts.length; index++) {
-    const lead = bestWindowMatch(normalizeWords(blockTexts[index] ?? ""), cueWords);
+    const words = normalizeWords(blockTexts[index] ?? "");
+    const lead = bestCueMatch(cueWords, (shiftedCue) => bestWindowMatch(words, shiftedCue));
     if (lead > bestLead) {
       bestLead = lead;
       bestIndex = index;
@@ -94,7 +111,8 @@ export function findParagraphIndexForBlock(
   let bestIndex = -1;
   let bestLead = 0;
   for (let index = 0; index < cues.length; index++) {
-    const lead = leadingMatch(words, normalizeWords(cues[index] ?? ""));
+    const cueWords = normalizeWords(cues[index] ?? "");
+    const lead = bestCueMatch(cueWords, (shiftedCue) => leadingMatch(words, shiftedCue));
     if (lead > bestLead) {
       bestLead = lead;
       bestIndex = index;
