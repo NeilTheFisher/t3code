@@ -55,6 +55,18 @@ describe("splitMarkdownBlocks", () => {
     ]);
   });
 
+  it("gives each bullet its own block, even when it starts with a code path", () => {
+    // Narration highlights and seeks by block index, so a bullet that shares a
+    // block with its neighbours can never be highlighted or tapped alone.
+    const md =
+      "What it is:\n\n- `apps/web/src/lib/ttsServerUrl.ts` (new) — empty setting.\n- `apps/web/src/hooks/useTtsPlayer.ts` — one line.";
+    expect(splitMarkdownBlocks(md)).toEqual([
+      "What it is:",
+      "- `apps/web/src/lib/ttsServerUrl.ts` (new) — empty setting.",
+      "- `apps/web/src/hooks/useTtsPlayer.ts` — one line.",
+    ]);
+  });
+
   it("never splits inside a fenced code block", () => {
     const md = "Before.\n\n```ts\nconst a = 1;\n\nconst b = 2;\n```\n\nAfter.";
     const blocks = splitMarkdownBlocks(md);
