@@ -74,16 +74,29 @@ let playlist: AudioPlaylist | null = null;
 let units: SpokenUnit[] = [];
 /** First unit index for each markdown block, or undefined when it has no speech. */
 let blockStarts: number[] = [];
-/** How many units have been fetched and added to the playlist, in order. */
+/**
+ * The playlist holds one contiguous window of units, `[playlistStart, fetchedCount)`.
+ * Playlist position `p` is unit `playlistStart + p`. A far seek rebuilds the window
+ * at its target, so the first fetch is the tapped paragraph itself.
+ */
+let playlistStart = 0;
+/** Unit index one past the playlist window's last track. */
 let fetchedCount = 0;
 let observedDurations: number[] = [];
 /** Bumped on every stop/play so in-flight fetches are discarded. */
 let generation = 0;
-/** Generation of the fetch loop currently running, or -1 when none is. */
-let activeFetchGeneration = -1;
+/** Bumped when the window moves; a fetch that started under the old window is dropped. */
+let windowToken = 0;
+/** Whether the fill loop is running. Only one may run at a time. */
+let pumping = false;
+/** Id of the newest fill loop, so a superseded one cannot clear its flag. */
+let pumpRun = 0;
+/** Active message, so a window rebuild can restart the fill loop. */
+let currentEnvironmentId: EnvironmentId | null = null;
+let currentMessageId: string | null = null;
 /** The playlist ran out of queued tracks while more are still being fetched. */
 let awaitingResume = false;
-/** A seek to a unit not yet fetched, applied once its audio arrives. */
+/** A seek to a unit whose track is not in the playlist yet, applied once it is. */
 let pendingSeekUnit: number | null = null;
 /** Ignore a `didJustFinish` until this time; a seek emits one for the old track. */
 let ignoreFinishUntil = 0;
@@ -194,12 +207,12 @@ function onPlaylistStatus(status: PlaylistStatusEvent) {
     return;
   }
 
-  const index = status.currentIndex ?? 0;
+  const unit = playlistStart + (status.currentIndex ?? 0);
   if (Number.isFinite(status.duration) && status.duration > 0) {
-    observedDurations[index] = status.duration;
+    observedDurations[unit] = status.duration;
   }
   if (pendingSeekUnit !== null) {
-    if (index !== pendingSeekUnit) {
+    if (unit !== pendingSeekUnit) {
       // Still on the outgoing track: keep the pinned highlight and retry the skip.
       // A skip issued right after `add` can be dropped natively, so this repeats
       // until the playlist reports the target.
@@ -210,8 +223,8 @@ function onPlaylistStatus(status: PlaylistStatusEvent) {
     pendingSeekUnit = null;
     if (state.status === "playing") getPlaylist().play();
   }
-  setActiveBlockFor(index);
-  updateProgress(index, status.currentTime ?? 0);
+  setActiveBlockFor(unit);
+  updateProgress(unit, status.currentTime ?? 0);
 
   if (status.didJustFinish) {
     // A skip emits a finish for the track being left; ignore it so seeking back
@@ -268,14 +281,19 @@ export function blocksHaveSpeech(blocks: readonly string[]): boolean {
 
 export function stopMessageTts() {
   generation += 1;
+  windowToken += 1;
+  pumping = false;
   awaitingResume = false;
   pendingSeekUnit = null;
+  currentEnvironmentId = null;
+  currentMessageId = null;
   if (playlist !== null) {
     playlist.pause();
     playlist.clear();
   }
   units = [];
   blockStarts = [];
+  playlistStart = 0;
   fetchedCount = 0;
   observedDurations = [];
   setProgress(0, 0);
@@ -304,37 +322,54 @@ export function setNarrationRate(rate: number) {
 /** Ask for a pending target whose audio now exists; confirmed by `onPlaylistStatus`. */
 function applyPendingSeek() {
   const target = pendingSeekUnit;
-  if (target === null || target >= fetchedCount) return;
+  if (target === null || target < playlistStart || target >= fetchedCount) return;
   const audio = getPlaylist();
   ignoreFinishUntil = Date.now() + 600;
-  audio.skipTo(target);
+  audio.skipTo(target - playlistStart);
   if (state.status === "playing") audio.play();
+}
+
+/**
+ * Move the window so `target` is its first track: the fill loop then fetches the
+ * tapped paragraph immediately instead of every paragraph before it.
+ */
+function rebuildWindowAt(target: number) {
+  const audio = getPlaylist();
+  pendingSeekUnit = target;
+  windowToken += 1;
+  playlistStart = target;
+  fetchedCount = target;
+  setActiveBlockFor(target);
+  setProgress(elapsedBefore(target), totalDuration());
+  awaitingResume = false;
+  audio.pause();
+  audio.clear();
+  if (!pumping && currentEnvironmentId !== null && currentMessageId !== null) {
+    void fetchRemaining(currentEnvironmentId, currentMessageId, generation);
+  }
 }
 
 /** Move the playback head to unit `index`, or arm it if its audio is unfetched. */
 function seekToUnit(index: number) {
   if (state.messageId === null || units.length === 0) return;
   const target = Math.max(0, Math.min(index, units.length - 1));
-  if (target >= fetchedCount) {
-    // Not fetched yet: pin the highlight and progress on the tap and silence the
-    // outgoing track, so the head cannot keep reading the paragraph it just left
-    // while the target synthesizes. A tap always resumes, even from a pause.
-    pendingSeekUnit = target;
-    setActiveBlockFor(target);
-    setProgress(elapsedBefore(target), totalDuration());
-    playlist?.pause();
+  if (target < playlistStart || target >= fetchedCount) {
+    // Outside the window: rebuild it here so the target is the next thing
+    // fetched and played, not the end of a long sequential queue.
     if (state.status === "paused") setState({ ...state, status: "playing" });
+    rebuildWindowAt(target);
     return;
   }
   pendingSeekUnit = null;
   const audio = getPlaylist();
   ignoreFinishUntil = Date.now() + 600;
-  if (audio.currentIndex === target) {
+  const position = target - playlistStart;
+  if (audio.currentIndex === position) {
     // Already on this track, so skipTo would no-op; rewind it to restart. This
     // is what makes tapping the paragraph you started on seek back to its start.
     void audio.seekTo(0).catch(() => undefined);
   } else {
-    audio.skipTo(target);
+    audio.skipTo(position);
   }
   setActiveBlockFor(target);
   setProgress(elapsedBefore(target), totalDuration());
@@ -435,8 +470,10 @@ async function fetchRemaining(
   messageId: string,
   forGeneration: number,
 ) {
-  if (activeFetchGeneration === forGeneration) return;
-  activeFetchGeneration = forGeneration;
+  if (pumping) return;
+  pumping = true;
+  const run = (pumpRun += 1);
+  const token = windowToken;
   try {
     while (forGeneration === generation && fetchedCount < units.length) {
       const index = fetchedCount;
@@ -447,6 +484,9 @@ async function fetchRemaining(
         environmentId,
         forGeneration,
       );
+      // A seek that rebuilt the window while this request was in flight owns the
+      // playlist now; drop the stale track and let the new window fetch.
+      if (token !== windowToken) return;
       if (forGeneration !== generation || uri === null) return;
 
       const audio = getPlaylist();
@@ -464,7 +504,7 @@ async function fetchRemaining(
       if (awaitingResume) {
         awaitingResume = false;
         if (state.status === "playing") {
-          audio.skipTo(index);
+          audio.skipTo(index - playlistStart);
           audio.play();
           if (pendingSeekUnit === null) setActiveBlockFor(index);
         }
@@ -477,7 +517,17 @@ async function fetchRemaining(
       Alert.alert("Playback failed", message);
     }
   } finally {
-    if (activeFetchGeneration === forGeneration) activeFetchGeneration = -1;
+    if (run === pumpRun) {
+      pumping = false;
+      if (
+        token !== windowToken &&
+        forGeneration === generation &&
+        currentEnvironmentId !== null &&
+        currentMessageId !== null
+      ) {
+        void fetchRemaining(currentEnvironmentId, currentMessageId, forGeneration);
+      }
+    }
   }
 }
 
@@ -505,6 +555,9 @@ export async function playMessageTts(
   const forGeneration = generation;
   units = built.units;
   blockStarts = built.blockStarts;
+  playlistStart = 0;
+  currentEnvironmentId = environmentId;
+  currentMessageId = messageId;
   setState({
     messageId,
     threadId,
