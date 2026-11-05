@@ -171,4 +171,23 @@ describe("synthesizeSpeech", () => {
       ),
     ).rejects.toThrow("no stream body");
   });
+
+  it("rejects a page from the wrong origin instead of decoding it as PCM", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response("<!doctype html><html></html>", {
+          status: 200,
+          headers: { "content-type": "text/html; charset=utf-8" },
+        }),
+      ),
+    );
+
+    await expect(
+      streamSpeechChunks(
+        { text: "hi", voice: "af_heart", serverUrl: "https://app.t3.codes" },
+        () => {},
+      ),
+    ).rejects.toThrow("expected audio, got text/html");
+  });
 });
