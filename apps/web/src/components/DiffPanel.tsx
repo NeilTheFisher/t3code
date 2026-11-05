@@ -27,7 +27,6 @@ import {
   PilcrowIcon,
   Rows3Icon,
   TextWrapIcon,
-  ChevronRightIcon,
   ChevronsDownUpIcon,
   ChevronsUpDownIcon,
 } from "lucide-react";
@@ -46,6 +45,7 @@ import { submodulePointerChanges } from "~/lib/submodulePointerChanges";
 import { cn } from "~/lib/utils";
 import {
   type DiffPanelSelection,
+  isGitDiffSelection,
   resolveToolCallDiffTarget,
   selectThreadBranchBaseRef,
   selectThreadDiffPanelSelection,
@@ -397,11 +397,7 @@ export default function DiffPanel({
   // Turn and git diffs name files from the repository root; a tool call's diff names them as
   // its provider recorded them, absolute or relative to the workspace.
   const diffPathRepositoryRoot = toolCallSelection ? undefined : activeRepositoryRoot;
-  const isGitSelection =
-    diffSelection.kind === "branch" ||
-    diffSelection.kind === "unstaged" ||
-    diffSelection.kind === "commit" ||
-    diffSelection.kind === "checkout-uncommitted";
+  const isGitSelection = isGitDiffSelection(diffSelection);
   const toolCallItems = useQuietThreadVisibleTurnItems(toolCallSelection ? routeThreadRef : null);
   const toolCallDetail = useTurnItemDetail(
     toolCallSelection && routeThreadRef
