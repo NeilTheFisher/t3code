@@ -26,7 +26,6 @@ import {
   PilcrowIcon,
   Rows3Icon,
   TextWrapIcon,
-  ChevronRightIcon,
   ChevronsDownUpIcon,
   ChevronsUpDownIcon,
 } from "lucide-react";
@@ -45,6 +44,7 @@ import { submodulePointerChanges } from "~/lib/submodulePointerChanges";
 import { cn } from "~/lib/utils";
 import {
   type DiffPanelSelection,
+  isGitDiffSelection,
   resolveToolCallDiffTarget,
   selectThreadBranchBaseRef,
   selectThreadDiffPanelSelection,
@@ -383,11 +383,7 @@ export default function DiffPanel({
     selectThreadBranchBaseRef(state, routeThreadRef),
   );
   const toolCallSelection = diffSelection.kind === "tool-call" ? diffSelection : null;
-  const isGitSelection =
-    diffSelection.kind === "branch" ||
-    diffSelection.kind === "unstaged" ||
-    diffSelection.kind === "commit" ||
-    diffSelection.kind === "checkout-uncommitted";
+  const isGitSelection = isGitDiffSelection(diffSelection);
   const toolCallItems = useQuietThreadVisibleTurnItems(toolCallSelection ? routeThreadRef : null);
   const toolCallDetail = useTurnItemDetail(
     toolCallSelection && routeThreadRef

@@ -32,6 +32,22 @@ export type DiffPanelSelection =
       repository?: string;
     };
 
+/**
+ * Selections whose content comes from the git preview RPC. A new git-backed
+ * scope must be added here, or the panel renders an empty diff for it.
+ */
+const GIT_DIFF_SELECTION_KINDS: ReadonlySet<DiffPanelSelection["kind"]> = new Set([
+  "branch",
+  "unstaged",
+  "commit",
+  "commit-range",
+  "checkout-uncommitted",
+]);
+
+export function isGitDiffSelection(selection: DiffPanelSelection): boolean {
+  return GIT_DIFF_SELECTION_KINDS.has(selection.kind);
+}
+
 const DEFAULT_SELECTION: DiffPanelSelection = { kind: "branch", baseRef: null };
 const DEFAULT_WORKING_TREE_SELECTION: DiffPanelSelection = { kind: "unstaged" };
 
