@@ -1475,6 +1475,18 @@ export default function ChatView(props: ChatViewProps) {
     (compactionRunning || (compactRequestIsActive && !compactionSettled));
   const isWorking =
     phase === "running" || isSendBusy || isCompacting || runlessWorkStartedAt !== null;
+  // Only the run that is working now owns the composer's checklist; a finished run keeps its
+  // list in the timeline.
+  const composerTaskSteps = (() => {
+    const runId = (activeActivityRun ?? activeLatestRun)?.runId;
+    if (runId === undefined) return null;
+    const item = serverVisibleTurnItems.findLast(
+      (row) => row.item.type === "todo_list" && row.item.runId === runId,
+    )?.item;
+    if (item?.type !== "todo_list" || item.steps.length === 0) return null;
+    if (!isWorking && item.steps.every((step) => step.status === "completed")) return null;
+    return item.steps;
+  })();
   // Some providers (OpenCode 1.x) report live usage without a window size, so
   // fill maxTokens from the active model's provider metadata to draw the ring.
   const activeModelContextWindowTokens = (() => {
@@ -3704,6 +3716,7 @@ export default function ChatView(props: ChatViewProps) {
                                   ? EMPTY_COMPOSER_BANNER_ITEMS
                                   : composerBannerItems
                               }
+                              taskSteps={composerTaskSteps}
                               resumeCompactionTokens={resumeCompactionTokens}
                               keepFullHistory={keepFullHistory}
                               onToggleKeepFullHistory={toggleKeepFullHistoryStable}
