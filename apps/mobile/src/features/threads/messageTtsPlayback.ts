@@ -198,6 +198,18 @@ function onPlaylistStatus(status: PlaylistStatusEvent) {
   if (Number.isFinite(status.duration) && status.duration > 0) {
     observedDurations[index] = status.duration;
   }
+  if (pendingSeekUnit !== null) {
+    if (index !== pendingSeekUnit) {
+      // Still on the outgoing track: keep the pinned highlight and retry the skip.
+      // A skip issued right after `add` can be dropped natively, so this repeats
+      // until the playlist reports the target.
+      applyPendingSeek();
+      return;
+    }
+    // Landed: hand the head back to the player.
+    pendingSeekUnit = null;
+    if (state.status === "playing") getPlaylist().play();
+  }
   setActiveBlockFor(index);
   updateProgress(index, status.currentTime ?? 0);
 
@@ -289,16 +301,29 @@ export function setNarrationRate(rate: number) {
   if (state.messageId !== null) setState({ ...state, rate });
 }
 
+/** Ask for a pending target whose audio now exists; confirmed by `onPlaylistStatus`. */
+function applyPendingSeek() {
+  const target = pendingSeekUnit;
+  if (target === null || target >= fetchedCount) return;
+  const audio = getPlaylist();
+  ignoreFinishUntil = Date.now() + 600;
+  audio.skipTo(target);
+  if (state.status === "playing") audio.play();
+}
+
 /** Move the playback head to unit `index`, or arm it if its audio is unfetched. */
 function seekToUnit(index: number) {
   if (state.messageId === null || units.length === 0) return;
   const target = Math.max(0, Math.min(index, units.length - 1));
   if (target >= fetchedCount) {
-    // Not fetched yet: arm the seek and reflect it immediately, so the bar and
-    // highlight jump now and playback follows as the audio arrives.
+    // Not fetched yet: pin the highlight and progress on the tap and silence the
+    // outgoing track, so the head cannot keep reading the paragraph it just left
+    // while the target synthesizes. A tap always resumes, even from a pause.
     pendingSeekUnit = target;
     setActiveBlockFor(target);
     setProgress(elapsedBefore(target), totalDuration());
+    playlist?.pause();
+    if (state.status === "paused") setState({ ...state, status: "playing" });
     return;
   }
   pendingSeekUnit = null;
@@ -429,18 +454,10 @@ async function fetchRemaining(
       fetchedCount = index + 1;
 
       // A seek that landed past the fetch head takes priority over resuming.
+      // `pendingSeekUnit` clears only when the player confirms the target index.
       if (pendingSeekUnit !== null && pendingSeekUnit < fetchedCount) {
-        const target = pendingSeekUnit;
-        pendingSeekUnit = null;
-        ignoreFinishUntil = Date.now() + 600;
-        audio.skipTo(target);
-        setActiveBlockFor(target);
-        setProgress(elapsedBefore(target), totalDuration());
-        if (state.status === "playing") audio.play();
-        else if (state.status === "paused") {
-          audio.play();
-          setState({ ...state, status: "playing" });
-        }
+        awaitingResume = false;
+        applyPendingSeek();
         continue;
       }
 
@@ -449,7 +466,7 @@ async function fetchRemaining(
         if (state.status === "playing") {
           audio.skipTo(index);
           audio.play();
-          setActiveBlockFor(index);
+          if (pendingSeekUnit === null) setActiveBlockFor(index);
         }
       }
     }
