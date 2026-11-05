@@ -1016,29 +1016,6 @@ export default function DiffPanel({
   const selectedCommitValue = selectedCommitSha !== null ? `commit:${selectedCommitSha}` : "";
   const selectedScopeValue = toolCallSelection
     ? ""
-<<<<<<< HEAD
-    : selectedSubmodule
-      ? selectedSubmodule.to === null
-        ? "submodule-working-tree"
-        : "submodule-range"
-      : selectedCommitRange
-        ? "commit-range"
-        : selectedRunId === null
-          ? selectedCommitValue || selectedGitScope
-          : selectedTurn?.runId === latestTurn?.runId
-            ? "latest"
-            : selectedTurnValue;
-  const selectRepository = (key: string) => {
-    if (!routeThreadRef || !selectedTurn) return;
-    useDiffPanelStore
-      .getState()
-      .selectTurnRepository(
-        routeThreadRef,
-        selectedTurn.runId,
-        key === ALL_REPOSITORIES ? null : key,
-      );
-  };
-=======
     : selectedCheckout
       ? "checkout-uncommitted"
       : selectedSubmodule
@@ -1052,7 +1029,16 @@ export default function DiffPanel({
             : selectedTurn?.runId === latestTurn?.runId
               ? "latest"
               : selectedTurnValue;
->>>>>>> a79ff8a4db (feat(web): read a checkout's own uncommitted diff from the worktrees list)
+  const selectRepository = (key: string) => {
+    if (!routeThreadRef || !selectedTurn) return;
+    useDiffPanelStore
+      .getState()
+      .selectTurnRepository(
+        routeThreadRef,
+        selectedTurn.runId,
+        key === ALL_REPOSITORIES ? null : key,
+      );
+  };
   const selectScopeValue = (value: string) => {
     if (value === "submodule-working-tree") {
       if (selectedSubmodule && routeThreadRef) {

@@ -60,6 +60,25 @@ describe("findActiveBlockIndex", () => {
     const blocks = ["Intro sentence. The cat sat on the mat."];
     expect(findActiveBlockIndex(blocks, "the cat sat on the mat")).toBe(0);
   });
+
+  it("matches a list item whose inline code renders as a file chip without its path", () => {
+    // The spoken cue keeps the full path; the chip shows only the file name.
+    const blocks = [
+      "First paragraph.",
+      "ttsServerUrl.ts\n(new, 17 lines) — empty tts.serverUrl resolves to the environment",
+      "useTtsPlayer.ts\n— one line to resolve that origin",
+    ];
+    expect(
+      findActiveBlockIndex(
+        blocks,
+        "apps/web/src/lib/ttsServerUrl.ts (new, 17 lines) — empty tts.serverUrl resolves",
+      ),
+    ).toBe(1);
+  });
+
+  it("does not claim a block on one shared word after a shifted cue", () => {
+    expect(findActiveBlockIndex(["An unrelated ts mention"], "apps/web/src/lib/file.ts")).toBe(-1);
+  });
 });
 
 describe("findParagraphIndexForBlock", () => {
@@ -93,5 +112,13 @@ describe("findParagraphIndexForBlock", () => {
   it("seeks the clicked line, not just the block's first line", () => {
     const cues = ["first item", "second item"];
     expect(findParagraphIndexForBlock(cues, "First item\nSecond item", "Second item")).toBe(1);
+  });
+
+  it("seeks a clicked file-chip list item whose cue keeps the full path", () => {
+    const cues = [
+      "apps/web/src/lib/ttsServerUrl.ts (new, 17 lines) — empty tts.serverUrl resolves",
+      "apps/web/src/hooks/useTtsPlayer.ts — one line to resolve that origin",
+    ];
+    expect(findParagraphIndexForBlock(cues, "useTtsPlayer.ts\n— one line to resolve")).toBe(1);
   });
 });
