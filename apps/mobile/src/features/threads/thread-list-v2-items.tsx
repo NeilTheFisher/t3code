@@ -25,12 +25,7 @@ import {
   formatWorkingDurationLabel,
   resolveThreadWorkingStartedAt,
 } from "@t3tools/client-runtime/state/models";
-import {
-  AuthOrchestrationOperateScope,
-  type EnvironmentId,
-  type EnvironmentMachineKind,
-} from "@t3tools/contracts";
-import { toServerClock } from "@t3tools/client-runtime/clock";
+import { AuthOrchestrationOperateScope, type EnvironmentMachineKind } from "@t3tools/contracts";
 import type { SnoozePresetSetting } from "@t3tools/contracts/settings";
 import { canSnooze } from "@t3tools/client-runtime/state/thread-settled";
 import { threadChipCopyTarget } from "@t3tools/client-runtime/thread-reference";
@@ -71,6 +66,7 @@ import {
 } from "../../state/thread-pr-presentation";
 import { useThreadPr } from "../../state/use-thread-pr";
 import { useSwipeRowDormant } from "../home/swipe-row-activation";
+import { useThreadWorkspaceMenu } from "../home/HomeWorkspaceContext";
 import { ThreadSwipeable } from "../home/thread-swipe-actions";
 import { buildThreadTitleRegenerationMenuItems } from "./thread-title-regeneration-menu";
 import { canTurnThreadIntoProject, turnThreadIntoProject } from "./turnThreadIntoProject";
@@ -82,12 +78,10 @@ import {
   resolveThreadListV2SnoozeMenuSelection,
   resolveThreadListV2SnoozePresets,
   threadHasUnseenCompletion,
-  resolveThreadListV2RowStatus,
   resolveThreadListV2Status,
   resolveThreadListV2ProviderDrivers,
   resolveThreadListV2SwipeActions,
   layoutThreadListV2RowMenuActions,
-  threadListV2RowAccessibilityLabel,
   type ThreadListV2Status,
 } from "./threadListV2";
 import { QueuedMessageIcon } from "./queued-message-icon";
@@ -163,7 +157,6 @@ const TABULAR_DURATION_STYLE = {
 } as const;
 
 function ThreadListV2Duration(props: {
-  readonly environmentId: EnvironmentId;
   readonly startedAt: string | null;
   readonly leadingSpace: boolean;
 }) {
@@ -193,6 +186,36 @@ const CARD_MENU_ACTIONS: MenuAction[] = [
     attributes: { destructive: true },
   },
 ];
+
+type ThreadWorkspaceMenu = NonNullable<ReturnType<typeof useThreadWorkspaceMenu>>;
+
+/** The row's move action; null menu means the environment has no workspaces to move to. */
+function buildWorkspaceMenuActions(menu: ThreadWorkspaceMenu | null): MenuAction[] {
+  if (menu === null) return [];
+  return [
+    {
+      id: "move-to-workspace",
+      title: "Move to workspace",
+      image: "folder",
+      subactions: [
+        {
+          id: "move-to-workspace:none",
+          title: "Unsorted",
+          image: "tray",
+          state: menu.assignedWorkspaceId === null ? ("on" as const) : ("off" as const),
+        },
+        ...menu.workspaces.map((workspace) => ({
+          id: `move-to-workspace:${workspace.id}`,
+          title: workspace.name,
+          state:
+            menu.assignedWorkspaceId === workspace.id
+              ? ("on" as const)
+              : ("off" as const),
+        })),
+      ],
+    },
+  ];
+}
 
 const SLIM_MENU_ACTIONS: MenuAction[] = [
   {
@@ -456,6 +479,7 @@ export const ThreadListV2PendingRow = memo(function ThreadListV2PendingRow(props
   readonly pendingTask: PendingNewTask;
   readonly selected?: boolean;
   readonly project: EnvironmentProject | null;
+  readonly projectTitle?: string;
   readonly environmentLabel: string | null;
   readonly environmentMachine?: EnvironmentMachineKind;
   readonly pane?: "screen" | "sidebar";
@@ -508,6 +532,7 @@ export const ThreadListV2PendingRow = memo(function ThreadListV2PendingRow(props
     }),
     [deleteLabel, gt, handleDelete, isDraft, pendingTask.title],
   );
+  const projectTitle = props.projectTitle ?? props.project?.title ?? pendingTask.projectTitle ?? "";
   const projectCwd = props.project?.workspaceRoot || null;
   // Drafts only; the reads are shared per-project atoms, and queued rows skip them.
   const projectDefaults = useNewTaskProjectDefaults(isDraft ? props.project : null);
@@ -549,7 +574,7 @@ export const ThreadListV2PendingRow = memo(function ThreadListV2PendingRow(props
               faviconPath={props.project.faviconPath}
               projectIcon={props.project.projectIcon}
               size={projectIconSize}
-              projectTitle={props.project.title}
+              projectTitle={projectTitle}
               workspaceRoot={props.project.workspaceRoot}
             />
           </View>
@@ -867,8 +892,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const selected = props.selected === true;
   const rowAppearance = getThreadListV2RowAppearance(theme, sidebarPane, selected);
 
-  const rawStatus = resolveThreadListV2Status(thread);
-  const status = resolveThreadListV2RowStatus(thread);
+  const status = resolveThreadListV2Status(thread);
   const isUnread = status === "ready" && threadHasUnseenCompletion(thread);
   const workingLabel = STATUS_LABEL_BY_STATUS[status];
   const showsWoke = status === "ready" && props.wokeAt !== null;
@@ -911,7 +935,6 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   );
 
   const visitThread = useAtomCommand(threadEnvironment.visit, { reportFailure: false });
-  const markThreadUnread = useAtomCommand(threadEnvironment.markUnread, { reportFailure: false });
   const handleAcknowledgeWoke = useCallback(() => {
     if (props.wokeAt === null) return;
     void visitThread({
@@ -960,6 +983,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   );
   const handleMoveUp = useCallback(() => onMoveThread?.(thread, "up"), [onMoveThread, thread]);
   const handleMoveDown = useCallback(() => onMoveThread?.(thread, "down"), [onMoveThread, thread]);
+  const workspaceMenu = useThreadWorkspaceMenu(thread);
   const handleArchive = useCallback(() => onArchiveThread(thread), [onArchiveThread, thread]);
 
   const canUnsettle = variant === "slim";
@@ -1222,12 +1246,6 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       if (nativeEvent.event === "rename") handleRename();
       if (nativeEvent.event === "regenerate-title") handleRegenerateTitle();
       if (nativeEvent.event === "turn-into-project") void turnThreadIntoProject(thread);
-      if (nativeEvent.event === "mark-unread") {
-        void markThreadUnread({
-          environmentId: thread.environmentId,
-          input: { threadId: thread.id },
-        });
-      }
       if (nativeEvent.event === "copy-thread") {
         const target = threadChipCopyTarget(
           { environmentId: thread.environmentId, threadId: thread.id },
@@ -1249,6 +1267,11 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         });
       }
       if (nativeEvent.event === "delete") handleDelete();
+      if (nativeEvent.event.startsWith("move-to-workspace:")) {
+        const workspaceId = nativeEvent.event.slice("move-to-workspace:".length);
+        workspaceMenu?.onFile(workspaceId === "none" ? null : workspaceId);
+        return;
+      }
       if (nativeEvent.event === "snooze:custom") {
         setCustomSnoozeOpen(true);
         return;
@@ -1274,6 +1297,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       onNewThreadOnBranch,
       thread,
       navigation,
+      workspaceMenu,
       handleArchive,
       handleDelete,
       handleRegenerateTitle,
@@ -1287,7 +1311,6 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       handleUnpin,
       handleUnsettle,
       handleUnsnooze,
-      markThreadUnread,
       setCustomSnoozeOpen,
       snoozePresets,
       props.snoozePresets,
@@ -1463,13 +1486,11 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
                 {statusLabel.label}
                 {status === "working" ? (
                   <ThreadListV2Duration
-                    environmentId={thread.environmentId}
                     startedAt={resolveThreadWorkingStartedAt(thread)}
                     leadingSpace={statusLabel.label !== null}
                   />
                 ) : status === "waiting" ? (
                   <ThreadListV2Duration
-                    environmentId={thread.environmentId}
                     startedAt={thread.latestRun?.completedAt ?? null}
                     leadingSpace={statusLabel.label !== null}
                   />
@@ -1501,7 +1522,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         </View>
       ) : null}
       <View className="mt-1 flex-row items-center gap-2" style={{ paddingLeft: titleTextInset }}>
-        {(rawStatus === "failed" || rawStatus === "limited") && thread.runtime?.lastError ? (
+        {(status === "failed" || status === "limited") && thread.runtime?.lastError ? (
           <Text
             className={cn(
               "flex-1 text-xs",
@@ -1782,8 +1803,11 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       >
         {(close) => (
           <Menu
-            accessibilityLabel={rowAccessibilityLabel}
-            actions={menuActions}
+            actions={
+              workspaceMenu === null
+                ? menuActions
+                : [...buildWorkspaceMenuActions(workspaceMenu), ...menuActions]
+            }
             onPressAction={handleMenuAction}
             shouldOpenOnLongPress
           >

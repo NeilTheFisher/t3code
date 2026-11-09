@@ -8,6 +8,9 @@ import type { AppBarMenuItem } from "../../components/ui/AppBar.types";
 import { m, type MessageResolver } from "../../i18n/messages";
 import type { WorkspaceEnvironment } from "../../state/workspaceModel";
 
+/** A thread in no workspace, matching the web sidebar's Unsorted slot. */
+export const UNSORTED_WORKSPACE_FILTER = "__unsorted__";
+
 export interface HomeListFilterMenuEnvironment {
   readonly environmentId: EnvironmentId;
   readonly label: string;
@@ -113,6 +116,13 @@ export function buildHomeListFilterMenuItems(
           selected: props.selectedWorkspaceId === workspace.id,
           onPress: () => props.onWorkspaceChange?.(workspace.id),
         })),
+        {
+          id: `workspace:${UNSORTED_WORKSPACE_FILTER}`,
+          title: "Unsorted",
+          subtitle: "Show threads that are in no workspace",
+          selected: props.selectedWorkspaceId === UNSORTED_WORKSPACE_FILTER,
+          onPress: () => props.onWorkspaceChange?.(UNSORTED_WORKSPACE_FILTER),
+        },
       ],
     });
   }
