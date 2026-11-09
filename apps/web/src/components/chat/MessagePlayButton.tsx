@@ -49,8 +49,9 @@ export const MessagePlayButton = memo(function MessagePlayButton({
     }
   });
 
-  // While the on-demand TTS server wakes, show a persistent toast; close it
-  // once this message leaves the waking state (started, failed, or superseded).
+  // While the speech engine loads or the local server wakes, show a persistent
+  // toast; close it once this message leaves the waking state (started, failed,
+  // or superseded).
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- The waking toast mirrors the module-level audio store.
   useEffect(() => {
     if (!isWaking) {
@@ -61,8 +62,9 @@ export const MessagePlayButton = memo(function MessagePlayButton({
       wakingToastRef.current = toastManager.add(
         stackedThreadToast({
           type: "loading",
-          title: "Starting TTS server",
-          description: "Waking the local speech server, first playback can take up to a minute.",
+          title: "Preparing speech",
+          description:
+            "Loading the voice model. The first playback downloads 44 MB, then the browser keeps it.",
           timeout: 0,
         }),
       );
