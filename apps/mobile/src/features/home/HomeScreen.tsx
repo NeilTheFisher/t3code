@@ -90,10 +90,17 @@ import { SwipeableScrollGateProvider, useSwipeableScrollGate } from "./thread-sw
 import { useFabScroll } from "./FabScrollContext";
 import { useWorkspaceTabs } from "../layout/workspace/WorkspaceTabsContext";
 import { ThreadListFilters } from "./ThreadListFilters";
+import type { HomeListFilterMenuWorkspace } from "./home-list-filter-menu";
 
 interface HomeScreenProps {
   readonly projects: ReadonlyArray<EnvironmentProject>;
   readonly threads: ReadonlyArray<EnvironmentThreadShell>;
+  /** Workspaces the connected environments define, for the list filter. */
+  readonly workspaces?: ReadonlyArray<HomeListFilterMenuWorkspace>;
+  readonly selectedWorkspaceId?: string | null;
+  readonly onWorkspaceChange?: (workspaceId: string | null) => void;
+  /** Narrows the list to one workspace; null means every thread. */
+  readonly workspaceFilter?: ((thread: EnvironmentThreadShell) => boolean) | null;
   readonly pendingTasks: ReadonlyArray<PendingNewTask>;
   readonly catalogState: WorkspaceState;
   readonly savedConnectionsById: Readonly<Record<string, SavedRemoteConnection>>;
@@ -401,6 +408,9 @@ export function HomeScreen(props: HomeScreenProps) {
       ? {}
       : { projectIds: v2ScopedProjectGroup.projectRefs.map((ref) => ref.projectId) },
   );
+  const visibleThreads = props.workspaceFilter
+    ? props.threads.filter(props.workspaceFilter)
+    : props.threads;
   const threadSearchMatchByKey = useThreadListSearchMatches(props.threads, threadSearch);
   const v2ProjectTitleByProjectKey = new Map(
     projectScopes.flatMap((scope) =>
@@ -464,7 +474,7 @@ export function HomeScreen(props: HomeScreenProps) {
     contentOnlyThreadKeys,
     olderSettledShelf,
   } = useThreadListV2({
-    threads: props.threads,
+    threads: visibleThreads,
     pendingTasks: props.pendingTasks,
     environmentId: props.selectedEnvironmentId,
     projectRefs: v2ScopedProjectGroup === null ? null : v2ScopedProjectGroup.projectRefs,
@@ -660,7 +670,7 @@ export function HomeScreen(props: HomeScreenProps) {
   };
 
   const hasAnyThreads =
-    props.threads.some((thread) => thread.archivedAt === null) ||
+    visibleThreads.some((thread) => thread.archivedAt === null) ||
     props.pendingTasks.length > 0 ||
     threadListV2Layout.settledCount > 0;
   const selectedEnvironmentLabel =
@@ -738,10 +748,13 @@ export function HomeScreen(props: HomeScreenProps) {
             key: scope.key,
             label: scope.title,
           }))}
+          workspaces={props.workspaces}
           selectedEnvironmentId={props.selectedEnvironmentId}
           selectedProjectKey={props.selectedProjectKey}
+          selectedWorkspaceId={props.selectedWorkspaceId ?? null}
           onEnvironmentChange={props.onEnvironmentChange}
           onProjectChange={props.onProjectChange}
+          onWorkspaceChange={props.onWorkspaceChange}
         />
       ) : null}
     </>
