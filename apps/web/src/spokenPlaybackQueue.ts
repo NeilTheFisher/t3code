@@ -14,7 +14,6 @@ export interface SpeakJob {
 
 export interface SpeakContext {
   readonly voice: string;
-  readonly serverUrl: string;
   /** Per-utterance synthesis speed from the tool call, if any. */
   readonly speed?: number | undefined;
 }
@@ -50,7 +49,7 @@ function persistPlayed(ids: Set<string>): void {
 
 let queue: SpeakJob[] = [];
 let running = false;
-let context: SpeakContext = { voice: "af_heart", serverUrl: "" };
+let context: SpeakContext = { voice: "Delia" };
 const played = loadPlayed();
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -71,7 +70,6 @@ async function run(): Promise<void> {
       try {
         await startPlayback(MessageId.make(`spoken:${job.id}`), job.text, null, {
           voice: context.voice,
-          serverUrl: context.serverUrl,
           speed: context.speed,
         });
         await waitForIdle();

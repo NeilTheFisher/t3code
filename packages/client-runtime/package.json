@@ -323,10 +323,6 @@
       "types": "./src/state/terminal.ts",
       "default": "./src/state/terminal.ts"
     },
-    "./state/tts": {
-      "types": "./src/state/ttsSpeech.ts",
-      "default": "./src/state/ttsSpeech.ts"
-    },
     "./state/bounded-thread-snapshot-http": {
       "types": "./src/state/boundedThreadSnapshotHttp.ts",
       "default": "./src/state/boundedThreadSnapshotHttp.ts"

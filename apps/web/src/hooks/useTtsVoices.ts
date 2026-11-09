@@ -1,14 +1,12 @@
 /**
- * Voice names for the settings dropdown. The browser engine's catalog comes
- * first because it speaks by default; a client that cannot run it (or an
- * environment that predates the proxy) still lists what the server offers.
+ * Voice names for the settings dropdown, from the pinned Phonon catalog the
+ * environment proxies. The engine is the only thing that speaks, so there is
+ * no server list to fall back to.
  */
 import { useEffect, useState } from "react";
 
 import { parseVoiceCatalog, voiceCatalogUrl } from "~/lib/phononModel";
-import { resolveTtsServerUrl } from "~/lib/ttsServerUrl";
-
-const stripTrailingSlash = (url: string): string => url.replace(/\/+$/, "");
+import { resolveTtsEnvironmentBase } from "~/lib/ttsEnvironmentBase";
 
 async function fetchLocalVoices(base: string): Promise<string[]> {
   try {
@@ -20,36 +18,21 @@ async function fetchLocalVoices(base: string): Promise<string[]> {
   }
 }
 
-async function fetchServerVoices(base: string): Promise<string[]> {
-  try {
-    const response = await fetch(`${stripTrailingSlash(base)}/v1/audio/voices`);
-    if (!response.ok) return [];
-    const data: unknown = await response.json();
-    const list = (data as { voices?: unknown }).voices;
-    return Array.isArray(list)
-      ? list.filter((voice): voice is string => typeof voice === "string")
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-export function useTtsVoices(serverUrl: string): string[] {
+export function useTtsVoices(): string[] {
   const [voices, setVoices] = useState<string[]>([]);
 
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- The voice list is fetched over HTTP, from the engine's catalog or the server.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- The voice list is fetched over HTTP from the engine's catalog.
   useEffect(() => {
-    const base = resolveTtsServerUrl(serverUrl, null);
+    const base = resolveTtsEnvironmentBase(null);
     let cancelled = false;
     void (async () => {
-      const local = await fetchLocalVoices(base);
-      const names = local.length > 0 ? local : await fetchServerVoices(base);
-      if (!cancelled && names.length > 0) setVoices(names);
+      const names = await fetchLocalVoices(base);
+      if (!cancelled) setVoices(names);
     })();
     return () => {
       cancelled = true;
     };
-  }, [serverUrl]);
+  }, []);
 
   return voices;
 }
