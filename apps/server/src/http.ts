@@ -32,6 +32,7 @@ import { OtlpTracer, OtlpSerialization } from "effect/observability";
 
 import * as ServerConfig from "./config.ts";
 import { ttsUpstreamPath } from "./voice/upstream.ts";
+import { ensureTtsModelAsset, resolveTtsModelAsset } from "./voice/modelAsset.ts";
 import { ASSET_ROUTE_PREFIX, readMcpAppHtml, resolveAsset } from "./assets/AssetAccess.ts";
 import { sourceControlMediaResponse } from "./assets/sourceControlMediaResponse.ts";
 import { statMediaFile, streamMediaFile, type OpenMediaFile } from "./assets/MediaFile.ts";
@@ -492,6 +493,50 @@ export const layerTtsModelsRoute = HttpRouter.add(
           status: 502,
           contentType: "application/json",
         }),
+      ),
+    ),
+  ),
+);
+
+const TTS_MODEL_ASSET_PREFIX = "/v1/audio/model";
+
+// Serves the browser speech engine's model files from this environment, so a
+// client speaks without reaching the Hub itself. Public like the speech proxy:
+// the files carry no environment data, and the browser needs them by URL.
+export const layerTtsModelAssetRoute = HttpRouter.add(
+  "GET",
+  `${TTS_MODEL_ASSET_PREFIX}/*`,
+  Effect.gen(function* () {
+    const config = yield* ServerConfig.ServerConfig;
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const url = HttpServerRequest.toURL(request);
+    if (Option.isNone(url)) {
+      return HttpServerResponse.text("Bad Request", { status: 400 });
+    }
+    const prefix = `${TTS_MODEL_ASSET_PREFIX}/`;
+    const pathname = url.value.pathname;
+    if (!pathname.startsWith(prefix)) {
+      return HttpServerResponse.text("Not Found", { status: 404 });
+    }
+    const asset = resolveTtsModelAsset(pathname.slice(prefix.length));
+    if (asset === null) {
+      return HttpServerResponse.text("Not Found", { status: 404 });
+    }
+    const file = yield* ensureTtsModelAsset(asset, config.ttsAssetCacheDir);
+    if (file === undefined) {
+      return HttpServerResponse.text("Model file unavailable", { status: 502 });
+    }
+    return yield* HttpServerResponse.file(file, {
+      headers: {
+        "cache-control": "public, max-age=31536000, immutable",
+        "content-type": asset.contentType,
+        "x-content-type-options": "nosniff",
+      },
+    });
+  }).pipe(
+    Effect.catchCause((cause) =>
+      Effect.logWarning(`TTS model asset failed: ${Cause.pretty(cause)}`).pipe(
+        Effect.as(HttpServerResponse.text("Model file unavailable", { status: 502 })),
       ),
     ),
   ),
