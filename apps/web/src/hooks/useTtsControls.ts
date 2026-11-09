@@ -41,7 +41,7 @@ export function useTtsControls(router: AppRouter) {
   const isLoading = status === "loading" || status === "waking";
   const displayTitle = isLoading
     ? status === "waking"
-      ? "Starting TTS server…"
+      ? "Preparing speech…"
       : "Loading…"
     : (title ?? "Audio");
 
