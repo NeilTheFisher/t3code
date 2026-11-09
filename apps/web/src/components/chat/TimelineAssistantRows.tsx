@@ -509,7 +509,7 @@ export function SpokenTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "
     if (!tts.enabled || tts.autoplay === false) return;
     enqueueSpoken(
       { id: row.id, text: row.speak.text },
-      { voice: tts.voice, serverUrl: tts.serverUrl, speed: row.speak.speed },
+      { voice: tts.voice, speed: row.speak.speed },
       row.speak.interrupt === true,
     );
   }, [
@@ -520,7 +520,6 @@ export function SpokenTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "
     tts.enabled,
     tts.autoplay,
     tts.voice,
-    tts.serverUrl,
   ]);
 
   return (
