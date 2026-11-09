@@ -64,6 +64,7 @@ import {
 } from "../../state/thread-pr-presentation";
 import { useThreadPr } from "../../state/use-thread-pr";
 import { useSwipeRowDormant } from "../home/swipe-row-activation";
+import { useThreadWorkspaceMenu } from "../home/HomeWorkspaceContext";
 import { ThreadSwipeable } from "../home/thread-swipe-actions";
 import { buildThreadTitleRegenerationMenuItems } from "./thread-title-regeneration-menu";
 import { canTurnThreadIntoProject, turnThreadIntoProject } from "./turnThreadIntoProject";
@@ -173,6 +174,36 @@ const CARD_MENU_ACTIONS: MenuAction[] = [
   { id: "settle", title: "Settle", image: "checkmark" },
   { id: "delete", title: "Delete", image: "trash", attributes: { destructive: true } },
 ];
+
+type ThreadWorkspaceMenu = NonNullable<ReturnType<typeof useThreadWorkspaceMenu>>;
+
+/** The row's move action; null menu means the environment has no workspaces to move to. */
+function buildWorkspaceMenuActions(menu: ThreadWorkspaceMenu | null): MenuAction[] {
+  if (menu === null) return [];
+  return [
+    {
+      id: "move-to-workspace",
+      title: "Move to workspace",
+      image: "folder",
+      subactions: [
+        {
+          id: "move-to-workspace:none",
+          title: "Unsorted",
+          image: "tray",
+          state: menu.assignedWorkspaceId === null ? ("on" as const) : ("off" as const),
+        },
+        ...menu.workspaces.map((workspace) => ({
+          id: `move-to-workspace:${workspace.id}`,
+          title: workspace.name,
+          state:
+            menu.assignedWorkspaceId === workspace.id
+              ? ("on" as const)
+              : ("off" as const),
+        })),
+      ],
+    },
+  ];
+}
 
 const SLIM_MENU_ACTIONS: MenuAction[] = [
   { id: "unsettle", title: "Un-settle", image: "arrow.uturn.backward" },
@@ -826,6 +857,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   );
   const handleMoveUp = useCallback(() => onMoveThread?.(thread, "up"), [onMoveThread, thread]);
   const handleMoveDown = useCallback(() => onMoveThread?.(thread, "down"), [onMoveThread, thread]);
+  const workspaceMenu = useThreadWorkspaceMenu(thread);
   const handleArchive = useCallback(() => onArchiveThread(thread), [onArchiveThread, thread]);
 
   const canUnsettle = variant === "slim";
@@ -1053,6 +1085,11 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         copyTextWithHaptic(thread.id, { target: "thread-id" });
       }
       if (nativeEvent.event === "delete") handleDelete();
+      if (nativeEvent.event.startsWith("move-to-workspace:")) {
+        const workspaceId = nativeEvent.event.slice("move-to-workspace:".length);
+        workspaceMenu?.onFile(workspaceId === "none" ? null : workspaceId);
+        return;
+      }
       if (nativeEvent.event === "snooze:custom") {
         setCustomSnoozeOpen(true);
         return;
@@ -1075,6 +1112,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     [
       onNewThreadOnBranch,
       thread,
+      workspaceMenu,
       handleArchive,
       handleDelete,
       handleRegenerateTitle,
@@ -1571,7 +1609,15 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         threadTitle={thread.title}
       >
         {(close) => (
-          <Menu actions={menuActions} onPressAction={handleMenuAction} shouldOpenOnLongPress>
+          <Menu
+            actions={
+              workspaceMenu === null
+                ? menuActions
+                : [...buildWorkspaceMenuActions(workspaceMenu), ...menuActions]
+            }
+            onPressAction={handleMenuAction}
+            shouldOpenOnLongPress
+          >
             {rowContent(close)}
           </Menu>
         )}
