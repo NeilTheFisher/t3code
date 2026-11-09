@@ -46,7 +46,9 @@ import { useThreadJumpShortcuts } from "../keyboard/threadKeyboardShortcuts";
 import { requestThreadMessageJump } from "./threadMessageJump";
 import { useThreadListSearchMatches } from "./useThreadListSearchMatches";
 import { useHomeListOptions } from "../home/home-list-options";
+import { UNSORTED_WORKSPACE_FILTER } from "../home/home-list-filter-menu";
 import { useHomeWorkspaces } from "../home/useHomeWorkspaces";
+import { HomeWorkspaceRoot } from "../home/HomeWorkspaceContext";
 import { threadWorkspaceIdForThread } from "../../state/threadWorkspaces";
 import { buildHomeListFilterMenuItems } from "../home/home-list-filter-menu";
 import { buildHomeProjectScopes } from "../home/homeThreadList";
@@ -141,6 +143,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
     moveThread,
     renameThread,
     regenerateThreadTitle,
+    fileThreadInWorkspace,
   } = useThreadListActions();
   const pendingTasks = usePendingNewTasks();
   const launchingThreads = useLaunchingThreads(threads);
@@ -161,7 +164,12 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
   );
   const { workspaces, byEnvironment: workspaceSettingsByEnvironment } = useHomeWorkspaces();
   const availableWorkspaceIds = useMemo(
-    () => new Set(workspaces.map((workspace) => workspace.id)),
+    () =>
+      new Set(
+        workspaces.length > 0
+          ? [...workspaces.map((workspace) => workspace.id), UNSORTED_WORKSPACE_FILTER]
+          : [],
+      ),
     [workspaces],
   );
   const { options, setSelectedEnvironmentId, setSelectedProjectKey, setSelectedWorkspaceId } =
@@ -171,10 +179,11 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
     if (selectedWorkspaceId === null) return launchingThreads;
     return launchingThreads.filter((thread) => {
       const settings = workspaceSettingsByEnvironment.get(thread.environmentId);
-      return (
-        settings !== undefined &&
-        (threadWorkspaceIdForThread(thread, settings) ?? null) === selectedWorkspaceId
-      );
+      const assigned =
+        settings === undefined ? null : threadWorkspaceIdForThread(thread, settings);
+      return selectedWorkspaceId === UNSORTED_WORKSPACE_FILTER
+        ? assigned === null
+        : assigned === selectedWorkspaceId;
     });
   }, [launchingThreads, selectedWorkspaceId, workspaceSettingsByEnvironment]);
   const searchEnvironmentIds =
@@ -622,6 +631,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
 
   if (Platform.OS === "ios") {
     return (
+      <HomeWorkspaceRoot onFileThreadInWorkspace={fileThreadInWorkspace}>
       <>
         {header}
         <View className="flex-1">
@@ -662,11 +672,13 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
           <ThreadUndoNotice visible={props.visible} />
         </View>
       </>
+      </HomeWorkspaceRoot>
     );
   }
 
   // Android: the bar floats below the list.
   return (
+    <HomeWorkspaceRoot onFileThreadInWorkspace={fileThreadInWorkspace}>
     <View testID="thread-navigation-sidebar" className="flex-1 bg-header">
       <View
         className="flex-1"
@@ -717,6 +729,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
       {header}
       <ThreadUndoNotice visible={props.visible} />
     </View>
+    </HomeWorkspaceRoot>
   );
 }
 
