@@ -1,7 +1,7 @@
 /**
  * Phonon's model files, fetched once from the upstream Hub and kept on disk so
  * every client of this environment downloads them from this server instead. A
- * browser asks for `/v1/audio/model/<repo>/resolve/<revision>/<file>`, the same
+ * client asks for `/v1/audio/model/<repo>/resolve/<revision>/<file>`, the same
  * path shape the upstream uses, so the pinned revision still keys the cache.
  */
 // @effect-diagnostics nodeBuiltinImport:off - a request-scoped cache key needs no Effect service.

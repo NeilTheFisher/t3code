@@ -15,10 +15,8 @@ import {
   TTS_CHARS_PER_SECOND,
   type ChunkSpan,
 } from "~/lib/ttsPlaybackMath";
-import { streamSpeechChunks, TTS_PCM_SAMPLE_RATE } from "~/lib/ttsClient";
-import { resolveTtsServerUrl } from "~/lib/ttsServerUrl";
-import { canSynthesizeLocally, serverVoiceFor } from "~/lib/phononModel";
-import { phononFailure, localSpeechAvailable, streamPhononChunks } from "~/lib/phononSpeech";
+import { resolveTtsEnvironmentBase } from "~/lib/ttsEnvironmentBase";
+import { localSpeechAvailable, streamPhononChunks, TTS_PCM_SAMPLE_RATE } from "~/lib/phononSpeech";
 
 const TITLE_MAX_CHARS = 80;
 
@@ -118,13 +116,6 @@ let applyRateChange: ((rate: number) => void) | null = null;
  * of waiting for the sequential stream to reach it.
  */
 let restartFromParagraph: ((index: number) => void) | null = null;
-/**
- * Set once the in-browser engine fails in this session. Every later narration
- * asks the environment instead, so a missing WebAssembly feature costs one
- * failed unit rather than one per message.
- */
-let localSpeechDisabled = false;
-
 /** Normalized text for cue matching: lowercase, whitespace collapsed. */
 function cueOf(paragraph: string): string {
   return paragraph
@@ -407,7 +398,6 @@ export function seekToParagraph(index: number): void {
 
 export interface PlayOptions {
   voice: string;
-  serverUrl: string;
   /** Synthesis speed for this narration, overriding the shared slider. */
   speed?: number | undefined;
 }
@@ -434,7 +424,7 @@ export async function startPlayback(
     useAudioPlayerStore.getState().setError("Nothing to read aloud.", id);
     return;
   }
-  const speechServerUrl = resolveTtsServerUrl(options.serverUrl, threadRef?.environmentId ?? null);
+  const speechServerUrl = resolveTtsEnvironmentBase(threadRef?.environmentId ?? null);
   // teardown() clears `paragraphCues`, so the new cues must be assigned after
   // it — assigning first left every cue null and suppressed all highlighting.
   teardown();
@@ -545,57 +535,30 @@ export async function startPlayback(
   };
 
   /**
-   * One spoken unit's audio, from this device when the speed is inside the
-   * model's native range, otherwise from the environment. A unit that already
-   * scheduled audio is never retried, so a failure cannot replay it.
+   * One spoken unit's audio, always from this device. Anything the engine
+   * cannot do (a plain-http page, a missing WebAssembly feature, a lost GPU)
+   * fails the narration with a visible message rather than moving synthesis to
+   * another machine.
    */
   const synthesizeUnit = async (
     unitText: string,
     index: number,
     owner: AbortController,
   ): Promise<void> => {
-    const onChunk = (chunkPcm: ArrayBuffer) => scheduleArriving(chunkPcm, index, owner);
-    if (
-      canSynthesizeLocally(e.rate) &&
-      !localSpeechDisabled &&
-      phononFailure() === null &&
-      localSpeechAvailable()
-    ) {
-      let delivered = false;
-      try {
-        await streamPhononChunks({
-          text: unitText,
-          voice: options.voice,
-          speed: e.rate,
-          serverUrl: speechServerUrl,
-          signal: owner.signal,
-          onChunk: (chunkPcm) => {
-            delivered = true;
-            onChunk(chunkPcm);
-          },
-          onLoadingModel: () => useAudioPlayerStore.getState().setWaking(id),
-        });
-        return;
-      } catch (error) {
-        if (owner.signal.aborted) throw error;
-        if (delivered) throw error;
-        localSpeechDisabled = true;
-        console.warn("[tts] in-browser speech engine unavailable; using the environment", error);
-      }
+    if (!localSpeechAvailable()) {
+      throw new Error(
+        "Reading aloud needs a secure (https) page so the speech model can be cached on this device.",
+      );
     }
-    await streamSpeechChunks(
-      {
-        text: unitText,
-        voice: serverVoiceFor(options.voice),
-        serverUrl: speechServerUrl,
-        speed: e.rate,
-        signal: owner.signal,
-        onWakingUp: () => {
-          useAudioPlayerStore.getState().setWaking(id);
-        },
-      },
-      onChunk,
-    );
+    await streamPhononChunks({
+      text: unitText,
+      voice: options.voice,
+      speed: e.rate,
+      serverUrl: speechServerUrl,
+      signal: owner.signal,
+      onChunk: (chunkPcm) => scheduleArriving(chunkPcm, index, owner),
+      onLoadingModel: () => useAudioPlayerStore.getState().setWaking(id),
+    });
   };
 
   /**
@@ -712,7 +675,7 @@ export function useTtsPlayer() {
   const tts = useClientSettings((s) => s.tts);
 
   const play = (id: MessageId, text: string, threadRef: ScopedThreadRef | null) =>
-    startPlayback(id, text, threadRef, { voice: tts.voice, serverUrl: tts.serverUrl });
+    startPlayback(id, text, threadRef, { voice: tts.voice });
 
   return {
     play,
@@ -723,7 +686,6 @@ export function useTtsPlayer() {
 /** Test helper — resets the singleton between Vitest runs. */
 export function __resetTtsPlayerForTests(): void {
   teardown();
-  localSpeechDisabled = false;
   if (audioContext !== null) {
     void audioContext.close();
     audioContext = null;
