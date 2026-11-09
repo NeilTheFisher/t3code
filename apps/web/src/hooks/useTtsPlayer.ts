@@ -17,6 +17,8 @@ import {
 } from "~/lib/ttsPlaybackMath";
 import { streamSpeechChunks, TTS_PCM_SAMPLE_RATE } from "~/lib/ttsClient";
 import { resolveTtsServerUrl } from "~/lib/ttsServerUrl";
+import { canSynthesizeLocally, serverVoiceFor } from "~/lib/phononModel";
+import { phononFailure, localSpeechAvailable, streamPhononChunks } from "~/lib/phononSpeech";
 
 const TITLE_MAX_CHARS = 80;
 
@@ -116,6 +118,12 @@ let applyRateChange: ((rate: number) => void) | null = null;
  * of waiting for the sequential stream to reach it.
  */
 let restartFromParagraph: ((index: number) => void) | null = null;
+/**
+ * Set once the in-browser engine fails in this session. Every later narration
+ * asks the environment instead, so a missing WebAssembly feature costs one
+ * failed unit rather than one per message.
+ */
+let localSpeechDisabled = false;
 
 /** Normalized text for cue matching: lowercase, whitespace collapsed. */
 function cueOf(paragraph: string): string {
@@ -537,6 +545,60 @@ export async function startPlayback(
   };
 
   /**
+   * One spoken unit's audio, from this device when the speed is inside the
+   * model's native range, otherwise from the environment. A unit that already
+   * scheduled audio is never retried, so a failure cannot replay it.
+   */
+  const synthesizeUnit = async (
+    unitText: string,
+    index: number,
+    owner: AbortController,
+  ): Promise<void> => {
+    const onChunk = (chunkPcm: ArrayBuffer) => scheduleArriving(chunkPcm, index, owner);
+    if (
+      canSynthesizeLocally(e.rate) &&
+      !localSpeechDisabled &&
+      phononFailure() === null &&
+      localSpeechAvailable()
+    ) {
+      let delivered = false;
+      try {
+        await streamPhononChunks({
+          text: unitText,
+          voice: options.voice,
+          speed: e.rate,
+          serverUrl: speechServerUrl,
+          signal: owner.signal,
+          onChunk: (chunkPcm) => {
+            delivered = true;
+            onChunk(chunkPcm);
+          },
+          onLoadingModel: () => useAudioPlayerStore.getState().setWaking(id),
+        });
+        return;
+      } catch (error) {
+        if (owner.signal.aborted) throw error;
+        if (delivered) throw error;
+        localSpeechDisabled = true;
+        console.warn("[tts] in-browser speech engine unavailable; using the environment", error);
+      }
+    }
+    await streamSpeechChunks(
+      {
+        text: unitText,
+        voice: serverVoiceFor(options.voice),
+        serverUrl: speechServerUrl,
+        speed: e.rate,
+        signal: owner.signal,
+        onWakingUp: () => {
+          useAudioPlayerStore.getState().setWaking(id);
+        },
+      },
+      onChunk,
+    );
+  };
+
+  /**
    * Synthesize units from `fromIndex` onward, one request at a time, eagerly so
    * any paragraph is seekable. Each call owns its AbortController, so a speed
    * change can replace the worker without stale chunks.
@@ -555,19 +617,7 @@ export async function startPlayback(
               : unit.pauseAfter > 0
                 ? `${unit.text} [pause:${unit.pauseAfter}s]`
                 : unit.text;
-          await streamSpeechChunks(
-            {
-              text: unitText,
-              voice: options.voice,
-              serverUrl: speechServerUrl,
-              speed: e.rate,
-              signal: owner.signal,
-              onWakingUp: () => {
-                useAudioPlayerStore.getState().setWaking(id);
-              },
-            },
-            (chunkPcm) => scheduleArriving(chunkPcm, index, owner),
-          );
+          await synthesizeUnit(unitText, index, owner);
           if (engine !== e || owner.signal.aborted) return;
           e.synthesizedChars += spokenCharCounts[index] ?? 0;
           e.nextParagraphIndex = index + 1;
@@ -673,6 +723,7 @@ export function useTtsPlayer() {
 /** Test helper — resets the singleton between Vitest runs. */
 export function __resetTtsPlayerForTests(): void {
   teardown();
+  localSpeechDisabled = false;
   if (audioContext !== null) {
     void audioContext.close();
     audioContext = null;

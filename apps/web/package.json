@@ -75,6 +75,7 @@
     "micromark-util-combine-extensions": "^2.0.1",
     "pdfjs-dist": "6.4.299",
     "pele": "catalog:",
+    "phonon-webgpu": "github:blixt/phonon#36e7e5eff820733be38e9df19ccf58ae891bd45c",
     "react": "catalog:",
     "react-dom": "catalog:",
     "react-markdown": "^10.1.0",

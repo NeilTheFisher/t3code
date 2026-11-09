@@ -802,6 +802,7 @@ const layerMakeRoutes = Layer.mergeAll(
     ServerHttp.layerTtsSpeechRoute,
     ServerHttp.layerTtsVoicesRoute,
     ServerHttp.layerTtsModelsRoute,
+    ServerHttp.layerTtsModelAssetRoute,
     // Starts the host's paradee-tts service as a supervised child (or adopts
     // one already answering the bind) so TTS ships with the server.
     layerManagedTts,
