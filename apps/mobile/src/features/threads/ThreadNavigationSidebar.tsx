@@ -2,7 +2,10 @@ import { useGT, useMessages } from "gt-react-native";
 import { useActiveNewTask } from "../../state/active-new-task";
 import { ThreadUndoNotice } from "../home/ThreadUndoNotice";
 import { useAndroidControlSizing } from "../../components/ui/useAndroidControlSizing";
-import { pickableProjectGroups } from "@t3tools/client-runtime/state/project-grouping";
+import {
+  pickableProjectGroups,
+  resolveScratchProjectScopeKey,
+} from "@t3tools/client-runtime/state/project-grouping";
 import {
   useAppearancePreferences,
   useAndroidFloatingTabs,
@@ -25,8 +28,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppText as Text } from "../../components/ui/AppText";
 import { Button } from "../../components/ui/Button";
 import { scopedProjectKey, scopedThreadKey } from "../../lib/scopedEntities";
-import { useProjects } from "../../state/entities";
-import { steadyNavigationThreadShellsAtom } from "../../state/threads";
+import { useProjects, useNavigationThreadShells } from "../../state/entities";
 import { useThreadSearch } from "../../state/queries";
 import { useThreadListV2ShelfPreferences } from "./use-thread-list-v2-shelf-preferences";
 import { useThreadListNow } from "./use-thread-list-now";
@@ -46,15 +48,9 @@ import { useThreadJumpShortcuts } from "../keyboard/threadKeyboardShortcuts";
 import { requestThreadMessageJump } from "./threadMessageJump";
 import { useThreadListSearchMatches } from "./useThreadListSearchMatches";
 import { useHomeListOptions } from "../home/home-list-options";
-import {
-  buildHomeListFilterMenuItems,
-  homeListFilterEnvironments,
-} from "../home/home-list-filter-menu";
-  buildHomeProjectScopes,
-  resolveHomeProjectFilterScope,
-  sortHomeProjectScopes,
-} from "../home/homeThreadList";
+import { UNSORTED_WORKSPACE_FILTER } from "../home/home-list-filter-menu";
 import { useHomeWorkspaces } from "../home/useHomeWorkspaces";
+import { HomeWorkspaceRoot } from "../home/HomeWorkspaceContext";
 import { threadWorkspaceIdForThread } from "../../state/threadWorkspaces";
 import { buildHomeListFilterMenuItems } from "../home/home-list-filter-menu";
 import { buildHomeProjectScopes } from "../home/homeThreadList";
@@ -152,6 +148,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
     moveThread,
     renameThread,
     regenerateThreadTitle,
+    fileThreadInWorkspace,
   } = useThreadListActions();
   const pendingTasks = usePendingNewTasks();
   const launchingThreads = useLaunchingThreads(threads);
@@ -161,13 +158,23 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
   const { confirmDeletePendingTask } = usePendingTaskListActions((params) =>
     selectDetail({ name: "Thread", params }),
   );
-  const environments = homeListFilterEnvironments(workspaceEnvironments);
+  const environments = Object.values(savedConnectionsById)
+    .map((connection) => ({
+      environmentId: connection.environmentId,
+      label: connection.environmentLabel,
+    }))
+    .sort((left, right) => left.label.localeCompare(right.label));
   const availableEnvironmentIds = new Set(
     environments.map((environment) => environment.environmentId),
   );
   const { workspaces, byEnvironment: workspaceSettingsByEnvironment } = useHomeWorkspaces();
   const availableWorkspaceIds = useMemo(
-    () => new Set(workspaces.map((workspace) => workspace.id)),
+    () =>
+      new Set(
+        workspaces.length > 0
+          ? [...workspaces.map((workspace) => workspace.id), UNSORTED_WORKSPACE_FILTER]
+          : [],
+      ),
     [workspaces],
   );
   const { options, setSelectedEnvironmentId, setSelectedProjectKey, setSelectedWorkspaceId } =
@@ -177,10 +184,11 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
     if (selectedWorkspaceId === null) return launchingThreads;
     return launchingThreads.filter((thread) => {
       const settings = workspaceSettingsByEnvironment.get(thread.environmentId);
-      return (
-        settings !== undefined &&
-        (threadWorkspaceIdForThread(thread, settings) ?? null) === selectedWorkspaceId
-      );
+      const assigned =
+        settings === undefined ? null : threadWorkspaceIdForThread(thread, settings);
+      return selectedWorkspaceId === UNSORTED_WORKSPACE_FILTER
+        ? assigned === null
+        : assigned === selectedWorkspaceId;
     });
   }, [launchingThreads, selectedWorkspaceId, workspaceSettingsByEnvironment]);
   const searchEnvironmentIds =
@@ -195,6 +203,12 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
           )
         ? [options.selectedEnvironmentId]
         : [];
+  // A legacy per-environment scratch key resolves here on every render; the stored
+  // value is only rewritten when the user picks a filter.
+  const resolvedProjectKey = resolveScratchProjectScopeKey(options.selectedProjectKey, projects, {
+    sidebarProjectGroupingMode: options.projectGroupingMode,
+    sidebarProjectGroupingOverrides: {},
+  });
   const projectScopes = useMemo(
     () =>
       buildHomeProjectScopes(
@@ -207,14 +221,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
       ),
     [projects, options.selectedEnvironmentId, options.projectGroupingMode, messages],
   );
-  const projectFilterOptions = pickableProjectGroups(
-    sortHomeProjectScopes({
-      scopes: projectScopes,
-      threads,
-      pendingTasks: [],
-      projectSortOrder: "updated_at",
-    }),
-  ).map((scope) => ({
+  const projectFilterOptions = pickableProjectGroups(projectScopes).map((scope) => ({
     key: scope.key,
     label: scope.title,
   }));
@@ -233,7 +240,9 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
       ),
     [projectScopes],
   );
-  const selectedProjectScope = resolveHomeProjectFilterScope(projectScopes, projects, options);
+  // An archived project's filter reads as all projects, matching the filter menu.
+  const selectedProjectScope =
+    pickableProjectGroups(projectScopes).find((scope) => scope.key === resolvedProjectKey) ?? null;
   const threadSearch = useThreadSearch(
     searchEnvironmentIds,
     props.searchQuery,
@@ -415,6 +424,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
                 ) === selectedThreadKey)
             }
             project={projectByKey.get(pendingScopeKey) ?? null}
+            projectTitle={projectTitleByProjectKey.get(pendingScopeKey)}
             environmentLabel={
               Object.keys(savedConnectionsById).length > 1
                 ? (savedConnectionsById[item.pendingTask.environmentId]?.environmentLabel ?? null)
@@ -634,6 +644,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
 
   if (Platform.OS === "ios") {
     return (
+      <HomeWorkspaceRoot onFileThreadInWorkspace={fileThreadInWorkspace}>
       <>
         {header}
         <View className="flex-1">
@@ -674,11 +685,13 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
           <ThreadUndoNotice visible={props.visible} />
         </View>
       </>
+      </HomeWorkspaceRoot>
     );
   }
 
   // Android: the bar floats below the list.
   return (
+    <HomeWorkspaceRoot onFileThreadInWorkspace={fileThreadInWorkspace}>
     <View testID="thread-navigation-sidebar" className="flex-1 bg-header">
       <View
         className="flex-1"
@@ -729,6 +742,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
       {header}
       <ThreadUndoNotice visible={props.visible} />
     </View>
+    </HomeWorkspaceRoot>
   );
 }
 
