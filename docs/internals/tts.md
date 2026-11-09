@@ -4,64 +4,70 @@ Reading a reply aloud is the reverse of dictation: text leaves the conversation 
 audio comes back. It is additive — nothing here creates, edits, or sends a turn, and
 the [voice input](voice-input.md) page owns the microphone side.
 
-## Which engine speaks
+## Synthesis happens on the client
 
-Web and desktop synthesize on the device with [Phonon](https://github.com/blixt/phonon),
-a browser runtime that runs on WebGPU and falls back to WebAssembly. The app serves the
-engine's prebuilt bundle itself (`vite/phononAssets.ts`), so nothing is fetched from a
-CDN at play time; the model's files come from the environment through
-`GET /v1/audio/model/*`, which mirrors the pinned Hub path and keeps what it downloads
-under `caches/tts-assets`. Every client of an environment therefore speaks from that
-environment's copy, offline once warm, and a pinned revision stays pinned.
+Every client speaks with [Phonon](https://github.com/blixt/phonon), a text-to-speech
+runtime for WebGPU with a WebAssembly CPU tier. No environment synthesizes speech; the
+old `paradee-tts` child process and the `/api/tts/speech` endpoint are gone, and no
+client has a fallback that calls one.
 
-Two things still go to the server, both deliberately:
+The environment still serves two things, both by plain URL:
 
-- **Speeds above 1.3×.** The model's speed control spans about 0.77×–1.3×; the player
-  offers up to 2×, synthesized server-side so pitch is preserved. Falling back keeps
-  every step sounding like the same voice.
-- **Any origin that is not a secure context**, such as a tailnet address over plain
-  http. Cache Storage needs a secure context, so the model could not be kept and every
-  paragraph would re-download 44 MB.
+- **The engine bundle**, at `GET /v1/audio/engine/*`, read from the `phonon-webgpu`
+  dependency. Its CPU worker and WebAssembly load from paths relative to the bundle,
+  so the files stay together.
+- **The model's files**, at `GET /v1/audio/model/*`, which mirrors the pinned Hub
+  path and keeps what it downloads under `caches/tts-assets`. Every client of an
+  environment therefore speaks from that environment's copy, offline once warm, and a
+  pinned revision stays pinned.
 
-A unit the engine fails to produce (no WebAssembly SIMD, a lost device, a failed
-download) is retried on the server unless it already scheduled audio, and the session
-stops attempting the engine after that. The player above this — paragraph spans,
-click-to-seek, highlight, mini-player, autoplay, speed — reads only the PCM stream and
-does not know which engine made it.
+The web and desktop clients serve the engine from their own Vite build and keep the
+model in Cache Storage. A page that is not a secure context has no Cache Storage, so a
+plain-http tailnet address would download the 44 MB model for every narration; those
+pages refuse to play with a visible message instead of moving synthesis elsewhere.
 
-Mobile cannot run Phonon: React Native's Hermes has neither WebGPU nor WebAssembly. A
-hidden WebView was the only candidate and was rejected — iOS suspends it in the
-background, so lock-screen seeking would stall, and it costs a second 44 MB model plus
-~150 MB of memory per device. Mobile keeps the authenticated `POST /api/tts/speech`
-path in [`client-runtime`](../../packages/client-runtime/src/state/ttsSpeech.ts), and
-[`apps/web/src/lib/phononSpeech.ts`](../../apps/web/src/lib/phononSpeech.ts) is the
-only place that knows about the browser engine.
+## Speed
 
-## The server engine
+Phonon makes speech itself between about 0.77× and 1.3×. The player still offers five
+steps (0.75×, 1×, 1.25×, 1.5×, 2×): outside the model's range it synthesizes at the
+nearest bound and resamples the PCM. Audio above 1.3× is therefore shorter and higher
+pitched, not time-stretched; below 0.77× it is longer and lower. That is the honest
+trade for never sending text to another machine.
 
-The environment still supervises `paradee-tts`, which speaks the OpenAI-compatible
-`/v1/audio/speech` contract on `127.0.0.1:8880`. An already-answering bind is adopted,
-otherwise the server spawns it, polls health, and respawns with backoff.
-`T3CODE_MANAGED_TTS=0` disables supervision for a developer pointing at their own
-engine, `T3CODE_MANAGED_TTS_DIR` selects the checkout, and `TTS_HOST`/`TTS_PORT` move
-the bind.
+Mobile keeps the same five steps but changes the playlist's `playbackRate`, which
+time-stretches natively, so its pitch does not move.
 
-The server proxies `/v1/audio/speech` so every client synthesizes through this
-environment's own origin, including remote and relay-connected ones. A `503` means the
-on-demand engine is waking, so the fetch layer polls before surfacing an error; with
-streaming requested the server emits raw s16le mono 24 kHz chunks, so playback starts
-before the reply's audio all exists.
+## Voices
 
-Voice names are the model's, and the engine's catalog fills the settings dropdown. The
-six Kokoro voices this fork shipped before map onto the closest Phonon voice, and map
-back when the server synthesizes, so an existing setting keeps working in both.
+The settings dropdown lists the pinned catalog's English voices and nothing else. The
+stored value is the catalog name (`Delia`, `Trevor`, …). A stored pre-Phonon Kokoro id
+such as `af_heart` is not translated: the player falls back to `Delia`, and a name the
+model does not know also falls back once the engine rejects it. There is no alias map
+in either direction.
+
+## Mobile
+
+React Native's Hermes has neither WebGPU nor WebAssembly, so mobile runs the CPU tier
+in a hidden WebView (`apps/mobile/src/features/threads/phononEngine.ts`). The page is
+the app's own HTML; the engine and the weights load from the environment's HTTP origin,
+on the same connection the app uses, and the weights stay in the WebView's cache.
+
+The WebView does not play audio. Before playback starts, the player synthesizes every
+paragraph of the message to a WAV file in the cache directory, then hands those files to
+the same native `expo-audio` playlist as before. That pre-synthesis is what makes the
+design acceptable: iOS may suspend a backgrounded WebView at any moment, but the audio
+it already produced is on disk, so lock-screen playback, per-paragraph seek, skip,
+speed and highlight all keep working. A paragraph that was never synthesized cannot be
+sought to, but there is no such paragraph once playback begins.
+
+The cost is the model in WebView memory (~150–200 MB) plus the WAV files on disk.
 
 ## Why messages are split
 
 A reply is synthesized per paragraph, then played in order. That is what makes the
-current paragraph highlightable, clickable, and seekable — including to a paragraph
-the engine has not reached yet. One request per whole message would make seeking a
-re-synthesis and would delay playback behind the slowest paragraph.
+current paragraph highlightable, clickable, and seekable. On web the engine streams PCM
+as it speaks; on mobile the paragraphs are pre-produced. One request per whole message
+would have made seeking a re-synthesis.
 
 ## The `t3_speak` tool
 

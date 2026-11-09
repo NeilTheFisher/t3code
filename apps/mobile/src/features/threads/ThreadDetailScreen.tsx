@@ -215,6 +215,7 @@ import { ThreadFeed, type ThreadFeedHistoryControls } from "./ThreadFeed";
 import { WorkspaceMutationIdProvider } from "./WorkspaceMutationIdProvider";
 import { useThreadTurnSubagents } from "./ThreadAgentsSheet";
 import { ComposerQueuedEditBanner } from "./ComposerQueuedEdit";
+import { PhononEngineHost } from "./PhononEngineHost";
 import { ThreadTtsMiniPlayer } from "./ThreadTtsMiniPlayer";
 import { useThreadQueuedCount } from "./ThreadQueueControl";
 import { ThreadGuestShareBar } from "./ThreadGuestShareBar";
@@ -1516,6 +1517,7 @@ function ThreadDetailBody(
     <View className="flex-1" onLayout={handleScreenLayout}>
       <ThreadStreamHaptics threadRef={props.selectedThreadDetailRef} />
       {!usesNativeWorkspaceColumns ? <NativeLayoutObserver onChange={setScreenMetrics} /> : null}
+      <PhononEngineHost environmentId={props.environmentId} />
       {props.draftMode ? (
         props.draftMode.content(
           navigationHeaderHeight,
