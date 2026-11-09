@@ -50,11 +50,14 @@ import {
   buildHomeListFilterMenuItems,
   homeListFilterEnvironments,
 } from "../home/home-list-filter-menu";
-import {
   buildHomeProjectScopes,
   resolveHomeProjectFilterScope,
   sortHomeProjectScopes,
 } from "../home/homeThreadList";
+import { useHomeWorkspaces } from "../home/useHomeWorkspaces";
+import { threadWorkspaceIdForThread } from "../../state/threadWorkspaces";
+import { buildHomeListFilterMenuItems } from "../home/home-list-filter-menu";
+import { buildHomeProjectScopes } from "../home/homeThreadList";
 import { SwipeableScrollGateProvider, useSwipeableScrollGate } from "../home/thread-swipe-actions";
 import { usePendingTaskListActions } from "../home/usePendingTaskListActions";
 import { useThreadListActions } from "../home/useThreadListActions";
@@ -162,8 +165,24 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
   const availableEnvironmentIds = new Set(
     environments.map((environment) => environment.environmentId),
   );
-  const { options, setSelectedEnvironmentId, setSelectedProjectKey } =
-    useHomeListOptions(availableEnvironmentIds);
+  const { workspaces, byEnvironment: workspaceSettingsByEnvironment } = useHomeWorkspaces();
+  const availableWorkspaceIds = useMemo(
+    () => new Set(workspaces.map((workspace) => workspace.id)),
+    [workspaces],
+  );
+  const { options, setSelectedEnvironmentId, setSelectedProjectKey, setSelectedWorkspaceId } =
+    useHomeListOptions(availableEnvironmentIds, availableWorkspaceIds);
+  const selectedWorkspaceId = options.selectedWorkspaceId;
+  const visibleThreads = useMemo(() => {
+    if (selectedWorkspaceId === null) return launchingThreads;
+    return launchingThreads.filter((thread) => {
+      const settings = workspaceSettingsByEnvironment.get(thread.environmentId);
+      return (
+        settings !== undefined &&
+        (threadWorkspaceIdForThread(thread, settings) ?? null) === selectedWorkspaceId
+      );
+    });
+  }, [launchingThreads, selectedWorkspaceId, workspaceSettingsByEnvironment]);
   const searchEnvironmentIds =
     options.selectedEnvironmentId === null
       ? workspaceEnvironments
@@ -277,7 +296,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
     contentOnlyThreadKeys,
     olderSettledShelf,
   } = useThreadListV2({
-    threads: launchingThreads,
+    threads: visibleThreads,
     pendingTasks,
     environmentId: options.selectedEnvironmentId,
     projectRefs: selectedProjectScope === null ? null : selectedProjectScope.projectRefs,
@@ -546,15 +565,21 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
         accessibilityLabel: gt("Search threads"),
       }}
       filter={{
-        customized: options.selectedEnvironmentId !== null || selectedProjectKey !== null,
+        customized:
+          options.selectedEnvironmentId !== null ||
+          selectedProjectKey !== null ||
+          selectedWorkspaceId !== null,
         items: buildHomeListFilterMenuItems(
           {
             environments,
             projects: projectFilterOptions,
+            workspaces,
             selectedEnvironmentId: options.selectedEnvironmentId,
             selectedProjectKey,
+            selectedWorkspaceId,
             onEnvironmentChange: setSelectedEnvironmentId,
             onProjectChange: setSelectedProjectKey,
+            onWorkspaceChange: setSelectedWorkspaceId,
           },
           messages,
         ),

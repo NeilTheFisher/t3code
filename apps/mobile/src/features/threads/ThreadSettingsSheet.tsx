@@ -690,6 +690,8 @@ function ThreadSettingsSessionProvider(
       props.restoreSelection,
       props.selectedModel,
       props.serverConfig,
+      setPendingModel,
+      setPendingPrompt,
     ],
   );
 

@@ -27,11 +27,14 @@ import {
   useAtomValueWhileVisible,
   useHomeRouteVisible,
 } from "./home-route-visibility";
-import {
   buildHomeProjectScopes,
   resolveHomeProjectFilterScope,
   sortHomeProjectScopes,
 } from "./homeThreadList";
+import { useHomeWorkspaces } from "./useHomeWorkspaces";
+import { threadWorkspaceIdForThread } from "../../state/threadWorkspaces";
+import { useAtomValueWhileVisible, useHomeRouteVisible } from "./home-route-visibility";
+import { buildHomeProjectScopes } from "./homeThreadList";
 import { usePendingTaskListActions } from "./usePendingTaskListActions";
 import { useThreadListActions } from "./useThreadListActions";
 import { useWorkspaceTabs } from "../layout/workspace/WorkspaceTabsContext";
@@ -114,11 +117,30 @@ export function HomeRouteScreen() {
     () => new Set(environments.map((environment) => environment.environmentId)),
     [environments],
   );
+  const { workspaces, byEnvironment: workspaceSettingsByEnvironment } = useHomeWorkspaces();
+  const availableWorkspaceIds = useMemo(
+    () => new Set(workspaces.map((workspace) => workspace.id)),
+    [workspaces],
+  );
   const {
     options: listOptions,
     setSelectedEnvironmentId,
     setSelectedProjectKey,
-  } = useHomeListOptions(availableEnvironmentIds);
+    setSelectedWorkspaceId,
+  } = useHomeListOptions(availableEnvironmentIds, availableWorkspaceIds);
+  const selectedWorkspaceId = listOptions.selectedWorkspaceId;
+  // A thread is in the selected workspace when its environment's settings file it
+  // there, including the project default an unassigned thread inherits.
+  const workspaceFilter = useMemo(() => {
+    if (selectedWorkspaceId === null) return null;
+    return (thread: EnvironmentThreadShell) => {
+      const settings = workspaceSettingsByEnvironment.get(thread.environmentId);
+      return (
+        settings !== undefined &&
+        (threadWorkspaceIdForThread(thread, settings) ?? null) === selectedWorkspaceId
+      );
+    };
+  }, [selectedWorkspaceId, workspaceSettingsByEnvironment]);
   const selectedEnvironmentId = listOptions.selectedEnvironmentId;
   const projectScopes = useMemo(
     () =>
@@ -173,15 +195,21 @@ export function HomeRouteScreen() {
             accessibilityLabel: gt("Search threads"),
           }}
           filter={{
-            customized: selectedEnvironmentId !== null || selectedProjectKey !== null,
+            customized:
+              selectedEnvironmentId !== null ||
+              selectedProjectKey !== null ||
+              selectedWorkspaceId !== null,
             items: buildHomeListFilterMenuItems(
               {
                 environments,
                 projects: projectFilterOptions,
+                workspaces,
                 selectedEnvironmentId,
                 selectedProjectKey,
+                selectedWorkspaceId,
                 onEnvironmentChange: setSelectedEnvironmentId,
                 onProjectChange: setSelectedProjectKey,
+                onWorkspaceChange: setSelectedWorkspaceId,
               },
               m,
             ),
@@ -191,6 +219,10 @@ export function HomeRouteScreen() {
         <HomeScreen
           catalogState={catalogState}
           environments={environments}
+          workspaces={workspaces}
+          selectedWorkspaceId={selectedWorkspaceId}
+          onWorkspaceChange={setSelectedWorkspaceId}
+          workspaceFilter={workspaceFilter}
           onAddConnection={() => openSettings(navigation, "SettingsEnvironmentNew")}
           onArchiveThread={archiveThread}
           onDeleteThread={confirmDeleteThread}
