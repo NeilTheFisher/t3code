@@ -73,8 +73,8 @@ const clientSettings: ClientSettings = {
   timestampFormat: "24-hour",
   tts: {
     enabled: true,
-    serverUrl: "http://127.0.0.1:8880",
-    voice: "af_heart",
+    autoplay: true,
+    voice: "Delia",
   },
   wordWrap: true,
 };
