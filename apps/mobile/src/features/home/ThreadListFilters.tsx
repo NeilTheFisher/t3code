@@ -2,6 +2,7 @@ import { useGT } from "gt-react-native";
 import { Pressable, ScrollView } from "react-native";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { ListFilterMenu } from "../layout/workspace/ListFilterMenu";
+import { UNSORTED_WORKSPACE_FILTER } from "./home-list-filter-menu";
 import type { EnvironmentId } from "@t3tools/contracts";
 import type {
   HomeListFilterMenuEnvironment,
@@ -112,6 +113,14 @@ export function ThreadListFilters(props: {
               state:
                 workspace.id === props.selectedWorkspaceId ? ("on" as const) : ("off" as const),
             })),
+            {
+              id: JSON.stringify(UNSORTED_WORKSPACE_FILTER),
+              title: "Unsorted",
+              state:
+                props.selectedWorkspaceId === UNSORTED_WORKSPACE_FILTER
+                  ? ("on" as const)
+                  : ("off" as const),
+            },
           ]}
           onSelect={(id) => {
             if (id === "all") props.onWorkspaceChange?.(null);
