@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { buildHomeListFilterMenuItems } from "./home-list-filter-menu";
+import { buildHomeListFilterMenuItems, UNSORTED_WORKSPACE_FILTER } from "./home-list-filter-menu";
 
 const selectedOf = (item: unknown): boolean =>
   typeof item === "object" &&
@@ -34,6 +34,7 @@ describe("buildHomeListFilterMenuItems workspaces", () => {
       ["All workspaces", false],
       ["Work", true],
       ["Personal", false],
+      ["Unsorted", false],
     ]);
   });
 
@@ -42,6 +43,18 @@ describe("buildHomeListFilterMenuItems workspaces", () => {
     if (item === undefined || !("items" in item)) throw new Error("no workspace submenu");
 
     expect(selectedOf(item.items[0])).toBe(true);
+  });
+
+  it("offers Unsorted for threads with no workspace", () => {
+    const item = workspaceItem(UNSORTED_WORKSPACE_FILTER);
+    if (item === undefined || !("items" in item)) throw new Error("no workspace submenu");
+
+    expect(item.items.map((entry) => [entry.title, selectedOf(entry)])).toEqual([
+      ["All workspaces", false],
+      ["Work", false],
+      ["Personal", false],
+      ["Unsorted", true],
+    ]);
   });
 
   it("omits the submenu when no environment defines a workspace", () => {

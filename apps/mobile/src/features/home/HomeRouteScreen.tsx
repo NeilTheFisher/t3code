@@ -26,7 +26,9 @@ import {
 import { AndroidHomeFabLayout } from "./AndroidHomeFab";
 import { HomeScreen } from "./HomeScreen";
 import { useHomeListOptions } from "./home-list-options";
+import { UNSORTED_WORKSPACE_FILTER } from "./home-list-filter-menu";
 import { useHomeWorkspaces } from "./useHomeWorkspaces";
+import { HomeWorkspaceRoot } from "./HomeWorkspaceContext";
 import { threadWorkspaceIdForThread } from "../../state/threadWorkspaces";
 import { useAtomValueWhileVisible, useHomeRouteVisible } from "./home-route-visibility";
 import { buildHomeProjectScopes } from "./homeThreadList";
@@ -87,6 +89,7 @@ export function HomeRouteScreen() {
 
   const {
     archiveThread,
+    fileThreadInWorkspace,
     confirmDeleteThread,
     settleThread,
     snoozeThread,
@@ -121,7 +124,12 @@ export function HomeRouteScreen() {
   );
   const { workspaces, byEnvironment: workspaceSettingsByEnvironment } = useHomeWorkspaces();
   const availableWorkspaceIds = useMemo(
-    () => new Set(workspaces.map((workspace) => workspace.id)),
+    () =>
+      new Set(
+        workspaces.length > 0
+          ? [...workspaces.map((workspace) => workspace.id), UNSORTED_WORKSPACE_FILTER]
+          : [],
+      ),
     [workspaces],
   );
   const {
@@ -137,10 +145,11 @@ export function HomeRouteScreen() {
     if (selectedWorkspaceId === null) return null;
     return (thread: EnvironmentThreadShell) => {
       const settings = workspaceSettingsByEnvironment.get(thread.environmentId);
-      return (
-        settings !== undefined &&
-        (threadWorkspaceIdForThread(thread, settings) ?? null) === selectedWorkspaceId
-      );
+      const assigned =
+        settings === undefined ? null : threadWorkspaceIdForThread(thread, settings);
+      return selectedWorkspaceId === UNSORTED_WORKSPACE_FILTER
+        ? assigned === null
+        : assigned === selectedWorkspaceId;
     };
   }, [selectedWorkspaceId, workspaceSettingsByEnvironment]);
   const selectedEnvironmentId = listOptions.selectedEnvironmentId;
@@ -215,6 +224,7 @@ export function HomeRouteScreen() {
           }}
         />
 
+        <HomeWorkspaceRoot onFileThreadInWorkspace={fileThreadInWorkspace}>
         <HomeScreen
           catalogState={catalogState}
           environments={environments}
@@ -264,6 +274,7 @@ export function HomeRouteScreen() {
           selectedProjectKey={selectedProjectKey}
           threads={threads}
         />
+        </HomeWorkspaceRoot>
         <ThreadUndoNotice visible={visible} />
       </>
     </AndroidHomeFabLayout>
