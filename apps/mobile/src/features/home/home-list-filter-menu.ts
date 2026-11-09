@@ -12,13 +12,21 @@ export interface HomeListFilterMenuProject {
   readonly label: string;
 }
 
+export interface HomeListFilterMenuWorkspace {
+  readonly id: string;
+  readonly name: string;
+}
+
 export function buildHomeListFilterMenuItems(props: {
   readonly environments: ReadonlyArray<HomeListFilterMenuEnvironment>;
   readonly projects: ReadonlyArray<HomeListFilterMenuProject>;
+  readonly workspaces?: ReadonlyArray<HomeListFilterMenuWorkspace>;
   readonly selectedEnvironmentId: EnvironmentId | null;
   readonly selectedProjectKey: string | null;
+  readonly selectedWorkspaceId?: string | null;
   readonly onEnvironmentChange: (environmentId: EnvironmentId | null) => void;
   readonly onProjectChange: (projectKey: string | null) => void;
+  readonly onWorkspaceChange?: (workspaceId: string | null) => void;
 }): AppBarMenuItem[] {
   const items: AppBarMenuItem[] = [
     {
@@ -59,6 +67,29 @@ export function buildHomeListFilterMenuItems(props: {
           title: project.label,
           selected: props.selectedProjectKey === project.key,
           onPress: () => props.onProjectChange(project.key),
+        })),
+      ],
+    });
+  }
+
+  const workspaces = props.workspaces ?? [];
+  if (workspaces.length > 0 && props.onWorkspaceChange !== undefined) {
+    items.push({
+      id: "workspace",
+      title: "Workspace",
+      items: [
+        {
+          id: "workspace:all",
+          title: "All workspaces",
+          subtitle: "Show threads from every workspace",
+          selected: (props.selectedWorkspaceId ?? null) === null,
+          onPress: () => props.onWorkspaceChange?.(null),
+        },
+        ...workspaces.map((workspace) => ({
+          id: `workspace:${workspace.id}`,
+          title: workspace.name,
+          selected: props.selectedWorkspaceId === workspace.id,
+          onPress: () => props.onWorkspaceChange?.(workspace.id),
         })),
       ],
     });
