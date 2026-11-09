@@ -7,17 +7,18 @@ import type { Phonon, Speech } from "phonon-webgpu";
 
 import {
   PHONON_DEFAULT_VOICE,
-  PHONON_MAX_SPEED,
-  PHONON_MIN_SPEED,
   PHONON_MODEL,
   modelAssetBase,
+  nativeSpeedFor,
   phononVoiceFor,
+  resampleFactorFor,
   rewriteModelUrl,
   splitPauseDirective,
 } from "./phononModel";
 
 /** Sample rate the model makes and the player's audio graph runs at. */
-const SAMPLE_RATE = 24_000;
+export const TTS_PCM_SAMPLE_RATE = 24_000;
+const SAMPLE_RATE = TTS_PCM_SAMPLE_RATE;
 /** Small chunks cost one audio buffer each, so they are batched to ~250 ms. */
 const BATCH_SAMPLES = 6_000;
 
@@ -35,8 +36,9 @@ function phononModuleUrl(): string {
 
 /**
  * Whether this page may run the engine at all. Cache Storage, and with it a
- * model kept between narrations, needs a secure origin: a plain-http tailnet
- * address would download 44 MB per message, so those pages ask the environment.
+ * model kept between narrations, needs a secure origin: on plain http every
+ * message would download 44 MB again, so speech refuses rather than pretending
+ * to work.
  */
 export function localSpeechAvailable(): boolean {
   return globalThis.isSecureContext === true;
@@ -95,11 +97,6 @@ async function loadEngine(serverUrl: string, onLoadingModel?: () => void): Promi
     });
   }
   return await loading;
-}
-
-/** Why the engine is unavailable, if it failed since the last reset. */
-export function phononFailure(): string | null {
-  return failure;
 }
 
 export interface PhononSpeechRequest {
@@ -165,6 +162,62 @@ function createPcmWriter(onChunk: (pcm: ArrayBuffer) => void): {
   };
 }
 
+/**
+ * Linear resampler for speeds the model cannot make itself. Speeding the
+ * samples up shortens the audio and raises its pitch, which is the honest
+ * trade for staying on-device past the model's 0.77x-1.3x range.
+ */
+function createResampler(
+  factor: number,
+  emit: (samples: Float32Array) => void,
+): { push: (samples: Float32Array) => void; flush: () => void } {
+  if (factor === 1) return { push: emit, flush: () => undefined };
+  let buffer = new Float32Array(8_192);
+  let length = 0;
+  let readPos = 0;
+
+  const compact = () => {
+    if (readPos === 0) return;
+    buffer.copyWithin(0, readPos, length);
+    length -= readPos;
+    readPos = 0;
+  };
+
+  return {
+    push(samples) {
+      if (length + samples.length > buffer.length) {
+        compact();
+        while (length + samples.length > buffer.length) {
+          const next = new Float32Array(buffer.length * 2);
+          next.set(buffer.subarray(0, length));
+          buffer = next;
+        }
+      }
+      buffer.set(samples, length);
+      length += samples.length;
+      const out = new Float32Array(Math.ceil(length / factor) + 2);
+      let count = 0;
+      while (readPos + 1 < length) {
+        const index = Math.floor(readPos);
+        const fraction = readPos - index;
+        out[count++] = buffer[index]! * (1 - fraction) + buffer[index + 1]! * fraction;
+        readPos += factor;
+      }
+      if (count > 0) emit(out.subarray(0, count));
+      if (readPos > 4_096) compact();
+    },
+    flush() {
+      if (readPos < length) {
+        // Keep the final source sample so a paragraph does not end early.
+        emit(buffer.subarray(length - 1, length));
+      }
+      buffer = new Float32Array(0);
+      length = 0;
+      readPos = 0;
+    },
+  };
+}
+
 /** Synthesize one spoken unit, streaming its PCM to `onChunk`. */
 export async function streamPhononChunks(request: PhononSpeechRequest): Promise<void> {
   const { text, pauseSeconds } = splitPauseDirective(request.text);
@@ -176,14 +229,17 @@ export async function streamPhononChunks(request: PhononSpeechRequest): Promise<
   request.signal?.throwIfAborted();
 
   const writer = createPcmWriter(request.onChunk);
-  const speed = Math.min(PHONON_MAX_SPEED, Math.max(PHONON_MIN_SPEED, request.speed));
+  const resampler = createResampler(resampleFactorFor(request.speed), (samples) =>
+    writer.push(samples),
+  );
+  const speed = nativeSpeedFor(request.speed);
   const speak = (voice: string): Promise<Speech> =>
     withModelOrigin(request.serverUrl, () =>
       tts.speak(text, {
         voice,
         speed,
         ...(request.signal === undefined ? {} : { signal: request.signal }),
-        onAudio: (samples) => writer.push(samples),
+        onAudio: (samples) => resampler.push(samples),
       }),
     );
 
@@ -196,5 +252,6 @@ export async function streamPhononChunks(request: PhononSpeechRequest): Promise<
     if (!message.startsWith("No voice ") || voice === PHONON_DEFAULT_VOICE) throw error;
     await speak(PHONON_DEFAULT_VOICE);
   }
+  resampler.flush();
   writer.silence(pauseSeconds);
 }

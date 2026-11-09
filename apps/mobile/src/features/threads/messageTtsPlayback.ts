@@ -1,5 +1,5 @@
 import { type EnvironmentId } from "@t3tools/contracts";
-import { runAtomCommand, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import { DEFAULT_TTS_VOICE } from "@t3tools/contracts/settings";
 import {
   createAudioPlaylist,
   setAudioModeAsync,
@@ -11,8 +11,7 @@ import { useSyncExternalStore } from "react";
 import { Alert } from "react-native";
 
 import { markdownToSpokenText, splitSpokenUnits } from "../../lib/spokenText";
-import { appAtomRegistry } from "../../state/atom-registry";
-import { requestTtsSpeech } from "../../state/tts";
+import { synthesizePhononWav } from "./phononEngine";
 
 export type MessageTtsStatus = "idle" | "loading" | "playing" | "paused";
 
@@ -67,37 +66,17 @@ export interface MessageTtsProgress {
 let progress: MessageTtsProgress = { currentTime: 0, duration: 0 };
 const progressListeners = new Set<() => void>();
 
-// Sentence-sized units are fetched in order into one playlist, so the first starts
-// playing while later ones synthesize. Each remembers its markdown block, so the
-// block under the playback head can be highlighted and tapped to seek.
+// Every spoken unit is synthesized to a WAV file before the playlist starts, so
+// a backgrounded or suspended WebView can never stall playback or seeking.
 let playlist: AudioPlaylist | null = null;
 let units: SpokenUnit[] = [];
 /** First unit index for each markdown block, or undefined when it has no speech. */
 let blockStarts: number[] = [];
-/**
- * The playlist holds one contiguous window of units, `[playlistStart, fetchedCount)`.
- * Playlist position `p` is unit `playlistStart + p`. A far seek rebuilds the window
- * at its target, so the first fetch is the tapped paragraph itself.
- */
-let playlistStart = 0;
-/** Unit index one past the playlist window's last track. */
-let fetchedCount = 0;
 let observedDurations: number[] = [];
-/** Bumped on every stop/play so in-flight fetches are discarded. */
+/** Bumped on every stop/play so in-flight synthesis is discarded. */
 let generation = 0;
-/** Bumped when the window moves; a fetch that started under the old window is dropped. */
-let windowToken = 0;
-/** Whether the fill loop is running. Only one may run at a time. */
-let pumping = false;
-/** Id of the newest fill loop, so a superseded one cannot clear its flag. */
-let pumpRun = 0;
-/** Active message, so a window rebuild can restart the fill loop. */
-let currentEnvironmentId: EnvironmentId | null = null;
-let currentMessageId: string | null = null;
-/** The playlist ran out of queued tracks while more are still being fetched. */
-let awaitingResume = false;
-/** A seek to a unit whose track is not in the playlist yet, applied once it is. */
-let pendingSeekUnit: number | null = null;
+/** Aborts the paragraph loop when the narration is stopped or replaced. */
+let synthesisController: AbortController | null = null;
 /** Ignore a `didJustFinish` until this time; a seek emits one for the old track. */
 let ignoreFinishUntil = 0;
 /** Chosen speed, kept across narrations. */
@@ -207,39 +186,17 @@ function onPlaylistStatus(status: PlaylistStatusEvent) {
     return;
   }
 
-  const unit = playlistStart + (status.currentIndex ?? 0);
+  const unit = status.currentIndex ?? 0;
   if (Number.isFinite(status.duration) && status.duration > 0) {
     observedDurations[unit] = status.duration;
-  }
-  if (pendingSeekUnit !== null) {
-    if (unit !== pendingSeekUnit) {
-      // Still on the outgoing track: keep the pinned highlight and retry the skip.
-      // A skip issued right after `add` can be dropped natively, so this repeats
-      // until the playlist reports the target.
-      applyPendingSeek();
-      return;
-    }
-    // Landed: hand the head back to the player.
-    pendingSeekUnit = null;
-    if (state.status === "playing") getPlaylist().play();
   }
   setActiveBlockFor(unit);
   updateProgress(unit, status.currentTime ?? 0);
 
-  if (status.didJustFinish) {
-    // A skip emits a finish for the track being left; ignore it so seeking back
-    // to an earlier paragraph doesn't end the narration.
-    if (Date.now() >= ignoreFinishUntil) {
-      // ExoPlayer reaches "ended" both at the true end and when it catches up to
-      // the fetch head; only the former means the message is done.
-      if (nextFetchIndex() >= units.length) stopMessageTts();
-      else awaitingResume = true;
-    }
+  if (status.didJustFinish && Date.now() >= ignoreFinishUntil) {
+    // Each track reports its own finish; only the last one ends the narration.
+    if (unit >= units.length - 1) stopMessageTts();
   }
-}
-
-function nextFetchIndex(): number {
-  return fetchedCount;
 }
 
 function getPlaylist(): AudioPlaylist {
@@ -281,20 +238,14 @@ export function blocksHaveSpeech(blocks: readonly string[]): boolean {
 
 export function stopMessageTts() {
   generation += 1;
-  windowToken += 1;
-  pumping = false;
-  awaitingResume = false;
-  pendingSeekUnit = null;
-  currentEnvironmentId = null;
-  currentMessageId = null;
+  synthesisController?.abort();
+  synthesisController = null;
   if (playlist !== null) {
     playlist.pause();
     playlist.clear();
   }
   units = [];
   blockStarts = [];
-  playlistStart = 0;
-  fetchedCount = 0;
   observedDurations = [];
   setProgress(0, 0);
   setState({ ...IDLE, rate: currentRate });
@@ -319,57 +270,18 @@ export function setNarrationRate(rate: number) {
   if (state.messageId !== null) setState({ ...state, rate });
 }
 
-/** Ask for a pending target whose audio now exists; confirmed by `onPlaylistStatus`. */
-function applyPendingSeek() {
-  const target = pendingSeekUnit;
-  if (target === null || target < playlistStart || target >= fetchedCount) return;
-  const audio = getPlaylist();
-  ignoreFinishUntil = Date.now() + 600;
-  audio.skipTo(target - playlistStart);
-  if (state.status === "playing") audio.play();
-}
-
-/**
- * Move the window so `target` is its first track: the fill loop then fetches the
- * tapped paragraph immediately instead of every paragraph before it.
- */
-function rebuildWindowAt(target: number) {
-  const audio = getPlaylist();
-  pendingSeekUnit = target;
-  windowToken += 1;
-  playlistStart = target;
-  fetchedCount = target;
-  setActiveBlockFor(target);
-  setProgress(elapsedBefore(target), totalDuration());
-  awaitingResume = false;
-  audio.pause();
-  audio.clear();
-  if (!pumping && currentEnvironmentId !== null && currentMessageId !== null) {
-    void fetchRemaining(currentEnvironmentId, currentMessageId, generation);
-  }
-}
-
-/** Move the playback head to unit `index`, or arm it if its audio is unfetched. */
+/** Move the playback head to unit `index`. Every unit has audio by now. */
 function seekToUnit(index: number) {
   if (state.messageId === null || units.length === 0) return;
   const target = Math.max(0, Math.min(index, units.length - 1));
-  if (target < playlistStart || target >= fetchedCount) {
-    // Outside the window: rebuild it here so the target is the next thing
-    // fetched and played, not the end of a long sequential queue.
-    if (state.status === "paused") setState({ ...state, status: "playing" });
-    rebuildWindowAt(target);
-    return;
-  }
-  pendingSeekUnit = null;
   const audio = getPlaylist();
   ignoreFinishUntil = Date.now() + 600;
-  const position = target - playlistStart;
-  if (audio.currentIndex === position) {
+  if (audio.currentIndex === target) {
     // Already on this track, so skipTo would no-op; rewind it to restart. This
     // is what makes tapping the paragraph you started on seek back to its start.
     void audio.seekTo(0).catch(() => undefined);
   } else {
-    audio.skipTo(position);
+    audio.skipTo(target);
   }
   setActiveBlockFor(target);
   setProgress(elapsedBefore(target), totalDuration());
@@ -426,109 +338,45 @@ export function skipNarration(deltaSeconds: number) {
   seekToRatio((progress.currentTime + deltaSeconds) / total);
 }
 
-/** Stable short hash of a unit's text, so edited messages don't reuse stale audio. */
-function hashText(text: string): string {
+/** Stable short hash of a unit's text and voice, so edited messages don't reuse stale audio. */
+function hashSpeech(text: string, voice: string): string {
+  const value = `${voice}\u0000${text}`;
   let hash = 5381;
-  for (let i = 0; i < text.length; i += 1) hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0;
+  for (let i = 0; i < value.length; i += 1) hash = ((hash << 5) + hash + value.charCodeAt(i)) | 0;
   return (hash >>> 0).toString(36);
 }
 
-async function fetchSegment(
+/**
+ * One unit's WAV, synthesized on this device and cached on disk. Repeating a
+ * narration or seeking back and forth reuses the file instead of re-synthesizing.
+ */
+async function synthesizeSegment(
   text: string,
   messageId: string,
   index: number,
   environmentId: EnvironmentId,
   forGeneration: number,
+  signal: AbortSignal,
 ): Promise<string | null> {
   const file = new File(
     Paths.cache,
-    `t3-tts-${messageId.replace(/[^a-zA-Z0-9._-]/g, "_")}-${index}-${hashText(text)}.ogg`,
+    `t3-tts-${messageId.replace(/[^a-zA-Z0-9._-]/g, "_")}-${index}-${hashSpeech(text, DEFAULT_TTS_VOICE)}.wav`,
   );
-  // Reuse audio already synthesized for this unit (an earlier narration, or a
-  // seek back and forth), so repeated seeking is instant.
   if (file.exists) return file.uri;
 
-  const result = await runAtomCommand(
-    appAtomRegistry,
-    requestTtsSpeech,
-    { environmentId, input: { text } },
-    { reportFailure: false, reportDefect: false },
-  );
-  // A stop or a new message while this request was in flight wins.
+  const base64 = await synthesizePhononWav({
+    environmentId,
+    text,
+    voice: DEFAULT_TTS_VOICE,
+    signal,
+  });
+  // A stop or a new message while this synthesis was in flight wins.
   if (forGeneration !== generation) return null;
-  if (result._tag === "Failure") throw squashAtomCommandFailure(result);
 
   if (file.exists) file.delete();
   file.create({ overwrite: true });
-  await file.write(result.value);
+  await file.write(base64, { encoding: "base64" });
   return file.uri;
-}
-
-/** Fetch and queue the remaining segments while the playlist plays. */
-async function fetchRemaining(
-  environmentId: EnvironmentId,
-  messageId: string,
-  forGeneration: number,
-) {
-  if (pumping) return;
-  pumping = true;
-  const run = (pumpRun += 1);
-  const token = windowToken;
-  try {
-    while (forGeneration === generation && fetchedCount < units.length) {
-      const index = fetchedCount;
-      const uri = await fetchSegment(
-        units[index]!.text,
-        messageId,
-        index,
-        environmentId,
-        forGeneration,
-      );
-      // A seek that rebuilt the window while this request was in flight owns the
-      // playlist now; drop the stale track and let the new window fetch.
-      if (token !== windowToken) return;
-      if (forGeneration !== generation || uri === null) return;
-
-      const audio = getPlaylist();
-      audio.add({ uri });
-      fetchedCount = index + 1;
-
-      // A seek that landed past the fetch head takes priority over resuming.
-      // `pendingSeekUnit` clears only when the player confirms the target index.
-      if (pendingSeekUnit !== null && pendingSeekUnit < fetchedCount) {
-        awaitingResume = false;
-        applyPendingSeek();
-        continue;
-      }
-
-      if (awaitingResume) {
-        awaitingResume = false;
-        if (state.status === "playing") {
-          audio.skipTo(index - playlistStart);
-          audio.play();
-          if (pendingSeekUnit === null) setActiveBlockFor(index);
-        }
-      }
-    }
-  } catch (cause) {
-    if (forGeneration === generation) {
-      const message = cause instanceof Error ? cause.message : "Could not play this message.";
-      stopMessageTts();
-      Alert.alert("Playback failed", message);
-    }
-  } finally {
-    if (run === pumpRun) {
-      pumping = false;
-      if (
-        token !== windowToken &&
-        forGeneration === generation &&
-        currentEnvironmentId !== null &&
-        currentMessageId !== null
-      ) {
-        void fetchRemaining(currentEnvironmentId, currentMessageId, forGeneration);
-      }
-    }
-  }
 }
 
 export async function playMessageTts(
@@ -555,9 +403,8 @@ export async function playMessageTts(
   const forGeneration = generation;
   units = built.units;
   blockStarts = built.blockStarts;
-  playlistStart = 0;
-  currentEnvironmentId = environmentId;
-  currentMessageId = messageId;
+  const controller = new AbortController();
+  synthesisController = controller;
   setState({
     messageId,
     threadId,
@@ -577,28 +424,35 @@ export async function playMessageTts(
       );
     }
 
-    // One retry: the first request after a reconnect can stall and time out, and
-    // one retry makes that invisible rather than an apparent hang.
-    let firstUri: string | null = null;
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      try {
-        firstUri = await fetchSegment(units[0]!.text, messageId, 0, environmentId, forGeneration);
-        break;
-      } catch (error) {
-        if (attempt === 1 || forGeneration !== generation) throw error;
-      }
+    // Synthesize the whole message before playback: the WebView is not needed
+    // once this returns, so backgrounding or suspending it cannot stall audio,
+    // and every paragraph has a file to seek to.
+    const uris: string[] = [];
+    for (let index = 0; index < units.length; index += 1) {
+      if (forGeneration !== generation) return;
+      const uri = await synthesizeSegment(
+        units[index]!.text,
+        messageId,
+        index,
+        environmentId,
+        forGeneration,
+        controller.signal,
+      );
+      if (uri === null || forGeneration !== generation) return;
+      uris.push(uri);
     }
-    if (firstUri === null) return;
 
     const audio = getPlaylist();
     audio.playbackRate = currentRate;
-    audio.add({ uri: firstUri });
-    fetchedCount = 1;
+    for (const uri of uris) audio.add({ uri });
     audio.play();
     setState({ ...state, status: "playing", activeBlock: units[0]!.block });
-    void fetchRemaining(environmentId, messageId, forGeneration);
   } catch (cause) {
-    if (forGeneration !== generation) return;
+    // A stop, a replaced message, or the screen closing owns the state already.
+    if (forGeneration !== generation || (cause instanceof Error && cause.name === "AbortError")) {
+      stopMessageTts();
+      return;
+    }
     const message = cause instanceof Error ? cause.message : "Could not play this message.";
     stopMessageTts();
     Alert.alert("Playback failed", message);
