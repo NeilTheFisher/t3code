@@ -79,6 +79,7 @@
     "lucide-react": "^0.564.0",
     "pdfjs-dist": "6.4.299",
     "pele": "catalog:",
+    "phonon-webgpu": "github:blixt/phonon#36e7e5eff820733be38e9df19ccf58ae891bd45c",
     "property-information": "^7.2.0",
     "react": "catalog:",
     "react-dom": "catalog:",
