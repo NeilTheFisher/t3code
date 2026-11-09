@@ -952,6 +952,9 @@ importers:
       node-pty:
         specifier: 1.2.0-beta.15
         version: 1.2.0-beta.15(patch_hash=ff8117509663fe1d5a07ef2648c324e80a9349b7d90401a00a591702615b8b30)
+      phonon-webgpu:
+        specifier: github:blixt/phonon#36e7e5eff820733be38e9df19ccf58ae891bd45c
+        version: https://codeload.github.com/blixt/phonon/tar.gz/36e7e5eff820733be38e9df19ccf58ae891bd45c
       playwright-core:
         specifier: 1.64.1
         version: 1.64.1
