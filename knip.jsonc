@@ -73,6 +73,8 @@
         "@napi-rs/keyring",
         "ffi-rs",
         "transcribe-cpp",
+        // The WebView engine bundle is read from the package by path, never imported.
+        "phonon-webgpu",
       ],
     },
     "apps/desktop": {

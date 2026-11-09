@@ -19,7 +19,6 @@ import * as Stream from "effect/Stream";
 import { cast, pipe } from "effect/Function";
 import {
   HttpClient,
-  HttpClientRequest,
   HttpClientResponse,
   HttpMiddleware,
   HttpRouter,
@@ -31,8 +30,8 @@ import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 import { OtlpTracer, OtlpSerialization } from "effect/observability";
 
 import * as ServerConfig from "./config.ts";
-import { ttsUpstreamPath } from "./voice/upstream.ts";
 import { ensureTtsModelAsset, resolveTtsModelAsset } from "./voice/modelAsset.ts";
+import { readPhononEngineAsset, PHONON_ENGINE_PREFIX } from "./voice/phononEngine.ts";
 import { ASSET_ROUTE_PREFIX, readMcpAppHtml, resolveAsset } from "./assets/AssetAccess.ts";
 import { sourceControlMediaResponse } from "./assets/sourceControlMediaResponse.ts";
 import { statMediaFile, streamMediaFile, type OpenMediaFile } from "./assets/MediaFile.ts";
@@ -390,119 +389,11 @@ export const layerOtlpTracesProxyRoute = HttpRouter.add(
   ),
 );
 
-const TTS_SPEECH_PATH = "/v1/audio/speech";
-
-// Proxies the OpenAI-compatible speech endpoint to the local TTS service so
-// every client (web, desktop, mobile, remote) synthesizes through this server's
-// own origin. Without it, remote and mobile clients would try the host's
-// loopback port, which only the host can reach.
-export const layerTtsSpeechRoute = HttpRouter.add(
-  "POST",
-  TTS_SPEECH_PATH,
-  Effect.gen(function* () {
-    const request = yield* HttpServerRequest.HttpServerRequest;
-    const httpClient = HttpClient.withScope(yield* HttpClient.HttpClient);
-    // The speech request is a small JSON body; forward it verbatim.
-    const body = yield* request.text;
-    const upstream = HttpClientRequest.make("POST")(ttsUpstreamPath(TTS_SPEECH_PATH)).pipe(
-      // Stream the audio straight through; never let an encoding layer buffer it.
-      HttpClientRequest.setHeaders({ "accept-encoding": "identity" }),
-      HttpClientRequest.bodyText(body, "application/json"),
-    );
-    const response = yield* httpClient.execute(upstream);
-    const contentType = response.headers["content-type"] ?? "audio/pcm";
-    return HttpServerResponse.stream(response.stream, {
-      status: response.status,
-      headers: {
-        "cache-control": "no-store",
-        "x-content-type-options": "nosniff",
-      },
-      contentType,
-    });
-  }).pipe(
-    Effect.catchCause((cause) =>
-      Effect.succeed(
-        HttpServerResponse.text(`TTS proxy failed: ${Cause.pretty(cause)}`, { status: 502 }),
-      ),
-    ),
-  ),
-);
-
-const TTS_VOICES_PATH = "/v1/audio/voices";
-
-// Proxies the voice list so the settings panel can offer a dropdown instead of a
-// free-text field. The bundled service reports one voice; a multi-voice external
-// server reports all of them.
-export const layerTtsVoicesRoute = HttpRouter.add(
-  "GET",
-  TTS_VOICES_PATH,
-  Effect.gen(function* () {
-    const httpClient = HttpClient.withScope(yield* HttpClient.HttpClient);
-    const response = yield* httpClient.get(ttsUpstreamPath(TTS_VOICES_PATH));
-    const body = yield* response.text;
-    return HttpServerResponse.text(body, {
-      status: response.status,
-      contentType: "application/json",
-      headers: { "cache-control": "no-store" },
-    });
-  }).pipe(
-    Effect.catchCause(() =>
-      Effect.succeed(
-        HttpServerResponse.text('{"voices":[]}', {
-          status: 502,
-          contentType: "application/json",
-        }),
-      ),
-    ),
-  ),
-);
-
-const TTS_MODELS_PATH = "/v1/models";
-
-// One wildcard proxy for the TTS model registry (list, install, delete, activate):
-// the upstream owns the path, and same-origin keeps remote clients off the host's
-// loopback port.
-export const layerTtsModelsRoute = HttpRouter.add(
-  "*",
-  `${TTS_MODELS_PATH}/*`,
-  Effect.gen(function* () {
-    const request = yield* HttpServerRequest.HttpServerRequest;
-    const method = request.method;
-    if (method !== "GET" && method !== "POST" && method !== "DELETE") {
-      return HttpServerResponse.text("Method Not Allowed", { status: 405 });
-    }
-    const url = HttpServerRequest.toURL(request);
-    if (Option.isNone(url)) {
-      return HttpServerResponse.text("Bad Request", { status: 400 });
-    }
-    const httpClient = HttpClient.withScope(yield* HttpClient.HttpClient);
-    const upstream = HttpClientRequest.make(method)(
-      ttsUpstreamPath(`${url.value.pathname}${url.value.search}`),
-    );
-    const response = yield* httpClient.execute(upstream);
-    const body = yield* response.text;
-    return HttpServerResponse.text(body, {
-      status: response.status,
-      contentType: "application/json",
-      headers: { "cache-control": "no-store" },
-    });
-  }).pipe(
-    Effect.catchCause(() =>
-      Effect.succeed(
-        HttpServerResponse.text('{"models":[]}', {
-          status: 502,
-          contentType: "application/json",
-        }),
-      ),
-    ),
-  ),
-);
-
 const TTS_MODEL_ASSET_PREFIX = "/v1/audio/model";
 
 // Serves the browser speech engine's model files from this environment, so a
-// client speaks without reaching the Hub itself. Public like the speech proxy:
-// the files carry no environment data, and the browser needs them by URL.
+// client speaks without reaching the Hub itself. Public: the files carry no
+// environment data, and the browser needs them by URL.
 export const layerTtsModelAssetRoute = HttpRouter.add(
   "GET",
   `${TTS_MODEL_ASSET_PREFIX}/*`,
@@ -537,6 +428,43 @@ export const layerTtsModelAssetRoute = HttpRouter.add(
     Effect.catchCause((cause) =>
       Effect.logWarning(`TTS model asset failed: ${Cause.pretty(cause)}`).pipe(
         Effect.as(HttpServerResponse.text("Model file unavailable", { status: 502 })),
+      ),
+    ),
+  ),
+);
+
+// The mobile app hosts Phonon in a WebView: the page is the app's own HTML, but
+// the engine bundle and its CPU worker load from this environment so the model
+// cache and the weight proxy stay on one origin.
+export const layerTtsPhononEngineRoute = HttpRouter.add(
+  "GET",
+  `${PHONON_ENGINE_PREFIX}/*`,
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const url = HttpServerRequest.toURL(request);
+    if (Option.isNone(url)) {
+      return HttpServerResponse.text("Bad Request", { status: 400 });
+    }
+    const prefix = `${PHONON_ENGINE_PREFIX}/`;
+    const pathname = url.value.pathname;
+    if (!pathname.startsWith(prefix)) {
+      return HttpServerResponse.text("Not Found", { status: 404 });
+    }
+    const asset = readPhononEngineAsset(pathname.slice(prefix.length));
+    if (asset === null) {
+      return HttpServerResponse.text("Not Found", { status: 404 });
+    }
+    return HttpServerResponse.uint8Array(asset.body, {
+      headers: {
+        "cache-control": "public, max-age=31536000, immutable",
+        "content-type": asset.contentType,
+        "x-content-type-options": "nosniff",
+      },
+    });
+  }).pipe(
+    Effect.catchCause((cause) =>
+      Effect.logWarning(`Phonon engine asset failed: ${Cause.pretty(cause)}`).pipe(
+        Effect.as(HttpServerResponse.text("Engine asset unavailable", { status: 502 })),
       ),
     ),
   ),

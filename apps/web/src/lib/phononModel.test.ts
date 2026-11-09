@@ -1,46 +1,43 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  canSynthesizeLocally,
   modelAssetBase,
+  nativeSpeedFor,
   parseVoiceCatalog,
   phononVoiceFor,
+  resampleFactorFor,
   rewriteModelUrl,
-  serverVoiceFor,
   splitPauseDirective,
   voiceCatalogUrl,
 } from "./phononModel";
 
 describe("voice mapping", () => {
-  it("keeps an existing Kokoro voice on its Phonon counterpart", () => {
-    expect(phononVoiceFor("af_heart")).toBe("Delia");
-    expect(phononVoiceFor("bf_emma")).toBe("Maeve");
-  });
-
-  it("passes a Phonon voice through and defaults an empty one", () => {
+  it("passes a catalog voice through verbatim", () => {
     expect(phononVoiceFor("Trevor")).toBe("Trevor");
+    expect(phononVoiceFor("  Delia ")).toBe("Delia");
+  });
+
+  it("uses the default for an empty or legacy Kokoro name", () => {
     expect(phononVoiceFor("  ")).toBe("Delia");
-  });
-
-  it("maps back to the server voice the environment can synthesize", () => {
-    expect(serverVoiceFor("Delia")).toBe("af_heart");
-    expect(serverVoiceFor("Trevor")).toBe("am_adam");
-    expect(serverVoiceFor("Zoey")).toBe("af_bella");
-  });
-
-  it("leaves a name neither engine knows alone for the server to judge", () => {
-    expect(serverVoiceFor("am_onyx")).toBe("am_onyx");
+    expect(phononVoiceFor("af_heart")).toBe("Delia");
+    expect(phononVoiceFor("am_michael")).toBe("Delia");
   });
 });
 
-describe("canSynthesizeLocally", () => {
-  it("accepts the model's native range and rejects the ends", () => {
-    expect(canSynthesizeLocally(1)).toBe(true);
-    expect(canSynthesizeLocally(1.3)).toBe(true);
-    expect(canSynthesizeLocally(0.77)).toBe(true);
-    expect(canSynthesizeLocally(1.5)).toBe(false);
-    expect(canSynthesizeLocally(2)).toBe(false);
-    expect(canSynthesizeLocally(Number.NaN)).toBe(false);
+describe("speed", () => {
+  it("clamps the model's native range", () => {
+    expect(nativeSpeedFor(1)).toBe(1);
+    expect(nativeSpeedFor(1.5)).toBe(1.3);
+    expect(nativeSpeedFor(0.75)).toBe(0.77);
+    expect(nativeSpeedFor(Number.NaN)).toBe(1);
+  });
+
+  it("resamples only outside that range", () => {
+    expect(resampleFactorFor(0.8)).toBe(1);
+    expect(resampleFactorFor(1.3)).toBe(1);
+    expect(resampleFactorFor(2)).toBeCloseTo(2 / 1.3);
+    expect(resampleFactorFor(1.5)).toBeCloseTo(1.5 / 1.3);
+    expect(resampleFactorFor(0.75)).toBeCloseTo(0.75 / 0.77);
   });
 });
 

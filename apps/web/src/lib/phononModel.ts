@@ -1,53 +1,47 @@
 /**
  * The browser speech engine's vocabulary: which model, where its files come
- * from, and how a stored voice name reaches both engines. Pure; the engine
- * itself lives in `phononSpeech`.
+ * from, and the voice names it speaks. Pure; the engine itself lives in
+ * `phononSpeech`.
  */
 import type { ModelId } from "phonon-webgpu";
 
 export const PHONON_MODEL: ModelId = "phonon-31m-en";
 
-/** Speaking speeds the model makes natively; past them the server synthesizes. */
-export const PHONON_MIN_SPEED = 0.77;
-export const PHONON_MAX_SPEED = 1.3;
+/** Speaking speeds the model makes itself. Past them the PCM is resampled. */
+const PHONON_MIN_SPEED = 0.77;
+const PHONON_MAX_SPEED = 1.3;
 
 /** The voice `speak` uses when the stored name is unknown to the model. */
 export const PHONON_DEFAULT_VOICE = "Delia";
 
+/** Clamp a requested speed into what the model can synthesize itself. */
+export function nativeSpeedFor(speed: number): number {
+  if (!Number.isFinite(speed)) return 1;
+  return Math.min(PHONON_MAX_SPEED, Math.max(PHONON_MIN_SPEED, speed));
+}
+
 /**
- * The Kokoro voices this fork shipped before the browser engine, mapped to the
- * closest Phonon voice so an existing `tts.voice` keeps its character.
+ * How far to resample the model's PCM to reach `speed`. 1 inside the model's
+ * range; outside it the audio is shortened or lengthened, so pitch moves with
+ * the rate.
  */
-const KOKORO_TO_PHONON: Readonly<Record<string, string>> = {
-  af_heart: "Delia",
-  af_bella: "Zoey",
-  af_nicole: "Juniper",
-  am_michael: "Easton",
-  am_adam: "Trevor",
-  bf_emma: "Maeve",
-};
+export function resampleFactorFor(speed: number): number {
+  if (!Number.isFinite(speed) || speed <= 0) return 1;
+  return speed / nativeSpeedFor(speed);
+}
 
-const PHONON_TO_KOKORO: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.entries(KOKORO_TO_PHONON).map(([kokoro, phonon]) => [phonon, kokoro]),
-);
+/** The Kokoro voice ids the fork stored before Phonon; they are not migrated. */
+const LEGACY_KOKORO_VOICE = /^(?:af|am|bf|bm)_[a-z]+$/;
 
-/** Voice name for the in-browser engine. */
+/**
+ * Voice name for the engine. Only the model's own catalog is valid, so a
+ * stored Kokoro id falls back to the default instead of being guessed into a
+ * different character.
+ */
 export function phononVoiceFor(stored: string): string {
   const trimmed = stored.trim();
-  if (trimmed.length === 0) return PHONON_DEFAULT_VOICE;
-  return KOKORO_TO_PHONON[trimmed] ?? trimmed;
-}
-
-/** Voice name for the environment's Kokoro server, used above the engine's speeds. */
-export function serverVoiceFor(stored: string): string {
-  const trimmed = stored.trim();
-  if (trimmed.length === 0) return "af_heart";
-  return PHONON_TO_KOKORO[trimmed] ?? trimmed;
-}
-
-/** Whether this narration's speed is inside the model's native range. */
-export function canSynthesizeLocally(speed: number): boolean {
-  return Number.isFinite(speed) && speed >= PHONON_MIN_SPEED && speed <= PHONON_MAX_SPEED;
+  if (trimmed.length === 0 || LEGACY_KOKORO_VOICE.test(trimmed)) return PHONON_DEFAULT_VOICE;
+  return trimmed;
 }
 
 const MODEL_ASSET_PREFIX = "/v1/audio/model/";
@@ -86,9 +80,8 @@ export function parseVoiceCatalog(text: string): string[] {
 const TRAILING_PAUSE = /\[pause:([\d.]+)s\]\s*$/;
 
 /**
- * Split the player's silence directive off a unit. The server renders
- * `[pause:Ns]` itself; the browser engine has no such syntax, so the caller
- * appends the silence to the PCM instead.
+ * Split the player's silence directive off a unit. The engine has no such
+ * syntax, so the caller appends the silence to the PCM instead.
  */
 export function splitPauseDirective(text: string): { text: string; pauseSeconds: number } {
   const match = TRAILING_PAUSE.exec(text);
