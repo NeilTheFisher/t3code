@@ -3,27 +3,26 @@ import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell
 import * as ThreadUndo from "@t3tools/client-runtime/state/thread-undo";
 import { showThreadUndoNotice } from "./thread-undo-notice";
 import { canSnooze } from "@t3tools/client-runtime/state/thread-settled";
-import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
+import {
+  AuthOrchestrationOperateScope,
+  AuthSettingsWriteScope,
+  threadWorkspaceAssignmentKey,
+} from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Haptics from "expo-haptics";
-import { useRef } from "react";
+import { useCallback, useRef } from "react";
 
 import { withThreadDismissal } from "./thread-dismissal";
 import * as Dialog from "../../components/ui/Dialog";
 import { scopedThreadKey } from "../../lib/scopedEntities";
 import { refreshArchivedThreadsForEnvironment } from "../archive/useArchivedThreadSnapshots";
+import { planThreadWorkspaceAssignment } from "../../state/threadWorkspaces";
 import { pinOrderKeyBetween } from "@t3tools/client-runtime/state/thread-sort";
 import { appAtomRegistry } from "../../state/atom-registry";
-import { environmentServerConfigsAtom } from "../../state/server";
+import { environmentServerConfigsAtom, serverEnvironment } from "../../state/server";
 import { connectedEnvironmentIdsAtom } from "../../state/presentation";
 import { readEnvironmentScope } from "../../state/session";
-import { clearComposerDraft } from "../../state/use-composer-drafts";
-import {
-  environmentThreadShells,
-  steadyNavigationThreadShellsAtom,
-  steadyShellsHoldingAtom,
-  threadEnvironment,
-} from "../../state/threads";
+import { environmentThreadShells, threadEnvironment } from "../../state/threads";
 import { queuedThreadKeysAtom } from "../../state/use-thread-outbox";
 import { useAtomCommand } from "../../state/use-atom-command";
 import {
@@ -89,19 +88,6 @@ function checkThreadOperationPermission(thread: EnvironmentThreadShell, title: s
   return false;
 }
 
-/**
- * The live row of a thread that a list passes to an action. A list holds its rows while an
- * environment synchronizes (`steadyNavigationThreadShellsAtom`), so its row can be older than
- * the client's data: an undo plan or a guard read from it would use replaced state.
- */
-function liveThread(thread: EnvironmentThreadShell): EnvironmentThreadShell {
-  return (
-    appAtomRegistry
-      .get(environmentThreadShells.threadShellsAtom)
-      .find((row) => row.id === thread.id && row.environmentId === thread.environmentId) ?? thread
-  );
-}
-
 function useThreadActionExecutor(
   onCompleted?: (action: ThreadListAction, thread: EnvironmentThreadShell) => void,
 ) {
@@ -116,7 +102,6 @@ function useThreadActionExecutor(
     action: ThreadListAction,
     thread: EnvironmentThreadShell,
     onStarted?: () => void,
-    restoreUnsettledAt?: string | null,
   ) => {
     if (!checkThreadOperationPermission(thread, actionFailureTitle(action))) return false;
     const key = scopedThreadKey(thread.environmentId, thread.id);
@@ -147,6 +132,9 @@ function useThreadActionExecutor(
         return false;
       }
       if (action === "unsettle") ThreadUndo.invalidate("settle", key);
+      if (action === "archive" || action === "delete") {
+        for (const kind of ["settle", "snooze", "pin"]) ThreadUndo.invalidate(kind, key);
+      }
       onStarted?.();
       const result = await withThreadDismissal(
         key,
@@ -156,11 +144,7 @@ function useThreadActionExecutor(
               // suppressed until real activity clears the pin server-side.
               await unsettleMutation({
                 environmentId: thread.environmentId,
-                input: {
-                  threadId: thread.id,
-                  reason: "user",
-                  ...(restoreUnsettledAt === undefined ? {} : { restoreUnsettledAt }),
-                },
+                input: { threadId: thread.id, reason: "user" },
               })
             : await (
                 action === "settle"
@@ -180,13 +164,9 @@ function useThreadActionExecutor(
         Dialog.alert(actionFailureTitle(action), actionFailureMessage(action, result.cause));
         return false;
       }
-      if (action === "archive" || action === "delete") {
-        for (const kind of ["settle", "snooze", "pin"]) ThreadUndo.invalidate(kind, key);
-      }
       if (action === "archive" || action === "unarchive" || action === "delete") {
         refreshArchivedThreadsForEnvironment(thread.environmentId);
       }
-      if (action === "delete") clearComposerDraft(key);
       onCompleted?.(action, thread);
       return true;
     })();
@@ -235,6 +215,10 @@ export function useThreadListActions(): {
   ) => Promise<boolean>;
   readonly renameThread: (thread: EnvironmentThreadShell) => void;
   readonly regenerateThreadTitle: (thread: EnvironmentThreadShell) => Promise<boolean>;
+  readonly fileThreadInWorkspace: (
+    thread: EnvironmentThreadShell,
+    workspaceId: string | null,
+  ) => Promise<boolean>;
 } {
   const executeAction = useThreadActionExecutor();
   const snoozeMutation = useAtomCommand(threadEnvironment.snooze, { reportFailure: false });
@@ -247,7 +231,7 @@ export function useThreadListActions(): {
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
-  const regenerateTitle = useAtomCommand(threadEnvironment.regenerateTitle, {
+  const updateServerSettings = useAtomCommand(serverEnvironment.updateSettings, {
     reportFailure: false,
   });
   const snoozeInFlightThreadKeys = useRef(new Set<string>());
@@ -270,19 +254,11 @@ export function useThreadListActions(): {
             async (step) => {
               switch (step.action) {
                 case "unsettle":
-                  return unsettleThread(thread, step.restoreUnsettledAt);
+                  return unsettleThread(thread);
                 case "unsnooze":
                   return unsnoozeThread(thread);
                 case "pin":
                   return pinThread(thread, step.orderKey);
-                case "reorderActive": {
-                  const result = await reorderActiveMutation({
-                    environmentId: thread.environmentId,
-                    input: { threadId: thread.id, orderKey: step.orderKey },
-                  });
-                  if (result._tag === "Failure") throw Cause.squash(result.cause);
-                  return true;
-                }
                 case "snooze": {
                   const failureTitle =
                     action === "Unpinned" ? "Could not undo unpin" : "Could not undo settle";
@@ -426,10 +402,8 @@ export function useThreadListActions(): {
     snoozeInFlightThreadKeys.current.delete(key);
     return succeeded;
   };
-  const unsettleThread = async (
-    thread: EnvironmentThreadShell,
-    restoreUnsettledAt?: string | null,
-  ) => (await executeAction("unsettle", thread, undefined, restoreUnsettledAt)) === true;
+  const unsettleThread = async (thread: EnvironmentThreadShell) =>
+    (await executeAction("unsettle", thread)) === true;
   const pinThread = async (thread: EnvironmentThreadShell, restoreOrderKey?: string) => {
     if (!checkThreadOperationPermission(thread, "Could not pin thread")) return false;
     if (!environmentConfigLoaded(thread.environmentId)) {
@@ -549,9 +523,9 @@ export function useThreadListActions(): {
     titleRegenerationInFlightThreadKeys.current.add(key);
     selectionHaptic();
     const succeeded = await (async () => {
-      const result = await regenerateTitle({
+      const result = await updateThreadMetadata({
         environmentId: thread.environmentId,
-        input: { threadId: thread.id },
+        input: { threadId: thread.id, regenerateTitle: true },
       });
       if (result._tag === "Failure") {
         const error = Cause.squash(result.cause);
@@ -560,13 +534,6 @@ export function useThreadListActions(): {
           error instanceof Error && error.message.trim().length > 0
             ? error.message
             : "The thread title could not be regenerated.",
-        );
-        return false;
-      }
-      if (result.value?.status === "failed") {
-        Dialog.alert(
-          "Could not regenerate title",
-          result.value.message ?? "The thread title could not be regenerated.",
         );
         return false;
       }
@@ -617,10 +584,7 @@ export function useThreadListActions(): {
   const moveThread = async (thread: EnvironmentThreadShell, direction: ThreadMoveDestination) => {
     if (!checkThreadOperationPermission(thread, "Could not move thread")) return false;
     if (getPendingThreadOrder() !== null || appAtomRegistry.get(threadDropBusyAtom)) return false;
-    // The rows on screen can be older than the server's while they wait to show. A move
-    // planned from them could act on a pin or an order key that the server has replaced.
-    if (appAtomRegistry.get(steadyShellsHoldingAtom)) return false;
-    const shells = appAtomRegistry.get(steadyNavigationThreadShellsAtom);
+    const shells = appAtomRegistry.get(environmentThreadShells.navigationThreadShellsAtom);
     const current = shells.find(
       (row) => row.id === thread.id && row.environmentId === thread.environmentId,
     );
@@ -756,20 +720,57 @@ export function useThreadListActions(): {
   const confirmDeleteThread = (thread: EnvironmentThreadShell) =>
     confirmThreadDeletion(executeAction, thread);
 
-  // `moveThread` looks up its own row, and refuses while a list holds older rows.
+  const fileThreadInWorkspace = useCallback(
+    async (thread: EnvironmentThreadShell, workspaceId: string | null) => {
+      if (!readEnvironmentScope(thread.environmentId, AuthSettingsWriteScope)) {
+        Dialog.alert("Could not move thread", "This connection cannot change workspace settings.");
+        return false;
+      }
+      const settings = appAtomRegistry.get(
+        serverEnvironment.settingsValueAtom(thread.environmentId),
+      );
+      if (settings === null || settings === undefined) {
+        Dialog.alert("Could not move thread", "This environment's settings are not loaded.");
+        return false;
+      }
+      const patch = planThreadWorkspaceAssignment({
+        settings,
+        threadKey: threadWorkspaceAssignmentKey(thread.environmentId, thread.id),
+        workspaceId,
+      });
+      if (patch === null) {
+        Dialog.alert("Could not move thread", "That workspace no longer exists.");
+        return false;
+      }
+      selectionHaptic();
+      const result = await updateServerSettings({
+        environmentId: thread.environmentId,
+        input: { patch },
+      });
+      if (result._tag === "Failure") {
+        const error = Cause.squash(result.cause);
+        Dialog.alert("Could not move thread", error instanceof Error ? error.message : "Try again.");
+        return false;
+      }
+      return true;
+    },
+    [updateServerSettings],
+  );
+
   return {
-    archiveThread: (thread) => archiveThread(liveThread(thread)),
-    confirmDeleteThread: (thread) => confirmDeleteThread(liveThread(thread)),
-    settleThread: (thread) => settleThread(liveThread(thread)),
-    snoozeThread: (thread, snoozedUntil) => snoozeThread(liveThread(thread), snoozedUntil),
-    unsnoozeThread: (thread) => unsnoozeThread(liveThread(thread)),
-    unsettleThread: (thread) => unsettleThread(liveThread(thread)),
-    pinThread: (thread) => pinThread(liveThread(thread)),
-    unpinThread: (thread) => unpinThread(liveThread(thread)),
-    setThreadAutoSettle: (thread, enabled) => setThreadAutoSettle(liveThread(thread), enabled),
+    archiveThread,
+    confirmDeleteThread,
+    settleThread,
+    snoozeThread,
+    unsnoozeThread,
+    unsettleThread,
+    pinThread,
+    unpinThread,
+    setThreadAutoSettle,
     moveThread,
-    renameThread: (thread) => renameThread(liveThread(thread)),
-    regenerateThreadTitle: (thread) => regenerateThreadTitle(liveThread(thread)),
+    renameThread,
+    regenerateThreadTitle,
+    fileThreadInWorkspace,
   };
 }
 

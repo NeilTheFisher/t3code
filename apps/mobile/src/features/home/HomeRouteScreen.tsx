@@ -2,15 +2,20 @@ import { uuidv4 } from "../../lib/uuid";
 import { ThreadUndoNotice } from "./ThreadUndoNotice";
 import { use } from "react";
 import { NativePrimaryColumnContext } from "../../native/v5-workspace-context";
+import * as Arr from "effect/Array";
+import * as Order from "effect/Order";
 import { useNavigation } from "@react-navigation/native";
 import { useMemo, useState } from "react";
 import { Platform } from "react-native";
 
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
-import { pickableProjectGroups } from "@t3tools/client-runtime/state/project-grouping";
+import {
+  pickableProjectGroups,
+  resolveScratchProjectScopeKey,
+} from "@t3tools/client-runtime/state/project-grouping";
 
 import { useProjects } from "../../state/entities";
-import { steadyNavigationThreadShellsAtom } from "../../state/threads";
+import { environmentThreadShells } from "../../state/threads";
 import { useLaunchingThreads, usePendingNewTasks } from "../../state/use-pending-new-tasks";
 import { useWorkspaceState } from "../../state/workspace";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
@@ -21,16 +26,9 @@ import {
 import { AndroidHomeFabLayout } from "./AndroidHomeFab";
 import { HomeScreen } from "./HomeScreen";
 import { useHomeListOptions } from "./home-list-options";
-import {
-  runWhenHomeCovered,
-  useAtomValueWhileVisible,
-  useHomeRouteVisible,
-} from "./home-route-visibility";
-  buildHomeProjectScopes,
-  resolveHomeProjectFilterScope,
-  sortHomeProjectScopes,
-} from "./homeThreadList";
+import { UNSORTED_WORKSPACE_FILTER } from "./home-list-filter-menu";
 import { useHomeWorkspaces } from "./useHomeWorkspaces";
+import { HomeWorkspaceRoot } from "./HomeWorkspaceContext";
 import { threadWorkspaceIdForThread } from "../../state/threadWorkspaces";
 import { useAtomValueWhileVisible, useHomeRouteVisible } from "./home-route-visibility";
 import { buildHomeProjectScopes } from "./homeThreadList";
@@ -42,7 +40,7 @@ import { useSelectWorkspaceTab } from "../layout/workspace/useSelectWorkspaceTab
 import { useSelectWorkspaceDetail } from "../layout/workspace/useSelectWorkspaceDetail";
 import { WorkspaceListEmptyDetail } from "../layout/workspace/WorkspaceListEmptyDetail";
 import { WorkspaceListHeader } from "../layout/workspace/WorkspaceListHeader";
-import { buildHomeListFilterMenuItems, homeListFilterEnvironments } from "./home-list-filter-menu";
+import { buildHomeListFilterMenuItems } from "./home-list-filter-menu";
 
 export function HomeRouteScreen() {
   const nativePrimaryColumn = use(NativePrimaryColumnContext);
@@ -53,7 +51,7 @@ export function HomeRouteScreen() {
   // Stop rebuilding the streaming thread list while Thread covers Home.
   const visible = useHomeRouteVisible();
   const threads = useLaunchingThreads(
-    useAtomValueWhileVisible(steadyNavigationThreadShellsAtom, visible),
+    useAtomValueWhileVisible(environmentThreadShells.navigationThreadShellsAtom, visible),
   );
   const { environments: workspaceEnvironments, state: catalogState } = useWorkspaceState();
   const { savedConnectionsById } = useSavedRemoteConnections();
@@ -70,16 +68,13 @@ export function HomeRouteScreen() {
     else if (workspace) workspace.dispatch({ type: "query", query, tab: "threads" });
     else setLocalSearchQuery(query);
   };
-  // Split layouts keep the query; only the stacked layout opens the thread over the list.
-  // Android's search field keeps its own open state, which a cleared query would leave open.
-  const clearsSearchOnOpen = Platform.OS !== "android" && !layout.usesSplitView;
-  const selectThreadRoute = (params: ReactNavigation.RootParamList["Thread"]) => {
-    if (searchQuery !== "" && clearsSearchOnOpen && workspace)
-      runWhenHomeCovered(() => workspace.cancelSearch("threads"));
-    selectDetail({ name: "Thread", params });
-  };
   const handleSelectThread = (thread: EnvironmentThreadShell) =>
-    selectThreadRoute({ environmentId: String(thread.environmentId), threadId: String(thread.id) });
+    selectDetail({
+      name: "Thread",
+      params: { environmentId: String(thread.environmentId), threadId: String(thread.id) },
+    });
+  const selectThreadRoute = (params: ReactNavigation.RootParamList["Thread"]) =>
+    selectDetail({ name: "Thread", params });
   const handleNewThreadOnBranch = (thread: EnvironmentThreadShell) => {
     selectThreadRoute({
       draft: {
@@ -94,6 +89,7 @@ export function HomeRouteScreen() {
 
   const {
     archiveThread,
+    fileThreadInWorkspace,
     confirmDeleteThread,
     settleThread,
     snoozeThread,
@@ -109,14 +105,31 @@ export function HomeRouteScreen() {
   const pendingTasks = usePendingNewTasks();
   const { openPendingTask, confirmDeletePendingTask } =
     usePendingTaskListActions(selectThreadRoute);
-  const environments = homeListFilterEnvironments(workspaceEnvironments);
+  const connectionStateByEnvironmentId = new Map(
+    workspaceEnvironments.map(
+      (environment) => [environment.environmentId, environment.connectionState] as const,
+    ),
+  );
+  const environments = Arr.sort(
+    Object.values(savedConnectionsById).map((connection) => ({
+      environmentId: connection.environmentId,
+      label: connection.environmentLabel,
+      connectionState: connectionStateByEnvironmentId.get(connection.environmentId) ?? "available",
+    })),
+    Order.mapInput(Order.String, (environment: { readonly label: string }) => environment.label),
+  );
   const availableEnvironmentIds = useMemo(
     () => new Set(environments.map((environment) => environment.environmentId)),
     [environments],
   );
   const { workspaces, byEnvironment: workspaceSettingsByEnvironment } = useHomeWorkspaces();
   const availableWorkspaceIds = useMemo(
-    () => new Set(workspaces.map((workspace) => workspace.id)),
+    () =>
+      new Set(
+        workspaces.length > 0
+          ? [...workspaces.map((workspace) => workspace.id), UNSORTED_WORKSPACE_FILTER]
+          : [],
+      ),
     [workspaces],
   );
   const {
@@ -132,39 +145,43 @@ export function HomeRouteScreen() {
     if (selectedWorkspaceId === null) return null;
     return (thread: EnvironmentThreadShell) => {
       const settings = workspaceSettingsByEnvironment.get(thread.environmentId);
-      return (
-        settings !== undefined &&
-        (threadWorkspaceIdForThread(thread, settings) ?? null) === selectedWorkspaceId
-      );
+      const assigned =
+        settings === undefined ? null : threadWorkspaceIdForThread(thread, settings);
+      return selectedWorkspaceId === UNSORTED_WORKSPACE_FILTER
+        ? assigned === null
+        : assigned === selectedWorkspaceId;
     };
   }, [selectedWorkspaceId, workspaceSettingsByEnvironment]);
   const selectedEnvironmentId = listOptions.selectedEnvironmentId;
-  const projectScopes = useMemo(
-    () =>
-      buildHomeProjectScopes({
-        projects,
-        environmentId: selectedEnvironmentId,
-        projectGroupingMode: listOptions.projectGroupingMode,
-      }),
-    [listOptions.projectGroupingMode, projects, selectedEnvironmentId],
+  // A legacy per-environment scratch key resolves here on every render; the stored
+  // value is only rewritten when the user picks a filter.
+  const resolvedProjectKey = resolveScratchProjectScopeKey(
+    listOptions.selectedProjectKey,
+    projects,
+    {
+      sidebarProjectGroupingMode: listOptions.projectGroupingMode,
+      sidebarProjectGroupingOverrides: {},
+    },
   );
   const projectFilterOptions = useMemo(
     () =>
       pickableProjectGroups(
-        sortHomeProjectScopes({
-          scopes: projectScopes,
-          threads,
-          pendingTasks: [],
-          projectSortOrder: "updated_at",
+        buildHomeProjectScopes({
+          projects,
+          environmentId: selectedEnvironmentId,
+          projectGroupingMode: listOptions.projectGroupingMode,
         }),
       ).map((scope) => ({
         key: scope.key,
         label: scope.title,
       })),
-    [projectScopes, threads],
+    [listOptions.projectGroupingMode, projects, selectedEnvironmentId],
   );
-  const selectedProjectKey =
-    resolveHomeProjectFilterScope(projectScopes, projects, listOptions)?.key ?? null;
+  const selectedProjectKey = projectFilterOptions.some(
+    (project) => project.key === resolvedProjectKey,
+  )
+    ? resolvedProjectKey
+    : null;
 
   if (layout.usesSplitView && !nativePrimaryColumn) {
     return (
@@ -207,6 +224,7 @@ export function HomeRouteScreen() {
           }}
         />
 
+        <HomeWorkspaceRoot onFileThreadInWorkspace={fileThreadInWorkspace}>
         <HomeScreen
           catalogState={catalogState}
           environments={environments}
@@ -255,8 +273,8 @@ export function HomeRouteScreen() {
           selectedEnvironmentId={selectedEnvironmentId}
           selectedProjectKey={selectedProjectKey}
           threads={threads}
-          visible={visible}
         />
+        </HomeWorkspaceRoot>
         <ThreadUndoNotice visible={visible} />
       </>
     </AndroidHomeFabLayout>
