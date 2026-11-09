@@ -42,6 +42,8 @@ export interface ServerDerivedPaths {
   readonly settingsPath: string;
   readonly environmentThemesDir: string;
   readonly providerStatusCacheDir: string;
+  /** Model files the browser speech engine fetches through this environment. */
+  readonly ttsAssetCacheDir: string;
   readonly worktreesDir: string;
   readonly worktreeCheckoutCacheDir: string;
   readonly attachmentsDir: string;
@@ -160,6 +162,7 @@ export const deriveServerPaths = Effect.fn(function* (
     settingsPath: join(stateDir, "settings.json"),
     environmentThemesDir: join(stateDir, "themes"),
     providerStatusCacheDir,
+    ttsAssetCacheDir: join(providerStatusCacheDir, "tts-assets"),
     worktreesDir: join(baseDir, "worktrees"),
     worktreeCheckoutCacheDir: join(providerStatusCacheDir, "worktree-checkouts"),
     attachmentsDir,
