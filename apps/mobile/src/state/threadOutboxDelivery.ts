@@ -60,6 +60,7 @@ import {
 import { environmentProjects } from "./projects";
 import { environmentServerConfigsAtom, serverEnvironment } from "./server";
 import { uploadComposerAttachmentShared } from "./composer-attachment-uploads";
+import { fileThreadInProjectDefaultWorkspace } from "./threadWorkspaces";
 import { gitEnvironment } from "./git";
 import { environmentSession, readEnvironmentScope, sessionHasScope } from "./session";
 import {
@@ -1222,6 +1223,11 @@ export function createThreadOutboxDelivery(): {
       return yield* restoreQueuedMessage(persistedMessage, failure.message);
     }
     recordPendingThreadCreationOutcome({ kind: "delivered", message: persistedMessage });
+    fileThreadInProjectDefaultWorkspace({
+      environmentId: queuedMessage.environmentId,
+      projectId: creation.projectId,
+      threadId: queuedMessage.threadId,
+    });
     const outcome = yield* completeQueuedMessageDelivery(
       persistedMessage,
       deliveryRevision,
