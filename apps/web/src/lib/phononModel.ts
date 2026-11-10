@@ -1,7 +1,7 @@
 /**
- * The browser speech engine's vocabulary: which model, where its files come
- * from, and the voice names it speaks. Pure; the engine itself lives in
- * `phononSpeech`.
+ * The browser speech engine's vocabulary: which model it loads, how fast it
+ * speaks, and how its text is shaped. Pure; the engine itself lives in
+ * `phononSpeech`, and the pinned voice catalog is shared with mobile.
  */
 import type { ModelId } from "phonon-webgpu";
 
@@ -10,9 +10,6 @@ export const PHONON_MODEL: ModelId = "phonon-31m-en";
 /** Speaking speeds the model makes itself. Past them the PCM is resampled. */
 const PHONON_MIN_SPEED = 0.77;
 const PHONON_MAX_SPEED = 1.3;
-
-/** The voice `speak` uses when the stored name is unknown to the model. */
-export const PHONON_DEFAULT_VOICE = "Delia";
 
 /** Clamp a requested speed into what the model can synthesize itself. */
 export function nativeSpeedFor(speed: number): number {
@@ -28,53 +25,6 @@ export function nativeSpeedFor(speed: number): number {
 export function resampleFactorFor(speed: number): number {
   if (!Number.isFinite(speed) || speed <= 0) return 1;
   return speed / nativeSpeedFor(speed);
-}
-
-/** The Kokoro voice ids the fork stored before Phonon; they are not migrated. */
-const LEGACY_KOKORO_VOICE = /^(?:af|am|bf|bm)_[a-z]+$/;
-
-/**
- * Voice name for the engine. Only the model's own catalog is valid, so a
- * stored Kokoro id falls back to the default instead of being guessed into a
- * different character.
- */
-export function phononVoiceFor(stored: string): string {
-  const trimmed = stored.trim();
-  if (trimmed.length === 0 || LEGACY_KOKORO_VOICE.test(trimmed)) return PHONON_DEFAULT_VOICE;
-  return trimmed;
-}
-
-const MODEL_ASSET_PREFIX = "/v1/audio/model/";
-
-/** Root the client fetches model files from: this environment's own proxy. */
-export function modelAssetBase(serverUrl: string): string {
-  return `${serverUrl.replace(/\/+$/, "")}${MODEL_ASSET_PREFIX}`;
-}
-
-/** The pinned voice catalog, shaped exactly like the upstream path it replaces. */
-const VOICE_CATALOG_PATH =
-  "gradium/phonon-voices/resolve/0ee17205f254b5abc43b266c8a0f215565c352f7/voices.jsonl";
-
-export function voiceCatalogUrl(serverUrl: string): string {
-  return `${modelAssetBase(serverUrl)}${VOICE_CATALOG_PATH}`;
-}
-
-/** Voice names the catalog reports for English, in catalog order. */
-export function parseVoiceCatalog(text: string): string[] {
-  const names: string[] = [];
-  for (const line of text.split("\n")) {
-    if (line.trim().length === 0) continue;
-    try {
-      const voice: unknown = JSON.parse(line);
-      if (typeof voice !== "object" || voice === null) continue;
-      const { name, language } = voice as { name?: unknown; language?: unknown };
-      if (language !== "en" || typeof name !== "string" || name.length === 0) continue;
-      if (!names.includes(name)) names.push(name);
-    } catch {
-      // A truncated line is the server's problem, not a reason to lose the list.
-    }
-  }
-  return names;
 }
 
 const TRAILING_PAUSE = /\[pause:([\d.]+)s\]\s*$/;
