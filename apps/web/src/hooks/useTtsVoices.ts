@@ -5,8 +5,12 @@
  */
 import { useEffect, useState } from "react";
 
-import { parseVoiceCatalog, voiceCatalogUrl } from "@t3tools/client-runtime/phonon-voices";
-import { resolveTtsEnvironmentBase } from "~/lib/ttsEnvironmentBase";
+import {
+  parseVoiceCatalog,
+  PHONON_FALLBACK_VOICES,
+  voiceCatalogUrl,
+} from "@t3tools/client-runtime/phonon-voices";
+import { useEnvironmentHttpBaseUrl, usePrimaryEnvironmentId } from "~/state/environments";
 
 async function fetchLocalVoices(base: string): Promise<string[]> {
   try {
@@ -19,20 +23,23 @@ async function fetchLocalVoices(base: string): Promise<string[]> {
 }
 
 export function useTtsVoices(): string[] {
-  const [voices, setVoices] = useState<string[]>([]);
+  // Seed with the catalog's own names so the picker exists from the first paint and
+  // never disappears when the environment, or its catalog, is not reachable yet.
+  const [voices, setVoices] = useState<string[]>([...PHONON_FALLBACK_VOICES]);
+  const base = useEnvironmentHttpBaseUrl(usePrimaryEnvironmentId());
 
+  // Refetch when the connection appears: on desktop the sidecar URL arrives after mount.
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- The voice list is fetched over HTTP from the engine's catalog.
   useEffect(() => {
-    const base = resolveTtsEnvironmentBase(null);
     let cancelled = false;
     void (async () => {
-      const names = await fetchLocalVoices(base);
-      if (!cancelled) setVoices(names);
+      const names = await fetchLocalVoices(base ?? "");
+      if (!cancelled && names.length > 0) setVoices(names);
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [base]);
 
   return voices;
 }
