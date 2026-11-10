@@ -620,7 +620,7 @@ export const ClientSettingsSchema = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_THREAD_PREVIEW_COUNT)),
   ),
   sidebarThreadWorkspacesEnabled: Schema.Boolean.pipe(
-    Schema.withDecodingDefault(Effect.succeed(false)),
+    Schema.withDecodingDefault(Effect.succeed(true)),
   ),
   sidebarThreadWorkspaces: Schema.Array(SidebarThreadWorkspace).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
@@ -1601,7 +1601,7 @@ export const ServerSettings = Schema.Struct({
    * preference: which one you are looking at belongs to the screen.
    */
   sidebarThreadWorkspacesEnabled: Schema.Boolean.pipe(
-    Schema.withDecodingDefault(Effect.succeed(false)),
+    Schema.withDecodingDefault(Effect.succeed(true)),
   ),
   sidebarThreadWorkspaces: Schema.Array(SidebarThreadWorkspace).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
