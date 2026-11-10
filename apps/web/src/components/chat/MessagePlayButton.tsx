@@ -13,6 +13,7 @@ import { useAudioPlayerStore } from "~/audioPlayerStore";
 import { useTtsPlayer } from "~/hooks/useTtsPlayer";
 import { clearSpokenQueue } from "~/spokenPlaybackQueue";
 import { stackedThreadToast, toastManager, type ToastId } from "../ui/toast";
+import { READ_FROM_HERE_HINT } from "./TtsParagraphHighlight";
 
 export const MessagePlayButton = memo(function MessagePlayButton({
   messageId,
@@ -127,6 +128,7 @@ export const MessagePlayButton = memo(function MessagePlayButton({
       </TooltipTrigger>
       <TooltipPopup>
         <p>{label}</p>
+        {isActive ? null : <p className="text-muted-foreground">{READ_FROM_HERE_HINT}</p>}
       </TooltipPopup>
     </Tooltip>
   );

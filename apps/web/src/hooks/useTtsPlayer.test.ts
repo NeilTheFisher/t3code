@@ -11,6 +11,8 @@ const synth = vi.hoisted(() => ({
   clock: 0,
   pending: [] as Pending[],
   frames: [] as Array<() => void>,
+  /** Text of every synthesis request, in order. */
+  requests: [] as string[],
 }));
 
 vi.mock(import("~/lib/phononSpeech"), () => ({
@@ -18,6 +20,7 @@ vi.mock(import("~/lib/phononSpeech"), () => ({
   localSpeechAvailable: () => true,
   // One 4s chunk per spoken unit, so paragraph boundaries are easy to reason about.
   streamPhononChunks: async (request: { text: string; onChunk: (chunk: ArrayBuffer) => void }) => {
+    synth.requests.push(request.text);
     await new Promise<void>((resolve) => {
       synth.pending.push({ at: synth.clock, run: resolve });
     });
@@ -80,8 +83,14 @@ vi.stubGlobal("requestAnimationFrame", (callback: () => void) => {
 vi.stubGlobal("cancelAnimationFrame", () => {});
 
 const { useAudioPlayerStore } = await import("~/audioPlayerStore");
-const { startPlayback, skipPlayback, togglePausePlayback, __resetTtsPlayerForTests } =
-  await import("~/hooks/useTtsPlayer");
+const {
+  completePlaybackText,
+  startPlayback,
+  skipPlayback,
+  syncPlaybackText,
+  togglePausePlayback,
+  __resetTtsPlayerForTests,
+} = await import("~/hooks/useTtsPlayer");
 
 async function flush() {
   for (let i = 0; i < 30; i++) await Promise.resolve();
@@ -103,13 +112,26 @@ async function step(seconds: number) {
 
 const paragraphNow = () => useAudioPlayerStore.getState().activeParagraph;
 const headNow = () => useAudioPlayerStore.getState().currentTime;
+const statusNow = () => useAudioPlayerStore.getState().status;
+
+/** Fresh singleton and synth clock for one test. */
+function beginTest() {
+  synth.clock = 0;
+  synth.pending = [];
+  synth.frames = [];
+  synth.requests.length = 0;
+  onTestFinished(() => {
+    __resetTtsPlayerForTests();
+    useAudioPlayerStore.getState().setIdle();
+    synth.pending = [];
+    synth.frames = [];
+    synth.requests.length = 0;
+  });
+}
 
 describe("useTtsPlayer paragraph highlight", () => {
   it("follows the audible paragraph across skip, pause and resume", async () => {
-    onTestFinished(() => {
-      __resetTtsPlayerForTests();
-      useAudioPlayerStore.getState().setIdle();
-    });
+    beginTest();
     const text = ["One.", "Two.", "Three.", "Four."].join("\n\n");
     void startPlayback("msg-1" as never, text, null, { voice: "Delia" }).catch(() => {});
 
@@ -134,5 +156,81 @@ describe("useTtsPlayer paragraph highlight", () => {
     togglePausePlayback();
     await step(4.5);
     expect(paragraphNow()).toBe(2);
+  });
+});
+
+describe("useTtsPlayer narration start", () => {
+  it("begins at the clicked paragraph and speaks the rest", async () => {
+    beginTest();
+    const text = ["One.", "Two.", "Three."].join("\n\n");
+    void startPlayback("msg-start" as never, text, null, {
+      voice: "Delia",
+      startParagraph: 2,
+    }).catch(() => {});
+
+    await step(0.05);
+    expect(synth.requests).toEqual(["Three."]);
+    // The highlight sits on the clicked paragraph before its audio arrives.
+    expect(paragraphNow()).toBe(2);
+
+    await step(4.5);
+    expect(headNow()).toBeCloseTo(4, 1);
+    expect(statusNow()).toBe("idle");
+  });
+
+  it("appends paragraphs that arrive while a live narration plays", async () => {
+    beginTest();
+    const id = "msg-live" as never;
+    // "Two" is still being written, so only the finished sentence is spoken.
+    void startPlayback(id, "One.\n\nTwo", null, { voice: "Delia", live: true }).catch(() => {});
+    await step(0.05);
+    expect(synth.requests).toEqual(["One. [pause:0.6s]"]);
+
+    // Out of audio, but the message is not over: the player keeps playing.
+    await step(4.5);
+    expect(statusNow()).toBe("playing");
+
+    syncPlaybackText(id, "One.\n\nTwo.\n\nThree");
+    await step(0.05);
+    expect(synth.requests).toEqual(["One. [pause:0.6s]", "Two. [pause:0.6s]"]);
+
+    completePlaybackText(id);
+    await step(0.05);
+    expect(synth.requests).toEqual(["One. [pause:0.6s]", "Two. [pause:0.6s]", "Three"]);
+
+    // After the last sentence plays out, the session settles.
+    await step(12);
+    expect(statusNow()).toBe("idle");
+  });
+
+  it("speaks the clicked paragraph even while it is still being written", async () => {
+    beginTest();
+    const id = "msg-live-tail" as never;
+    void startPlayback(id, "One.\n\nTwo", null, {
+      voice: "Delia",
+      live: true,
+      startParagraph: 1,
+    }).catch(() => {});
+
+    await step(0.05);
+    expect(synth.requests).toEqual(["Two"]);
+    expect(paragraphNow()).toBe(1);
+  });
+
+  it("settles a live narration when the message stops sending text", async () => {
+    beginTest();
+    const id = "msg-stall" as never;
+    void startPlayback(id, "One.", null, { voice: "Delia", live: true }).catch(() => {});
+    await step(0.05);
+    expect(synth.requests).toEqual(["One."]);
+
+    await step(4.5);
+    expect(statusNow()).toBe("playing");
+
+    // Nothing arrives: the session gives up waiting rather than holding a
+    // silent player open forever.
+    await step(16);
+    await step(0.05);
+    expect(statusNow()).toBe("idle");
   });
 });
