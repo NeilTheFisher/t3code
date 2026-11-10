@@ -257,6 +257,8 @@ interface MessagesTimelineProps {
   runningRunId?: RunId | null;
   turnDiffSummaries: ReadonlyArray<TurnDiffSummary>;
   routeThreadKey: string;
+  /** Title of the thread being viewed, for the global player's label. */
+  threadTitle?: string | undefined;
   displayThreadKey?: string;
   /** Off where another region already speaks the thread's status, like a subagent's bar. */
   announceTurnStatus?: boolean;
@@ -371,6 +373,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   runningRunId = null,
   turnDiffSummaries,
   routeThreadKey,
+  threadTitle,
   displayThreadKey,
   announceTurnStatus = true,
   onOpenToolDiff,
@@ -1087,6 +1090,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     timestampFormat,
     routeThreadKey,
     threadRef: citationThreadRef,
+    threadTitle,
     markdownCwd,
     resolvedTheme,
     ttsEnabled: ttsEnabled === true,

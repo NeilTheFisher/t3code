@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  findActiveBlockIndex,
   findParagraphIndexForBlock,
+  mapParagraphsToBlocks,
   normalizeWords,
 } from "./ttsParagraphMatching";
+
+/** The block index a single cue resolves to. */
+function blockFor(blocks: readonly string[], cue: string): number {
+  return mapParagraphsToBlocks(blocks, [cue])[0]!;
+}
 
 describe("normalizeWords", () => {
   it("lowercases and strips punctuation", () => {
@@ -21,44 +26,44 @@ describe("normalizeWords", () => {
   });
 });
 
-describe("findActiveBlockIndex", () => {
+describe("mapParagraphsToBlocks", () => {
   it("matches a plain paragraph despite case and punctuation differences", () => {
     const blocks = ["Hello, world! This is a test."];
-    expect(findActiveBlockIndex(blocks, "hello world this is a")).toBe(0);
+    expect(blockFor(blocks, "hello world this is a")).toBe(0);
   });
 
   it("matches a list block even though the cue carries no newlines", () => {
     const blocks = ["First item of the list\nSecond item"];
-    expect(findActiveBlockIndex(blocks, "first item of the list")).toBe(0);
+    expect(blockFor(blocks, "first item of the list")).toBe(0);
   });
 
   it("locates a heading when the spoken paragraph merges it with the body", () => {
     const blocks = ["Release notes", "We shipped a bunch of fixes today."];
-    expect(findActiveBlockIndex(blocks, "release notes we shipped")).toBe(0);
+    expect(blockFor(blocks, "release notes we shipped")).toBe(0);
   });
 
   it("locates a later list item that became its own spoken paragraph", () => {
     const blocks = ["First item", "Second item", "Third item"];
-    expect(findActiveBlockIndex(blocks, "second item")).toBe(1);
+    expect(blockFor(blocks, "second item")).toBe(1);
   });
 
   it("prefers the block matching the most opening words", () => {
     const blocks = ["The cat sat", "The cat sat on the mat"];
-    expect(findActiveBlockIndex(blocks, "the cat sat on the mat")).toBe(1);
+    expect(blockFor(blocks, "the cat sat on the mat")).toBe(1);
   });
 
   it("returns -1 when no block shares the cue's opening words", () => {
     const blocks = ["Completely different text", "Another unrelated block"];
-    expect(findActiveBlockIndex(blocks, "nothing here matches")).toBe(-1);
+    expect(blockFor(blocks, "nothing here matches")).toBe(-1);
   });
 
   it("returns -1 for an empty cue", () => {
-    expect(findActiveBlockIndex(["some block"], "   ")).toBe(-1);
+    expect(blockFor(["some block"], "   ")).toBe(-1);
   });
 
   it("matches a cue that starts mid-block (a later sentence)", () => {
     const blocks = ["Intro sentence. The cat sat on the mat."];
-    expect(findActiveBlockIndex(blocks, "the cat sat on the mat")).toBe(0);
+    expect(blockFor(blocks, "the cat sat on the mat")).toBe(0);
   });
 
   it("matches a list item whose inline code renders as a file chip without its path", () => {
@@ -69,7 +74,7 @@ describe("findActiveBlockIndex", () => {
       "useTtsPlayer.ts\n— one line to resolve that origin",
     ];
     expect(
-      findActiveBlockIndex(
+      blockFor(
         blocks,
         "apps/web/src/lib/ttsServerUrl.ts (new, 17 lines) — empty tts.serverUrl resolves",
       ),
@@ -77,7 +82,21 @@ describe("findActiveBlockIndex", () => {
   });
 
   it("does not claim a block on one shared word after a shifted cue", () => {
-    expect(findActiveBlockIndex(["An unrelated ts mention"], "apps/web/src/lib/file.ts")).toBe(-1);
+    expect(blockFor(["An unrelated ts mention"], "apps/web/src/lib/file.ts")).toBe(-1);
+  });
+
+  it("advances past a block that opens with the same words as the previous one", () => {
+    const blocks = ["Updated the parser.", "Updated the parser and the renderer."];
+    expect(
+      mapParagraphsToBlocks(blocks, ["updated the parser", "updated the parser and the renderer"]),
+    ).toEqual([0, 1]);
+  });
+
+  it("never maps a later paragraph back to an earlier block", () => {
+    const blocks = ["Run the tests.", "Then run the tests again."];
+    expect(mapParagraphsToBlocks(blocks, ["run the tests", "then run the tests again"])).toEqual([
+      0, 1,
+    ]);
   });
 });
 
@@ -92,10 +111,10 @@ describe("findParagraphIndexForBlock", () => {
     expect(findParagraphIndexForBlock(cues, "The cat sat on the mat.")).toBe(1);
   });
 
-  it("is the inverse of findActiveBlockIndex for a cue/block pair", () => {
+  it("is the inverse of mapParagraphsToBlocks for a cue/block pair", () => {
     const blocks = ["Release notes", "We shipped a bunch of fixes today."];
     const cues = ["we shipped a bunch of fixes"];
-    const blockIndex = findActiveBlockIndex(blocks, cues[0]!);
+    const blockIndex = mapParagraphsToBlocks(blocks, cues)[0]!;
     expect(blockIndex).toBe(1);
     expect(findParagraphIndexForBlock(cues, blocks[blockIndex]!)).toBe(0);
   });
