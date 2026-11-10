@@ -48,10 +48,7 @@ import {
 } from "./Drivers/ClaudeHome.ts";
 import { discoverClaudeSkills, readClaudeSettingsEnv } from "./Drivers/ClaudeSkills.ts";
 import type { ProviderWorkspaceSnapshot } from "@t3tools/provider-core/server/driver";
-import {
-  makeUnavailableUsageLimits,
-  parseClaudeUsageLimitsJson,
-} from "@t3tools/provider-core/server/usageLimits";
+import { makeUnavailableUsageLimits } from "@t3tools/provider-core/server/usageLimits";
 import {
   type ClaudeScopedLimitNames,
   claudeUsageResponseToLimits,
@@ -518,55 +515,6 @@ export const probeClaudeWorkspaceSnapshot = Effect.fn("probeClaudeWorkspaceSnaps
     ]),
     slashCommandsPending: cwdExists && !capabilities,
   };
-});
-
-const USAGE_PROBE_TIMEOUT_MS = 4_000;
-
-/**
- * Fallback Claude usage probe. Runs `claude --print /usage` and parses the
- * human output when the SDK's `get_usage` read cannot answer (older CLIs,
- * SDK transport failures).
- */
-export const probeClaudeUsageLimits = Effect.fn("probeClaudeUsageLimits")(function* (
-  claudeSettings: ClaudeSettings,
-  environment?: NodeJS.ProcessEnv,
-  cwd?: string,
-): Effect.fn.Return<
-  ServerProviderUsageLimits | undefined,
-  never,
-  ChildProcessSpawner.ChildProcessSpawner | Path.Path
-> {
-  const checkedAt = DateTime.formatIso(yield* DateTime.now);
-  return yield* runClaudeCommand(
-    claudeSettings,
-    [
-      "--print",
-      "/usage",
-      "--output-format",
-      "json",
-      "--permission-mode",
-      "plan",
-      "--strict-mcp-config",
-      "--mcp-config",
-      '{"mcpServers":{}}',
-    ],
-    {
-      ...(environment ?? process.env),
-      ENABLE_CLAUDEAI_MCP_SERVERS: "false",
-    },
-    { closeStdin: true, ...(cwd ? { cwd } : {}) },
-  ).pipe(
-    Effect.timeoutOption(USAGE_PROBE_TIMEOUT_MS),
-    Effect.map(
-      Option.flatMap((result) =>
-        result.code === 0
-          ? Option.fromUndefinedOr(parseClaudeUsageLimitsJson(result.stdout, checkedAt))
-          : Option.none(),
-      ),
-    ),
-    Effect.catchCause(() => Effect.succeed(Option.none())),
-    Effect.map(Option.getOrUndefined),
-  );
 });
 
 export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(function* (

@@ -275,11 +275,11 @@ const CURRENT_CODEX_MODELS = new Set([
   "gpt-daybreak-red-latest",
 ]);
 
-export function isLegacyCodexModel(model: string): boolean {
+function isLegacyCodexModel(model: string): boolean {
   return !CURRENT_CODEX_MODELS.has(model);
 }
 
-export function enrichCodexModelsFromCache(
+function enrichCodexModelsFromCache(
   models: ReadonlyArray<ServerProviderModel>,
   cache: unknown,
 ): ReadonlyArray<ServerProviderModel> {
