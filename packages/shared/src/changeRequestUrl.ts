@@ -1,10 +1,10 @@
-import type { RepositoryIdentity, ThreadLinkedPullRequest } from "@t3tools/contracts";
+import type { ThreadLinkedPullRequest } from "@t3tools/contracts";
 import { canonicalRepositoryKey } from "./sourceControl.ts";
 
 /**
- * The two strings are what `pullRequestHostOf` and the project's `repositoryIdentity` produce
- * from a git remote — lower case, no port, the full path below the host — because links are
- * matched against those. Anything else matches nothing.
+ * The two strings are what the project's `repositoryIdentity` produces from a git remote —
+ * lower case, no port, the full path below the host — because links are matched against
+ * those. Anything else matches nothing.
  */
 export interface ChangeRequestLink {
   readonly host: string;
@@ -113,39 +113,6 @@ export function changeRequestUrlFor(
   }
 }
 
-export function gitHubPullRequestBrowserUrl(
-  identity: RepositoryIdentity | null | undefined,
-  repository: string,
-  number: number,
-): string | null {
-  if (identity?.provider !== "github" || !Number.isSafeInteger(number) || number < 1) return null;
-  const repositoryPath = repository.split("/");
-  if (
-    repositoryPath.length !== 2 ||
-    repositoryPath.some((segment) => segment.length === 0 || segment === "." || segment === "..")
-  ) {
-    return null;
-  }
-
-  let origin: string | null = null;
-  try {
-    const remoteUrl = new URL(identity.locator.remoteUrl.trim());
-    if (remoteUrl.protocol === "http:" || remoteUrl.protocol === "https:") {
-      origin = remoteUrl.origin;
-    }
-  } catch {}
-  const hostname = identity.canonicalKey.split("/")[0];
-  if (origin === null && !hostname) return null;
-
-  try {
-    const url = new URL(origin ?? `https://${hostname}`);
-    url.pathname = `/${repositoryPath.join("/")}/pull/${number}`;
-    return url.toString();
-  } catch {
-    return null;
-  }
-}
-
 /**
  * The pull-request URL a GitHub-style `#123` autolink might name. GitHub writes every bare
  * reference through `/issues/`, including pull requests, so this only builds a candidate: the
@@ -188,31 +155,6 @@ export function matchesLinkedPullRequestUrl(
     linked.number === target.number &&
     linked.authority === target.authority
   );
-}
-
-export function changeRequestRepositoryUrl(targetUrl: string): string | null {
-  const changeRequest = parseChangeRequestUrl(targetUrl);
-  if (changeRequest === null) return null;
-  const url = new URL(targetUrl);
-  // Gerrit's change route is `/c/{project}/+/{n}`; its project page lives on its own route, so
-  // the `/c/{project}` prefix does not identify it. The project path keeps its own casing.
-  const gerritProject = /^\/c\/(.+?)\/\+\/\d+(?:\/|$)/iu.exec(url.pathname)?.[1];
-  if (gerritProject !== undefined) {
-    url.pathname = `/admin/repos/${gerritProject}`;
-    url.search = "";
-    url.hash = "";
-    return url.toString();
-  }
-  const repositoryPath =
-    /^(.*?)\/-\/merge_requests\/\d+(?:\/|$)/iu.exec(url.pathname)?.[1] ??
-    /^(.*?)(?:\/pulls?\/\d+|\/pull-requests\/\d+|\/pullrequest\/\d+)(?:\/|$)/iu.exec(
-      url.pathname,
-    )?.[1];
-  if (!repositoryPath) return null;
-  url.pathname = repositoryPath;
-  url.search = "";
-  url.hash = "";
-  return url.toString();
 }
 
 export function siblingPullRequestUrl(url: string, number: number): string | null {

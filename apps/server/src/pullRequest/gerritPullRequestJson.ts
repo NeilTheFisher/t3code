@@ -217,7 +217,7 @@ export function currentPatchSet(record: GerritQueryChange): RawPatchSet | null {
 
 /** Whether Gerrit would let this change be submitted right now: Code-Review +2 with no
  *  blocking vote, and Verified (when the project uses it) at +1 with no negative vote. */
-export function gerritChangeIsSubmittable(record: GerritQueryChange): boolean {
+function gerritChangeIsSubmittable(record: GerritQueryChange): boolean {
   const patchSet = currentPatchSet(record);
   const approvals = patchSet?.approvals ?? [];
   let codeReviewMax = Number.NEGATIVE_INFINITY;

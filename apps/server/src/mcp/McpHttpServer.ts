@@ -1360,7 +1360,7 @@ export const layerPullRequestsToolkit = toolkitRegistration(
 ).pipe(Layer.provide(PullRequestWatchService.layer));
 
 const layerIssuesToolkit = toolkitRegistration(IssuesToolkit, IssuesHandlers.layer);
-export const layerSpeakToolkit = toolkitRegistration(SpeakToolkit, SpeakHandlers.layer);
+const layerSpeakToolkit = toolkitRegistration(SpeakToolkit, SpeakHandlers.layer);
 
 const layerDeviceStandardToolkitRegistration = toolkitRegistration(
   DeviceStandardToolkit,
