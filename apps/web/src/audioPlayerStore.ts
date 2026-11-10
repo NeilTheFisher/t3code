@@ -21,14 +21,12 @@ interface AudioPlayerState {
   /** Volume/playbackRate of the shared audio element, persisted per playback. */
   volume: number;
   rate: number;
-  /** Excerpt of the synthesized text for display in the mini-player. */
+  /** Global player title: the playing thread's title, or the spoken excerpt. */
   title: string | null;
   /** Thread the active narration belongs to, for mini-player navigation. */
   threadRef: ScopedThreadRef | null;
   /** Index of the paragraph currently being spoken, for message highlighting. */
   activeParagraph: number | null;
-  /** Normalized opening words of the active paragraph, for DOM matching. */
-  activeParagraphCue: string | null;
   /** Bumped by the mini-player to ask the highlight to reveal the active block. */
   scrollToActiveRequest: number;
   /**
@@ -49,7 +47,7 @@ interface AudioPlayerActions {
   setProgress: (currentTime: number, duration: number) => void;
   setVolume: (volume: number) => void;
   setRate: (rate: number) => void;
-  setActiveParagraph: (index: number | null, cue: string | null) => void;
+  setActiveParagraph: (index: number | null) => void;
   setSynthesizedParagraphs: (count: number) => void;
   requestScrollToActiveParagraph: () => void;
 }
@@ -65,7 +63,6 @@ export const useAudioPlayerStore = create<AudioPlayerState & AudioPlayerActions>
   title: null,
   threadRef: null,
   activeParagraph: null,
-  activeParagraphCue: null,
   scrollToActiveRequest: 0,
   synthesizedParagraphs: 0,
   setLoading: (id, title, threadRef) =>
@@ -81,7 +78,6 @@ export const useAudioPlayerStore = create<AudioPlayerState & AudioPlayerActions>
       currentTime: 0,
       duration: 0,
       activeParagraph: null,
-      activeParagraphCue: null,
       synthesizedParagraphs: 0,
     }),
   setWaking: (id) =>
@@ -95,7 +91,6 @@ export const useAudioPlayerStore = create<AudioPlayerState & AudioPlayerActions>
       playingMessageId: null,
       threadRef: null,
       activeParagraph: null,
-      activeParagraphCue: null,
       synthesizedParagraphs: 0,
     }),
   setError: (message, id) =>
@@ -106,13 +101,12 @@ export const useAudioPlayerStore = create<AudioPlayerState & AudioPlayerActions>
       error: message,
       errorMessageId: id,
       activeParagraph: null,
-      activeParagraphCue: null,
       synthesizedParagraphs: 0,
     }),
   setProgress: (currentTime, duration) => set({ currentTime, duration }),
   setVolume: (volume) => set({ volume }),
   setRate: (rate) => set({ rate }),
-  setActiveParagraph: (index, cue) => set({ activeParagraph: index, activeParagraphCue: cue }),
+  setActiveParagraph: (index) => set({ activeParagraph: index }),
   setSynthesizedParagraphs: (count) =>
     set((state) => (state.synthesizedParagraphs === count ? {} : { synthesizedParagraphs: count })),
   requestScrollToActiveParagraph: () =>
