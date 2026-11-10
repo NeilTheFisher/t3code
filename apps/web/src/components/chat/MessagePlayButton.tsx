@@ -18,6 +18,7 @@ export const MessagePlayButton = memo(function MessagePlayButton({
   messageId,
   text,
   threadRef,
+  threadTitle,
   size = "xs",
   variant = "outline",
   className,
@@ -25,6 +26,8 @@ export const MessagePlayButton = memo(function MessagePlayButton({
   messageId: MessageId;
   text: string;
   threadRef: ScopedThreadRef | null;
+  /** Title of the thread this message belongs to, shown by the global player. */
+  threadTitle?: string | undefined;
   size?: "xs" | "icon-xs";
   variant?: "outline" | "ghost";
   className?: string;
@@ -100,7 +103,7 @@ export const MessagePlayButton = memo(function MessagePlayButton({
     }
     // A user-initiated play takes over from any queued agent speech.
     clearSpokenQueue();
-    void play(messageId, trimmed, threadRef).catch(() => {
+    void play(messageId, trimmed, threadRef, threadTitle).catch(() => {
       // Error already surfaced via the store + effect above.
     });
   };
