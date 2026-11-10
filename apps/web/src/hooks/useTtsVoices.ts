@@ -5,7 +5,7 @@
  */
 import { useEffect, useState } from "react";
 
-import { parseVoiceCatalog, voiceCatalogUrl } from "~/lib/phononModel";
+import { parseVoiceCatalog, voiceCatalogUrl } from "@t3tools/client-runtime/phonon-voices";
 import { resolveTtsEnvironmentBase } from "~/lib/ttsEnvironmentBase";
 
 async function fetchLocalVoices(base: string): Promise<string[]> {
