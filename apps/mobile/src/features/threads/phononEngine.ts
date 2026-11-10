@@ -20,17 +20,24 @@ interface PhononHost {
 }
 
 interface PendingSynthesis {
+  readonly host: PhononHost;
   readonly chunks: string[];
   readonly resolve: (base64: string) => void;
   readonly reject: (error: Error) => void;
+  readonly onLoadingModel?: (() => void) | undefined;
   readonly onProgress?: ((percent: number) => void) | undefined;
   readonly dispose: () => void;
 }
 
-let host: PhononHost | null = null;
+/**
+ * Hosts stack: a screen opened over a thread (the voice picker) may register
+ * its own engine, and closing it must leave the thread's engine working. The
+ * newest host for an environment serves its requests.
+ */
+const hosts: PhononHost[] = [];
 const pending = new Map<string, PendingSynthesis>();
 let nextId = 0;
-/** One synth at a time: the engine pipelines text, and files exist before play. */
+/** One synth at a time: the engine itself serializes text and reuses one KV cache. */
 let queue: Promise<unknown> = Promise.resolve();
 
 function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
@@ -49,10 +56,28 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
   });
 }
 
-function postToPage(message: Record<string, unknown>): void {
-  if (host === null) return;
+function postToPage(host: PhononHost, message: Record<string, unknown>): void {
   const json = JSON.stringify(JSON.stringify(message));
   host.view.injectJavaScript(`window.T3Phonon && window.T3Phonon.handle(${json});true;`);
+}
+
+function hostFor(environmentId: EnvironmentId): PhononHost | null {
+  for (let index = hosts.length - 1; index >= 0; index -= 1) {
+    if (hosts[index]!.environmentId === environmentId) return hosts[index]!;
+  }
+  return null;
+}
+
+function hostForView(view: WebView<object>): PhononHost | null {
+  for (let index = hosts.length - 1; index >= 0; index -= 1) {
+    if (hosts[index]!.view === view) return hosts[index]!;
+  }
+  return null;
+}
+
+/** Whether an engine page is already registered for this environment. */
+export function hasPhononHost(environmentId: EnvironmentId): boolean {
+  return hostFor(environmentId) !== null;
 }
 
 export function registerPhononHost(
@@ -69,8 +94,12 @@ export function registerPhononHost(
   ready.catch(() => {
     // A rejection is delivered to whatever synthesis is waiting on it.
   });
-  const previous = host;
-  host = {
+  const replaced = hostForView(view);
+  if (replaced !== null) {
+    hosts.splice(hosts.indexOf(replaced), 1);
+    failHost(replaced, aborted("The speech engine was replaced."));
+  }
+  const host: PhononHost = {
     environmentId,
     view,
     voice,
@@ -78,19 +107,17 @@ export function registerPhononHost(
     resolveReady,
     rejectReady,
   };
-  if (previous !== null) {
-    failAll(aborted("The speech engine was replaced."));
-  }
+  hosts.push(host);
   return () => {
-    if (host?.view !== view) return;
-    host = null;
-    failAll(aborted("The speech engine went away."));
+    const index = hosts.indexOf(host);
+    if (index >= 0) hosts.splice(index, 1);
+    failHost(host, aborted("The speech engine went away."));
   };
 }
 
 /** The voice later synthesis requests use when they do not name one. */
 export function setPhononHostVoice(voice: string): void {
-  if (host !== null) host.voice = voice;
+  for (const host of hosts) host.voice = voice;
 }
 
 function aborted(message: string): Error {
@@ -99,16 +126,18 @@ function aborted(message: string): Error {
   return error;
 }
 
-function failAll(error: Error): void {
-  for (const entry of pending.values()) {
+function failHost(host: PhononHost, error: Error): void {
+  for (const [id, entry] of pending) {
+    if (entry.host !== host) continue;
+    pending.delete(id);
     entry.dispose();
     entry.reject(error);
   }
-  pending.clear();
 }
 
-/** Runtime messages from the engine page. */
-export function handlePhononMessage(event: WebViewMessageEvent): void {
+/** Runtime messages from one engine page. */
+export function handlePhononMessage(event: WebViewMessageEvent, view?: WebView<object>): void {
+  const host = view === undefined ? (hosts[hosts.length - 1] ?? null) : hostForView(view);
   let message: unknown;
   try {
     message = JSON.parse(event.nativeEvent.data);
@@ -132,14 +161,17 @@ export function handlePhononMessage(event: WebViewMessageEvent): void {
       typeof data.message === "string" ? data.message : "The speech engine could not start.",
     );
     host?.rejectReady(error);
-    failAll(error);
+    if (host !== null) failHost(host, error);
     return;
   }
   if (typeof data.id !== "string") return;
   const entry = pending.get(data.id);
   if (entry === undefined) return;
+  if (host !== null && entry.host !== host) return;
 
-  if (data.type === "chunk" && typeof data.data === "string") {
+  if (data.type === "loading-model") {
+    entry.onLoadingModel?.();
+  } else if (data.type === "chunk" && typeof data.data === "string") {
     entry.chunks.push(data.data);
   } else if (data.type === "progress" && typeof data.percent === "number") {
     entry.onProgress?.(data.percent);
@@ -165,7 +197,11 @@ interface PhononSynthesisRequest {
   readonly text: string;
   /** Defaults to the host's selected voice. */
   readonly voice?: string | undefined;
+  /** Retried once when the model does not know `voice`. */
+  readonly fallbackVoice?: string | undefined;
   readonly signal?: AbortSignal | undefined;
+  /** Called once when the engine page starts a cold model load. */
+  readonly onLoadingModel?: (() => void) | undefined;
   readonly onProgress?: ((percent: number) => void) | undefined;
 }
 
@@ -178,8 +214,8 @@ export function synthesizePhononWav(request: PhononSynthesisRequest): Promise<st
 }
 
 async function startSynthesis(request: PhononSynthesisRequest): Promise<string> {
-  const active = host;
-  if (active === null || active.environmentId !== request.environmentId) {
+  const active = hostFor(request.environmentId);
+  if (active === null) {
     throw new Error("The speech engine is not ready on this screen.");
   }
   if (request.signal?.aborted === true) throw request.signal.reason;
@@ -192,23 +228,26 @@ async function startSynthesis(request: PhononSynthesisRequest): Promise<string> 
   const id = `synth-${(nextId += 1)}`;
   return await new Promise<string>((resolve, reject) => {
     const onAbort = () => {
-      postToPage({ type: "cancel", id });
+      postToPage(active, { type: "cancel", id });
       pending.delete(id);
       reject(request.signal?.reason ?? new Error("Speech synthesis was cancelled."));
     };
     request.signal?.addEventListener("abort", onAbort, { once: true });
     pending.set(id, {
+      host: active,
       chunks: [],
       resolve,
       reject,
+      onLoadingModel: request.onLoadingModel,
       onProgress: request.onProgress,
       dispose: () => request.signal?.removeEventListener("abort", onAbort),
     });
-    postToPage({
+    postToPage(active, {
       type: "synthesize",
       id,
       text: request.text,
       voice: request.voice ?? active.voice,
+      fallbackVoice: request.fallbackVoice ?? PHONON_DEFAULT_VOICE,
     });
   });
 }
@@ -241,11 +280,16 @@ const post = (message) => window.ReactNativeWebView.postMessage(JSON.stringify(m
 const controllers = new Map();
 let engine = null;
 let loading = null;
-function loadEngine() {
+function loadEngine(id) {
   if (engine) return Promise.resolve(engine);
   if (!loading) {
-    loading = import("./phonon.js")
-      .then((module) => module.Phonon.load({ model: "phonon-31m-en" }))
+    loading = (async () => {
+      const module = await import("./phonon.js");
+      return await module.Phonon.load({
+        model: "phonon-31m-en",
+        progress: (percent) => post({ type: "progress", id, percent }),
+      });
+    })()
       .then((value) => { engine = value; return value; })
       .catch((error) => { loading = null; throw error; });
   }
@@ -286,25 +330,38 @@ function toBase64(bytes) {
   }
   return btoa(text);
 }
+async function speak(phonon, request, voice, controller) {
+  return await phonon.speak(request.text, {
+    voice,
+    signal: controller.signal,
+  });
+}
 async function synthesize(request) {
   const controller = new AbortController();
   controllers.set(request.id, controller);
   try {
-    const phonon = await loadEngine();
-    const speech = await phonon.speak(request.text, {
-      voice: request.voice,
-      signal: controller.signal,
-    });
+    if (!engine) post({ type: "loading-model", id: request.id });
+    const phonon = await loadEngine(request.id);
+    if (controller.signal.aborted) {
+      post({ type: "cancelled", id: request.id });
+      return;
+    }
+    let speech;
+    try {
+      speech = await speak(phonon, request, request.voice, controller);
+    } catch (error) {
+      const message = (error && error.message) || "";
+      if (!message.startsWith("No voice ") || !request.fallbackVoice || request.fallbackVoice === request.voice) throw error;
+      speech = await speak(phonon, request, request.fallbackVoice, controller);
+    }
     if (controller.signal.aborted) {
       post({ type: "cancelled", id: request.id });
       return;
     }
     const wav = wavBytes(speech.audio, speech.sampleRate || 24000);
-    // Independent base64 writes need each chunk to be a multiple of 3 bytes.
-    const CHUNK = 98304;
-    for (let at = 0; at < wav.length; at += CHUNK) {
-      post({ type: "chunk", id: request.id, data: toBase64(wav.subarray(at, at + CHUNK)) });
-    }
+    // One message per paragraph: every crossing costs RN JS-thread time, and a
+    // paragraph is small enough to send whole.
+    post({ type: "chunk", id: request.id, data: toBase64(wav) });
     post({ type: "done", id: request.id });
   } catch (error) {
     if (controller.signal.aborted) post({ type: "cancelled", id: request.id });
