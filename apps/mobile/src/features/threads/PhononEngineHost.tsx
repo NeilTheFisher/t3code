@@ -1,8 +1,8 @@
 /**
  * Keeps a hidden WebView running the Phonon engine for the open thread. It is
- * mounted beside the thread, not the player: synthesis must finish before
- * playback starts, and the WebView may then be suspended without affecting the
- * native audio that is already on disk.
+ * mounted beside the thread, not the player: paragraphs are synthesized as
+ * playback proceeds, and the WebView may be suspended in the background while
+ * the native audio already written to disk keeps playing.
  */
 import type { EnvironmentId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
@@ -62,7 +62,10 @@ export function PhononEngineHost({ environmentId }: { environmentId: Environment
         allowFileAccess={false}
         allowsLinkPreview={false}
         mixedContentMode="compatibility"
-        onMessage={handlePhononMessage}
+        onMessage={(event) => {
+          const current = view.current;
+          if (current !== null) handlePhononMessage(event, current);
+        }}
         style={{ width: 1, height: 1, backgroundColor: "transparent" }}
       />
     </View>
