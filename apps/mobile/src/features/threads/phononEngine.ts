@@ -2,6 +2,7 @@
 // The page is app-owned; the engine and weights come from the environment origin
 // so the model cache and the weight proxy share one authenticated connection.
 import type { EnvironmentId } from "@t3tools/contracts";
+import { PHONON_DEFAULT_VOICE } from "@t3tools/client-runtime/phonon-voices";
 import type { WebView } from "react-native-webview";
 import type { WebViewMessageEvent } from "react-native-webview";
 
@@ -11,6 +12,8 @@ export const PHONON_ENGINE_PATH = "/v1/audio/engine/";
 interface PhononHost {
   readonly environmentId: EnvironmentId;
   readonly view: WebView<object>;
+  /** Selected narration voice; a per-request voice still wins. */
+  voice: string;
   readonly ready: Promise<void>;
   resolveReady: () => void;
   rejectReady: (error: Error) => void;
@@ -55,6 +58,7 @@ function postToPage(message: Record<string, unknown>): void {
 export function registerPhononHost(
   environmentId: EnvironmentId,
   view: WebView<object>,
+  voice: string = PHONON_DEFAULT_VOICE,
 ): () => void {
   let resolveReady = () => {};
   let rejectReady = (_error: Error) => {};
@@ -66,7 +70,14 @@ export function registerPhononHost(
     // A rejection is delivered to whatever synthesis is waiting on it.
   });
   const previous = host;
-  host = { environmentId, view, ready, resolveReady, rejectReady };
+  host = {
+    environmentId,
+    view,
+    voice,
+    ready,
+    resolveReady,
+    rejectReady,
+  };
   if (previous !== null) {
     failAll(aborted("The speech engine was replaced."));
   }
@@ -75,6 +86,11 @@ export function registerPhononHost(
     host = null;
     failAll(aborted("The speech engine went away."));
   };
+}
+
+/** The voice later synthesis requests use when they do not name one. */
+export function setPhononHostVoice(voice: string): void {
+  if (host !== null) host.voice = voice;
 }
 
 function aborted(message: string): Error {
@@ -147,7 +163,8 @@ export function handlePhononMessage(event: WebViewMessageEvent): void {
 interface PhononSynthesisRequest {
   readonly environmentId: EnvironmentId;
   readonly text: string;
-  readonly voice: string;
+  /** Defaults to the host's selected voice. */
+  readonly voice?: string | undefined;
   readonly signal?: AbortSignal | undefined;
   readonly onProgress?: ((percent: number) => void) | undefined;
 }
@@ -191,7 +208,7 @@ async function startSynthesis(request: PhononSynthesisRequest): Promise<string> 
       type: "synthesize",
       id,
       text: request.text,
-      voice: request.voice,
+      voice: request.voice ?? active.voice,
     });
   });
 }

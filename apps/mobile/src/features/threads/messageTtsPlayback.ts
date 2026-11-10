@@ -1,5 +1,5 @@
 import { type EnvironmentId } from "@t3tools/contracts";
-import { DEFAULT_TTS_VOICE } from "@t3tools/contracts/settings";
+import { PHONON_DEFAULT_VOICE } from "@t3tools/client-runtime/phonon-voices";
 import {
   createAudioPlaylist,
   setAudioModeAsync,
@@ -355,19 +355,20 @@ async function synthesizeSegment(
   messageId: string,
   index: number,
   environmentId: EnvironmentId,
+  voice: string,
   forGeneration: number,
   signal: AbortSignal,
 ): Promise<string | null> {
   const file = new File(
     Paths.cache,
-    `t3-tts-${messageId.replace(/[^a-zA-Z0-9._-]/g, "_")}-${index}-${hashSpeech(text, DEFAULT_TTS_VOICE)}.wav`,
+    `t3-tts-${messageId.replace(/[^a-zA-Z0-9._-]/g, "_")}-${index}-${hashSpeech(text, voice)}.wav`,
   );
   if (file.exists) return file.uri;
 
   const base64 = await synthesizePhononWav({
     environmentId,
     text,
-    voice: DEFAULT_TTS_VOICE,
+    voice,
     signal,
   });
   // A stop or a new message while this synthesis was in flight wins.
@@ -384,6 +385,7 @@ export async function playMessageTts(
   threadId: string,
   environmentId: EnvironmentId,
   blocks: readonly string[],
+  voice: string = PHONON_DEFAULT_VOICE,
 ): Promise<void> {
   const built = buildUnits(blocks);
   if (built.units.length === 0) return;
@@ -435,6 +437,7 @@ export async function playMessageTts(
         messageId,
         index,
         environmentId,
+        voice,
         forGeneration,
         controller.signal,
       );
