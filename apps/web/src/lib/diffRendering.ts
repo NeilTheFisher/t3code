@@ -218,7 +218,7 @@ function compactPartialHunkOffsets(file: FileDiffMetadata): FileDiffMetadata {
  * patch"). The parser drops those markers, leaving a hunk-less FileDiffMetadata
  * whose virtualized rendering can crash, so they render as static rows instead.
  */
-export function extractBinaryPatchPaths(patch: string): Set<string> {
+function extractBinaryPatchPaths(patch: string): Set<string> {
   const binaryPaths = new Set<string>();
   const lines = patch.split("\n");
   let currentPaths: string[] = [];

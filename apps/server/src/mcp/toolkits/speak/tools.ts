@@ -4,7 +4,7 @@ import { Tool, Toolkit } from "effect/ai";
 
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 
-export const SPEAK_TOOL_NAME = "t3_speak";
+const SPEAK_TOOL_NAME = "t3_speak";
 
 const SpeakText = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4_000)).annotate({
   description:
@@ -15,7 +15,7 @@ const SpeakText = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(
 // the server. The reader's clients pick the utterance up from this tool result
 // and play it. Not idempotent, since speaking the same text twice is two
 // utterances.
-export const SpeakTool = Tool.make(SPEAK_TOOL_NAME, {
+const SpeakTool = Tool.make(SPEAK_TOOL_NAME, {
   description:
     "Say something aloud to the reader through their T3 Code clients' text-to-speech. Use it for a short spoken answer, a summary, or a heads-up you want read out, not for anything the reader must read carefully. Pass plain prose. Only one voice plays at a time: by default the utterance queues behind whatever is speaking; set interrupt only to correct something you said that was wrong (rare). It plays on the reader's connected clients, once, only when text-to-speech is enabled.",
   parameters: Schema.Struct({

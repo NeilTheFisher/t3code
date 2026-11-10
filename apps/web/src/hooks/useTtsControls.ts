@@ -15,7 +15,7 @@ import {
 } from "~/hooks/useTtsPlayer";
 import type { AppRouter } from "~/router";
 
-export const RATE_OPTIONS = [0.75, 1, 1.25, 1.5, 2] as const;
+const RATE_OPTIONS = [0.75, 1, 1.25, 1.5, 2] as const;
 
 export function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
