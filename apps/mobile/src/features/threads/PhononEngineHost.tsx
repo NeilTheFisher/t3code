@@ -16,18 +16,30 @@ import {
   PHONON_ENGINE_HTML,
   PHONON_ENGINE_PATH,
   registerPhononHost,
+  setPhononHostVoice,
 } from "./phononEngine";
+import { useSpeakVoice } from "./ttsVoices";
 
 export function PhononEngineHost({ environmentId }: { environmentId: EnvironmentId }) {
   const prepared = usePreparedConnection(environmentId);
   const base = Option.match(prepared, { onNone: () => null, onSome: (value) => value.httpBaseUrl });
   const view = useRef<WebView<object>>(null);
+  const voice = useSpeakVoice();
+  // Read by the re-registration below without making the voice its own trigger:
+  // changing voices must not tear down an in-flight synthesis.
+  const voiceRef = useRef(voice);
+
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- hands the selected voice to the hidden page
+  useEffect(() => {
+    voiceRef.current = voice;
+    setPhononHostVoice(voice);
+  }, [voice]);
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- registers the native bridge for an external WebView
   useEffect(() => {
     const current = view.current;
     if (base === null || current === null) return;
-    return registerPhononHost(environmentId, current);
+    return registerPhononHost(environmentId, current, voiceRef.current);
   }, [base, environmentId]);
 
   if (base === null) return null;
