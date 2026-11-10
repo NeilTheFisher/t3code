@@ -115,14 +115,6 @@ export function fileNewThreadInWorkspace(
   );
 }
 
-/** Files a thread created while a workspace is active into that workspace. */
-export function fileThreadInActiveWorkspace(threadRef: {
-  readonly environmentId: string;
-  readonly threadId: string;
-}): void {
-  fileNewThreadInWorkspace(threadRef, null);
-}
-
 /**
  * The workspaces strip's view of the server settings that back it, with the
  * active workspace from this device's own client settings. An enabled strip with

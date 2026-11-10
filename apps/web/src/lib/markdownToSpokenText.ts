@@ -5,7 +5,7 @@
  */
 
 /** Pause lengths (seconds) at markdown structural boundaries. */
-export const PARAGRAPH_PAUSE = "0.6";
+const PARAGRAPH_PAUSE = "0.6";
 const HEADING_PAUSE = "0.8";
 const LIST_ITEM_PAUSE = "0.4";
 const CODE_BLOCK_PAUSE = "0.5";
@@ -89,7 +89,7 @@ function convertLines(markdown: string): string[] {
  * is one block-level unit with its pauses already inlined — the joiner adds
  * the paragraph pause.
  */
-export function toSpokenParagraphs(markdown: string): string[] {
+function toSpokenParagraphs(markdown: string): string[] {
   const paragraphs: string[] = [];
   let current: string[] = [];
   for (const line of convertLines(markdown)) {
