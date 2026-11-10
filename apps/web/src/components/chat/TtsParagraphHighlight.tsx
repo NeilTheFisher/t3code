@@ -1,13 +1,13 @@
 /**
  * Highlights the block being spoken and makes matched blocks clickable to seek.
  * Renders nothing: it observes the markdown container, reads the shared audio
- * store, and matches blocks by normalized word prefix (`findActiveBlockIndex`).
+ * store, and maps the active paragraph onto a block (`mapParagraphsToBlocks`).
  */
 import { memo, useEffect, useRef } from "react";
 import { type MessageId } from "@t3tools/contracts";
 import { useAudioPlayerStore } from "~/audioPlayerStore";
 import { canSeekToParagraph, getActiveParagraphCues, seekToParagraph } from "~/hooks/useTtsPlayer";
-import { findActiveBlockIndex, findParagraphIndexForBlock } from "~/lib/ttsParagraphMatching";
+import { findParagraphIndexForBlock, mapParagraphsToBlocks } from "~/lib/ttsParagraphMatching";
 
 const HIGHLIGHT_CLASS = "tts-active-paragraph";
 /** Tailwind utility added to blocks that can be clicked to seek. */
@@ -98,26 +98,26 @@ export const TtsParagraphHighlight = memo(function TtsParagraphHighlight({
   const autoScrolledRef = useRef(false);
   const status = useAudioPlayerStore((s) => s.status);
   const playingId = useAudioPlayerStore((s) => s.playingMessageId);
-  const cue = useAudioPlayerStore((s) => s.activeParagraphCue);
+  const paragraph = useAudioPlayerStore((s) => s.activeParagraph);
   const scrollRequest = useAudioPlayerStore((s) => s.scrollToActiveRequest);
   // Grows as more paragraphs are synthesized, so blocks that become seekable
   // ahead of the playback head are (re)marked clickable.
   const synthesizedParagraphs = useAudioPlayerStore((s) => s.synthesizedParagraphs);
 
-  const active = playingId === messageId && status !== "idle" && cue !== null;
+  const active = playingId === messageId && status !== "idle" && paragraph !== null;
 
   // Clickability only: which blocks can be clicked to seek. Re-runs as
   // synthesis advances so newly-synthesized paragraphs become clickable, but
   // never touches the highlight, so it can't flicker.
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- The markdown DOM is built outside React; classes follow the active cue.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- The markdown DOM is built outside React; classes follow the active paragraph.
   useEffect(() => {
     const container = ref.current?.parentElement;
     if (container === null || container === undefined) return;
     const blocks = Array.from(container.querySelectorAll<HTMLElement>(BLOCK_SELECTOR));
     const cues = active ? getActiveParagraphCues() : [];
     for (const block of blocks) {
-      const paragraph = active ? findParagraphIndexForBlock(cues, blockText(block)) : -1;
-      block.classList.toggle(CLICKABLE_CLASS, paragraph >= 0 && canSeekToParagraph(paragraph));
+      const unit = active ? findParagraphIndexForBlock(cues, blockText(block)) : -1;
+      block.classList.toggle(CLICKABLE_CLASS, unit >= 0 && canSeekToParagraph(unit));
     }
   }, [
     active,
@@ -137,10 +137,11 @@ export const TtsParagraphHighlight = memo(function TtsParagraphHighlight({
 
     const blocks = Array.from(container.querySelectorAll<HTMLElement>(BLOCK_SELECTOR));
     for (const block of blocks) block.classList.remove(HIGHLIGHT_CLASS);
-    if (!active || cue === null || cue.length === 0) return;
+    if (!active || paragraph === null) return;
 
-    const matchIndex = findActiveBlockIndex(blocks.map(blockText), cue);
-    const match = matchIndex >= 0 ? blocks[matchIndex] : undefined;
+    const cues = getActiveParagraphCues();
+    const blockIndex = mapParagraphsToBlocks(blocks.map(blockText), cues)[paragraph];
+    const match = blockIndex === undefined || blockIndex < 0 ? undefined : blocks[blockIndex];
     if (match === undefined) return;
 
     match.classList.add(HIGHLIGHT_CLASS);
@@ -153,7 +154,7 @@ export const TtsParagraphHighlight = memo(function TtsParagraphHighlight({
       scrollBlockIntoView(match);
       autoScrolledRef.current = true;
     }
-  }, [active, cue, scrollRequest]);
+  }, [active, paragraph, scrollRequest]);
 
   // Delegated click: any matched block seeks to its paragraph. A single
   // listener survives the markdown DOM re-rendering under us.
