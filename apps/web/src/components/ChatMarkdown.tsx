@@ -256,6 +256,10 @@ interface ChatMarkdownProps {
   /** Assistant message this markdown belongs to, so the paragraph being spoken
       by TTS can be highlighted. Omit for markdown that is not spoken. */
   ttsMessageId?: MessageId | undefined;
+  /** Read-aloud is on: ctrl-clicking a paragraph starts narration at it. */
+  ttsEnabled?: boolean | undefined;
+  /** Thread title for the global player when narration starts from a paragraph. */
+  ttsThreadTitle?: string | undefined;
 }
 
 export interface ChatMarkdownContextReference {
@@ -1820,7 +1824,16 @@ function ChatMarkdown({
           />
         ))}
       </ChatMarkdownRendererContext>
-      {ttsMessageId ? <TtsParagraphHighlight messageId={ttsMessageId} /> : null}
+      {ttsMessageId ? (
+        <TtsParagraphHighlight
+          messageId={ttsMessageId}
+          text={text}
+          isStreaming={props.isStreaming === true}
+          threadRef={props.threadRef ?? null}
+          threadTitle={props.ttsThreadTitle}
+          ttsEnabled={props.ttsEnabled === true}
+        />
+      ) : null}
       {localMediaPreview ? (
         <ExpandedImageDialog preview={localMediaPreview} onClose={closeLocalMediaPreview} />
       ) : null}
