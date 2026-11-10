@@ -97,7 +97,7 @@ function downloadTextFile(filename: string, contents: string): void {
 }
 
 // @effect-diagnostics-next-line extendsNativeError:off - browser download helper with no Effect runtime; a local throw sentinel.
-export class ThreadExportError extends Error {
+class ThreadExportError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "ThreadExportError";

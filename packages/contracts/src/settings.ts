@@ -85,8 +85,8 @@ export const SidebarProjectGroupingMode = Schema.Literals([
 ]);
 export type SidebarProjectGroupingMode = typeof SidebarProjectGroupingMode.Type;
 const DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE: SidebarProjectGroupingMode = "repository";
-export const MIN_SIDEBAR_THREAD_PREVIEW_COUNT = 1;
-export const MAX_SIDEBAR_THREAD_PREVIEW_COUNT = 15;
+const MIN_SIDEBAR_THREAD_PREVIEW_COUNT = 1;
+const MAX_SIDEBAR_THREAD_PREVIEW_COUNT = 15;
 export const SidebarThreadPreviewCount = Schema.Int.check(
   Schema.isBetween({
     minimum: MIN_SIDEBAR_THREAD_PREVIEW_COUNT,
@@ -116,7 +116,7 @@ export const DEFAULT_THREAD_WORKSPACE_ICON = "briefcase";
 export const DEFAULT_THREAD_WORKSPACE_TINT = "info";
 
 /** Shown, without being saved, until the first workspace edit persists a list. */
-export const DEFAULT_THREAD_WORKSPACES: readonly SidebarThreadWorkspace[] = [
+const DEFAULT_THREAD_WORKSPACES: readonly SidebarThreadWorkspace[] = [
   { id: "work", name: "Work", icon: "building-2", tint: "info" },
   { id: "personal", name: "Personal", icon: "house", tint: "success" },
 ];

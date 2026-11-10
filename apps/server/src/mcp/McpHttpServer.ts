@@ -1198,7 +1198,7 @@ export const layerPullRequestsToolkit = toolkitRegistration(
   PullRequestsHandlers.layer,
 );
 
-export const layerSpeakToolkit = toolkitRegistration(SpeakToolkit, SpeakHandlers.layer);
+const layerSpeakToolkit = toolkitRegistration(SpeakToolkit, SpeakHandlers.layer);
 
 const layerDeviceStandardToolkitRegistration = toolkitRegistration(
   DeviceStandardToolkit,
