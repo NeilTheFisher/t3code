@@ -71,19 +71,20 @@ function bestCueMatch(
 }
 
 /**
- * Index of the candidate block whose normalized text shares the longest run of
- * words with `cue`, or -1 when no block contains it. Ties keep the earliest
- * block, so document order breaks them predictably.
+ * Index of the best block at or after `from` for one cue, or -1. Ties keep the
+ * earliest block, so document order breaks them predictably.
  */
-export function findActiveBlockIndex(blockTexts: readonly string[], cue: string): number {
-  const cueWords = normalizeWords(cue);
-  if (cueWords.length === 0) return -1;
-
+function bestBlockFrom(
+  blockWords: readonly (readonly string[])[],
+  cueWords: readonly string[],
+  from: number,
+): number {
   let bestIndex = -1;
   let bestLead = 0;
-  for (let index = 0; index < blockTexts.length; index++) {
-    const words = normalizeWords(blockTexts[index] ?? "");
-    const lead = bestCueMatch(cueWords, (shiftedCue) => bestWindowMatch(words, shiftedCue));
+  for (let index = from; index < blockWords.length; index++) {
+    const lead = bestCueMatch(cueWords, (shiftedCue) =>
+      bestWindowMatch(blockWords[index]!, shiftedCue),
+    );
     if (lead > bestLead) {
       bestLead = lead;
       bestIndex = index;
@@ -95,7 +96,29 @@ export function findActiveBlockIndex(blockTexts: readonly string[], cue: string)
 }
 
 /**
- * The inverse of `findActiveBlockIndex`: index of the cue whose normalized
+ * Block index of every spoken paragraph, in order. Units are synthesized in
+ * document order and blocks render in document order, so a cue can never belong
+ * to a block before the previous unit's: that bound resolves two blocks that
+ * open with the same words, where the best match alone would pick the earlier.
+ */
+export function mapParagraphsToBlocks(
+  blockTexts: readonly string[],
+  cues: readonly string[],
+): number[] {
+  const blockWords = blockTexts.map(normalizeWords);
+  const mapping: number[] = [];
+  let from = 0;
+  for (const cue of cues) {
+    const cueWords = normalizeWords(cue);
+    const index = cueWords.length === 0 ? -1 : bestBlockFrom(blockWords, cueWords, from);
+    mapping.push(index);
+    if (index >= 0) from = index;
+  }
+  return mapping;
+}
+
+/**
+ * The inverse of `mapParagraphsToBlocks`: index of the cue whose normalized
  * opening words best match the clicked text's leading words, or -1. Maps a
  * clicked rendered line (or the whole block when no line is known) back to the
  * spoken unit to seek to — the unit that begins that line.

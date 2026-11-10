@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { convergeEstimatedDuration, estimateSpokenDuration } from "./ttsPlaybackMath";
+import {
+  convergeEstimatedDuration,
+  estimateSpokenDuration,
+  playbackPosition,
+  type ScheduledChunk,
+} from "./ttsPlaybackMath";
 
 describe("estimateSpokenDuration", () => {
   it("estimates ~15 chars per second at 1x", () => {
@@ -14,6 +19,41 @@ describe("estimateSpokenDuration", () => {
   it("is zero for empty text or non-positive rate", () => {
     expect(estimateSpokenDuration("", 1)).toBe(0);
     expect(estimateSpokenDuration("hi", 0)).toBe(0);
+  });
+});
+
+describe("playbackPosition", () => {
+  const chunk = (
+    paragraph: number,
+    at: number,
+    startedAt: number,
+    duration = 2,
+  ): ScheduledChunk => ({ paragraph, at, startedAt, duration });
+
+  it("is idle before the first chunk starts", () => {
+    expect(playbackPosition([chunk(0, 0, 5)], 1)).toEqual({ head: 0, paragraph: null });
+  });
+
+  it("reads the head and paragraph of the chunk being heard", () => {
+    const schedule = [chunk(0, 0, 0), chunk(1, 2, 2), chunk(2, 4, 4)];
+    expect(playbackPosition(schedule, 3.5)).toEqual({ head: 3.5, paragraph: 1 });
+  });
+
+  it("holds the last chunk's end through a gap instead of running ahead", () => {
+    // Chunk 1 starts late (synthesis behind realtime): the clock is at 3 but the
+    // audio heard has only reached 2.
+    const schedule = [chunk(0, 0, 0), chunk(1, 2, 3)];
+    expect(playbackPosition(schedule, 2.5)).toEqual({ head: 2, paragraph: 0 });
+  });
+
+  it("accounts for a chunk resumed mid-buffer by a seek", () => {
+    // Seeking to 3 resumes paragraph 1's chunk at message-time 3, now.
+    const schedule = [chunk(1, 3, 10), chunk(2, 4, 11, 2)];
+    expect(playbackPosition(schedule, 10.5)).toEqual({ head: 3.5, paragraph: 1 });
+  });
+
+  it("ends on the last chunk's end when everything has played", () => {
+    expect(playbackPosition([chunk(0, 0, 0)], 99)).toEqual({ head: 2, paragraph: 0 });
   });
 });
 
