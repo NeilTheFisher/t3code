@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./phonon-voices": {
+      "types": "./src/phononVoices.ts",
+      "default": "./src/phononVoices.ts"
+    },
     "./assembly-highlighting": {
       "types": "./src/assemblyHighlighting.ts",
       "default": "./src/assemblyHighlighting.ts"

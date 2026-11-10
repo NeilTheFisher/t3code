@@ -7,10 +7,13 @@ import type { Phonon, Speech } from "phonon-webgpu";
 
 import {
   PHONON_DEFAULT_VOICE,
-  PHONON_MODEL,
   modelAssetBase,
-  nativeSpeedFor,
   phononVoiceFor,
+} from "@t3tools/client-runtime/phonon-voices";
+
+import {
+  PHONON_MODEL,
+  nativeSpeedFor,
   resampleFactorFor,
   rewriteModelUrl,
   splitPauseDirective,
