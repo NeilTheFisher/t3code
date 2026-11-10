@@ -9,6 +9,7 @@ import {
   stopMessageTts,
   useMessageTtsStatus,
 } from "./messageTtsPlayback";
+import { useSpeakVoice } from "./ttsVoices";
 
 /**
  * Play/stop control for an assistant message. One module-level player drives
@@ -22,6 +23,7 @@ export const MessageTtsButton = memo(function MessageTtsButton(props: {
   readonly tintColor?: ColorValue;
 }) {
   const { isLoading, isPlaying } = useMessageTtsStatus(props.messageId);
+  const voice = useSpeakVoice();
   const disabled = !blocksHaveSpeech(props.blocks);
   return (
     <Pressable
@@ -33,7 +35,13 @@ export const MessageTtsButton = memo(function MessageTtsButton(props: {
       onPress={() => {
         if (isPlaying) stopMessageTts();
         else
-          void playMessageTts(props.messageId, props.threadId, props.environmentId, props.blocks);
+          void playMessageTts(
+            props.messageId,
+            props.threadId,
+            props.environmentId,
+            props.blocks,
+            voice,
+          );
       }}
       className="size-7 items-center justify-center"
     >
