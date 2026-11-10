@@ -69,6 +69,19 @@ current paragraph highlightable, clickable, and seekable. On web the engine stre
 as it speaks; on mobile the paragraphs are pre-produced. One request per whole message
 would have made seeking a re-synthesis.
 
+## Starting from a paragraph
+
+Ctrl/cmd-click on a paragraph of an assistant reply starts narration there instead of at
+the top; while that reply is already playing, the click is the ordinary seek-to-paragraph
+gesture. A reply that is still streaming keeps the session open, so paragraphs that
+arrive are synthesized onto the same timeline.
+
+From a live reply the player speaks only sentences that have ended: the trailing,
+unfinished one waits for its punctuation, because a fragment already spoken cannot be
+taken back. A paragraph the reader started or seeked to directly is the exception and is
+spoken as it stands. A live session that stops receiving text settles after a short wait,
+so a client that navigated away cannot leave the player "playing" over silence.
+
 ## The `t3_speak` tool
 
 Agents reach the same player through an MCP tool rather than by asking the user to

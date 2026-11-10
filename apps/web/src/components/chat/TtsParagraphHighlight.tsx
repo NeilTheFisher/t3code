@@ -1,20 +1,37 @@
 /**
- * Highlights the block being spoken and makes matched blocks clickable to seek.
- * Renders nothing: it observes the markdown container, reads the shared audio
- * store, and maps the active paragraph onto a block (`mapParagraphsToBlocks`).
+ * Highlights the block being spoken, seeks on click, and starts narration where
+ * a ctrl/cmd-click lands — including on a message that is still streaming.
+ * Renders nothing: it observes the markdown container and the shared audio store.
  */
 import { memo, useEffect, useRef } from "react";
-import { type MessageId } from "@t3tools/contracts";
+import { type MessageId, type ScopedThreadRef } from "@t3tools/contracts";
 import { useAudioPlayerStore } from "~/audioPlayerStore";
-import { canSeekToParagraph, getActiveParagraphCues, seekToParagraph } from "~/hooks/useTtsPlayer";
+import {
+  canSeekToParagraph,
+  completePlaybackText,
+  getActiveParagraphCues,
+  paragraphCuesFor,
+  seekToParagraph,
+  syncPlaybackText,
+  useTtsPlayer,
+} from "~/hooks/useTtsPlayer";
 import { findParagraphIndexForBlock, mapParagraphsToBlocks } from "~/lib/ttsParagraphMatching";
+import { isMacPlatform } from "~/lib/utils";
+import { clearSpokenQueue } from "~/spokenPlaybackQueue";
 
 const HIGHLIGHT_CLASS = "tts-active-paragraph";
 /** Tailwind utility added to blocks that can be clicked to seek. */
 const CLICKABLE_CLASS = "cursor-pointer";
 
+/** Hover hint for starting narration at a paragraph. */
+export const READ_FROM_HERE_HINT = isMacPlatform(navigator.platform)
+  ? "⌘-click to read from here"
+  : "Ctrl-click to read from here";
+
 /** Block-level elements a spoken paragraph can map onto. */
 const BLOCK_SELECTOR = "p, li, h1, h2, h3, h4, h5, h6, blockquote, dt, dd, td, th, figcaption";
+
+const SKIP_SELECTOR = "a, button, input, textarea, select, [role='button']";
 
 function blockText(element: HTMLElement): string {
   return element.innerText ?? element.textContent ?? "";
@@ -86,8 +103,18 @@ function scrollBlockIntoView(block: HTMLElement): void {
 
 export const TtsParagraphHighlight = memo(function TtsParagraphHighlight({
   messageId,
+  text,
+  isStreaming,
+  threadRef,
+  threadTitle,
+  ttsEnabled,
 }: {
   messageId: MessageId;
+  text: string;
+  isStreaming: boolean;
+  threadRef: ScopedThreadRef | null;
+  threadTitle: string | undefined;
+  ttsEnabled: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   // Last scroll request consumed by this message, so a click in the mini-player
@@ -96,6 +123,9 @@ export const TtsParagraphHighlight = memo(function TtsParagraphHighlight({
   // Auto-scroll follows the narration only for its first paragraph; after that
   // the reader scrolls freely and the highlight never yanks the page back.
   const autoScrolledRef = useRef(false);
+  // Cues for the rendered text, cached across hover/click events because the
+  // text changes on every streamed token.
+  const cuesRef = useRef<{ text: string; cues: readonly string[] } | null>(null);
   const status = useAudioPlayerStore((s) => s.status);
   const playingId = useAudioPlayerStore((s) => s.playingMessageId);
   const paragraph = useAudioPlayerStore((s) => s.activeParagraph);
@@ -103,8 +133,16 @@ export const TtsParagraphHighlight = memo(function TtsParagraphHighlight({
   // Grows as more paragraphs are synthesized, so blocks that become seekable
   // ahead of the playback head are (re)marked clickable.
   const synthesizedParagraphs = useAudioPlayerStore((s) => s.synthesizedParagraphs);
+  const { play } = useTtsPlayer();
 
   const active = playingId === messageId && status !== "idle" && paragraph !== null;
+
+  const cuesForText = (): readonly string[] => {
+    if (cuesRef.current?.text !== text) {
+      cuesRef.current = { text, cues: paragraphCuesFor(text) };
+    }
+    return cuesRef.current.cues;
+  };
 
   // Clickability only: which blocks can be clicked to seek. Re-runs as
   // synthesis advances so newly-synthesized paragraphs become clickable, but
@@ -156,21 +194,49 @@ export const TtsParagraphHighlight = memo(function TtsParagraphHighlight({
     }
   }, [active, paragraph, scrollRequest]);
 
-  // Delegated click: any matched block seeks to its paragraph. A single
-  // listener survives the markdown DOM re-rendering under us.
+  // A narration started on a streaming message grows with its text: paragraphs
+  // that arrive join the same session, and the final text ends it.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- The audio engine lives outside React and follows the streamed text.
+  useEffect(() => {
+    if (playingId !== messageId || status === "idle") return;
+    if (isStreaming) syncPlaybackText(messageId, text);
+    else completePlaybackText(messageId);
+  }, [messageId, text, isStreaming, playingId, status]);
+
+  // Delegated click: any matched block seeks to its paragraph, and ctrl-click
+  // starts a narration here. A single listener survives the markdown DOM
+  // re-rendering under us.
   const handleClick = (event: MouseEvent) => {
     const store = useAudioPlayerStore.getState();
-    if (store.playingMessageId !== messageId || store.status === "idle") return;
     const target = event.target;
     if (!(target instanceof Element)) return;
     // Let links, controls, and text selection behave normally.
-    if (target.closest("a, button, input, textarea, select, [role='button']") !== null) return;
+    if (target.closest(SKIP_SELECTOR) !== null) return;
     if (window.getSelection()?.toString()) return;
     const container = ref.current?.parentElement;
     if (container === null || container === undefined) return;
     const block = target.closest<HTMLElement>(BLOCK_SELECTOR);
     if (block === null || !container.contains(block)) return;
     const lineText = clickedLineText(block, event) ?? undefined;
+
+    const narrating = store.playingMessageId === messageId && store.status !== "idle";
+    if (!narrating) {
+      if (!event.ctrlKey && !event.metaKey) return;
+      if (!ttsEnabled) return;
+      const paragraph = findParagraphIndexForBlock(cuesForText(), blockText(block), lineText);
+      if (paragraph < 0) return;
+      event.preventDefault();
+      // A user-started narration takes over from any queued agent speech.
+      clearSpokenQueue();
+      void play(messageId, text, threadRef, threadTitle, {
+        startParagraph: paragraph,
+        live: isStreaming,
+      }).catch(() => {
+        // Failure is surfaced through the audio store's toast.
+      });
+      return;
+    }
+
     const paragraph = findParagraphIndexForBlock(
       getActiveParagraphCues(),
       blockText(block),
@@ -184,13 +250,35 @@ export const TtsParagraphHighlight = memo(function TtsParagraphHighlight({
     block.classList.add(CLICKABLE_CLASS);
   };
 
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- The delegated listener outlives markdown re-renders.
+  // Native hover hint, so ctrl-click is discoverable without adding chrome to
+  // every paragraph. Set on hover rather than up front: streamed text would
+  // otherwise re-scan the whole message on every token.
+  const handlePointerOver = (event: PointerEvent) => {
+    if (!ttsEnabled) return;
+    const store = useAudioPlayerStore.getState();
+    if (store.playingMessageId === messageId && store.status !== "idle") return;
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    if (target.closest(SKIP_SELECTOR) !== null) return;
+    const container = ref.current?.parentElement;
+    if (container === null || container === undefined) return;
+    const block = target.closest<HTMLElement>(BLOCK_SELECTOR);
+    if (block === null || !container.contains(block) || block.title.length > 0) return;
+    if (findParagraphIndexForBlock(cuesForText(), blockText(block)) < 0) return;
+    block.title = READ_FROM_HERE_HINT;
+  };
+
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- The delegated listeners outlive markdown re-renders.
   useEffect(() => {
     const container = ref.current?.parentElement;
     if (container === null || container === undefined) return;
     container.addEventListener("click", handleClick);
-    return () => container.removeEventListener("click", handleClick);
-  }, [handleClick]);
+    container.addEventListener("pointerover", handlePointerOver);
+    return () => {
+      container.removeEventListener("click", handleClick);
+      container.removeEventListener("pointerover", handlePointerOver);
+    };
+  }, [handleClick, handlePointerOver]);
 
   return <div ref={ref} aria-hidden className="hidden" />;
 });
