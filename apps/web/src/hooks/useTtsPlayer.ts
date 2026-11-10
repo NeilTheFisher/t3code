@@ -11,9 +11,12 @@ import { markdownToSpokenText, toSpokenUnits } from "~/lib/markdownToSpokenText"
 import {
   convergeEstimatedDuration,
   estimateSpokenDuration,
+  playbackPosition,
   seekSchedule,
   TTS_CHARS_PER_SECOND,
   type ChunkSpan,
+  type PlaybackPosition,
+  type ScheduledChunk,
 } from "~/lib/ttsPlaybackMath";
 import { resolveTtsEnvironmentBase } from "~/lib/ttsEnvironmentBase";
 import { localSpeechAvailable, streamPhononChunks, TTS_PCM_SAMPLE_RATE } from "~/lib/phononSpeech";
@@ -27,6 +30,15 @@ function excerptTitle(text: string): string {
 }
 
 /**
+ * Global-player title: the playing thread's title, or the spoken excerpt when
+ * there is no thread (agent speech, the voice preview).
+ */
+function playerTitle(threadTitle: string | undefined, spoken: string): string {
+  const trimmed = threadTitle?.trim();
+  return trimmed === undefined || trimmed.length === 0 ? excerptTitle(spoken) : trimmed;
+}
+
+/**
  * Perceptual volume curve: slider position -> amplitude. Position 0.5 sounds
  * "half as loud" at ~12% amplitude, matching how OS volume sliders behave.
  */
@@ -36,12 +48,8 @@ export function sliderToVolume(position: number): number {
   return pos ** VOLUME_EXP;
 }
 
-interface ScheduledSource {
+interface ScheduledSource extends ScheduledChunk {
   source: AudioBufferSourceNode;
-  /** Context time this source starts at. */
-  startedAt: number;
-  /** Playback duration in context-time seconds (chunk duration / rate). */
-  duration: number;
 }
 
 interface PlayChunk {
@@ -75,8 +83,6 @@ interface EngineState {
    */
   nextStartTime: number;
   paused: boolean;
-  /** Ctx time when playback was suspended, if paused. */
-  pausedAt: number | null;
   rate: number;
   /** Spoken-unit time spans [start, end) in message-time, by index. */
   paragraphSpans: Array<{ start: number; end: number }>;
@@ -149,13 +155,14 @@ function pcmToAudioBuffer(ctx: AudioContext, chunk: ArrayBuffer): AudioBuffer {
   return buffer;
 }
 
-/** Message-time of the playback head (where in [0, duration) we are). */
+/** Message-time of the playback head: where in [0, duration) we are. */
+function currentPosition(): PlaybackPosition {
+  if (engine === null || audioContext === null) return { head: 0, paragraph: null };
+  return playbackPosition(scheduledSources, audioContext.currentTime);
+}
+
 function currentHead(): number {
-  const e = engine;
-  if (e === null || audioContext === null) return 0;
-  // The ctx clock freezes while suspended, so pausedAt needs no adjustment.
-  const ctxNow = e.paused ? (e.pausedAt ?? 0) : audioContext.currentTime;
-  return Math.max(0, Math.min(ctxNow - e.baseTime, e.duration));
+  return currentPosition().head;
 }
 
 function stopSources(): void {
@@ -183,7 +190,7 @@ function teardown(): void {
   paragraphCues = [];
   applyRateChange = null;
   restartFromParagraph = null;
-  useAudioPlayerStore.getState().setActiveParagraph(null, null);
+  useAudioPlayerStore.getState().setActiveParagraph(null);
 }
 
 function finishPlayback(): void {
@@ -191,27 +198,28 @@ function finishPlayback(): void {
   useAudioPlayerStore.getState().setIdle();
 }
 
+/**
+ * Highlight the paragraph being heard. A pending seek owns the highlight until
+ * its audio arrives (see `seekToParagraph`), and a null paragraph holds the
+ * previous one rather than blinking off between chunks.
+ */
+function syncActiveParagraph(paragraph: number | null): void {
+  const e = engine;
+  if (e === null || paragraph === null) return;
+  if (e.pendingSeekParagraph !== null || e.pendingSeekTime !== null) return;
+  const store = useAudioPlayerStore.getState();
+  if (store.activeParagraph === paragraph) return;
+  store.setActiveParagraph(paragraph);
+}
+
 function startProgressLoop(): void {
   const tick = () => {
     progressHandle = null;
     const e = engine;
     if (e === null || e.paused || audioContext === null) return;
-    const store = useAudioPlayerStore.getState();
-    const head = currentHead();
-    store.setProgress(head, e.duration);
-
-    // Paragraph highlighting: the span containing the playback head. Skipped
-    // while a seek is pending so it can't overwrite the highlight that was set
-    // optimistically on click, before the head reaches the target.
-    if (e.pendingSeekParagraph === null && e.pendingSeekTime === null) {
-      const active = e.paragraphSpans.findIndex((span) => head >= span.start && head < span.end);
-      if ((store.activeParagraph ?? -1) !== active) {
-        store.setActiveParagraph(
-          active >= 0 ? active : null,
-          active >= 0 ? (paragraphCues[active] ?? null) : null,
-        );
-      }
-    }
+    const position = currentPosition();
+    useAudioPlayerStore.getState().setProgress(position.head, e.duration);
+    syncActiveParagraph(position.paragraph);
 
     // Only settle when the stream is fully scheduled AND every source has
     // finished. During streaming, more sources may still arrive.
@@ -242,7 +250,6 @@ export function togglePausePlayback(): void {
   const { ctx } = ensureAudioGraph();
 
   if (!e.paused) {
-    e.pausedAt = ctx.currentTime;
     e.paused = true;
     if (progressHandle !== null) {
       cancelAnimationFrame(progressHandle);
@@ -252,7 +259,6 @@ export function togglePausePlayback(): void {
     s.setPaused();
   } else {
     e.paused = false;
-    e.pausedAt = null;
     void ctx.resume();
     s.setPlaying(e.playingMessageId);
     startProgressLoop();
@@ -287,16 +293,20 @@ function rescheduleAt(head: number): number {
     source.start(when, offset);
     scheduledSources.push({
       source,
-      startedAt: when,
+      // A start time in the past (the chunk containing the seek target) begins
+      // immediately at its offset, so the audible clock starts now, not then.
+      startedAt: Math.max(when, ctx.currentTime),
       duration: chunk.buffer.duration - offset,
+      at: chunk.at + offset,
+      paragraph: chunk.paragraph,
     });
   }
 
   // The next streamed chunk must land after everything already scheduled here.
   e.nextStartTime = e.baseTime + e.scheduledDuration;
 
-  const s = useAudioPlayerStore.getState();
-  s.setProgress(target, e.duration);
+  useAudioPlayerStore.getState().setProgress(target, e.duration);
+  syncActiveParagraph(currentPosition().paragraph);
   if (!e.paused && progressHandle === null) {
     startProgressLoop();
   }
@@ -375,12 +385,8 @@ export function seekToParagraph(index: number): void {
   if (e === null) return;
   if (useAudioPlayerStore.getState().status === "paused") togglePausePlayback();
   // Reflect the seek immediately: highlight the clicked paragraph now, before
-  // its audio (and the progress loop) catches up. Skip when the cue is unknown,
-  // so we don't clear the store's cue and drop the highlight.
-  const cue = paragraphCues[index];
-  if (cue !== undefined) {
-    useAudioPlayerStore.getState().setActiveParagraph(index, cue);
-  }
+  // its audio (and the progress loop) catches up.
+  useAudioPlayerStore.getState().setActiveParagraph(index);
   const span = e.paragraphSpans[index];
   if (span !== undefined) {
     seekPlayback(span.start);
@@ -400,6 +406,8 @@ export interface PlayOptions {
   voice: string;
   /** Synthesis speed for this narration, overriding the shared slider. */
   speed?: number | undefined;
+  /** Playing thread's title for the global player; the excerpt stands in when absent. */
+  title?: string | undefined;
 }
 
 export async function startPlayback(
@@ -434,7 +442,7 @@ export async function startPlayback(
   const { volume } = store;
   // An agent utterance can carry its own speed; otherwise use the slider.
   const rate = options.speed ?? store.rate;
-  store.setLoading(id, excerptTitle(spoken), threadRef);
+  store.setLoading(id, playerTitle(options.title, spoken), threadRef);
   setPlaybackVolume(volume);
 
   const { ctx, gain } = ensureAudioGraph();
@@ -453,7 +461,6 @@ export async function startPlayback(
     baseTime: ctx.currentTime + 0.05,
     nextStartTime: ctx.currentTime + 0.05,
     paused: false,
-    pausedAt: null,
     rate,
     paragraphSpans: [],
     spokenCharCounts,
@@ -513,7 +520,13 @@ export async function startPlayback(
     source.buffer = buffer;
     source.connect(gain);
     source.start(start);
-    scheduledSources.push({ source, startedAt: start, duration: buffer.duration });
+    scheduledSources.push({
+      source,
+      startedAt: start,
+      duration: buffer.duration,
+      at,
+      paragraph: unit,
+    });
 
     // A seek that was waiting for its audio to exist: jump now that it does.
     if (e.pendingSeekParagraph !== null && unit >= e.pendingSeekParagraph) {
@@ -674,8 +687,8 @@ export async function startPlayback(
 export function useTtsPlayer() {
   const tts = useClientSettings((s) => s.tts);
 
-  const play = (id: MessageId, text: string, threadRef: ScopedThreadRef | null) =>
-    startPlayback(id, text, threadRef, { voice: tts.voice });
+  const play = (id: MessageId, text: string, threadRef: ScopedThreadRef | null, title?: string) =>
+    startPlayback(id, text, threadRef, { voice: tts.voice, title });
 
   return {
     play,

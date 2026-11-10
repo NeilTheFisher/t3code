@@ -50,6 +50,45 @@ export interface SeekEntry {
   offset: number;
 }
 
+/** One chunk of the narration as it is scheduled on the audio clock. */
+export interface ScheduledChunk {
+  /** Message-time offset where this chunk's audio begins, after any seek offset. */
+  at: number;
+  /** Context time this chunk starts at. */
+  startedAt: number;
+  /** Context-time seconds left to play. */
+  duration: number;
+  /** Index of the spoken paragraph this chunk belongs to. */
+  paragraph: number;
+}
+
+export interface PlaybackPosition {
+  /** Message-time of the audio being heard. */
+  head: number;
+  /** Paragraph of the audio being heard, or null before the first chunk starts. */
+  paragraph: number | null;
+}
+
+/**
+ * The audible position, read off the schedule instead of the audio clock.
+ * Synthesis runs ahead of and behind realtime, so the clock alone runs into
+ * audio that does not exist yet and the highlight follows it there. In a gap
+ * the last started chunk's end holds until the next chunk begins.
+ */
+export function playbackPosition(
+  schedule: readonly ScheduledChunk[],
+  ctxNow: number,
+): PlaybackPosition {
+  let head = 0;
+  let paragraph: number | null = null;
+  for (const chunk of schedule) {
+    if (chunk.startedAt > ctxNow) break;
+    head = chunk.at + Math.min(ctxNow - chunk.startedAt, chunk.duration);
+    paragraph = chunk.paragraph;
+  }
+  return { head, paragraph };
+}
+
 /**
  * Which chunks to (re)schedule after seeking to `target`, in order: chunks
  * that end at/before the target are dropped; the chunk containing the target
