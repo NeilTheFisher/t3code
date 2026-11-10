@@ -1,28 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  modelAssetBase,
   nativeSpeedFor,
-  parseVoiceCatalog,
-  phononVoiceFor,
   resampleFactorFor,
   rewriteModelUrl,
   splitPauseDirective,
-  voiceCatalogUrl,
 } from "./phononModel";
-
-describe("voice mapping", () => {
-  it("passes a catalog voice through verbatim", () => {
-    expect(phononVoiceFor("Trevor")).toBe("Trevor");
-    expect(phononVoiceFor("  Delia ")).toBe("Delia");
-  });
-
-  it("uses the default for an empty or legacy Kokoro name", () => {
-    expect(phononVoiceFor("  ")).toBe("Delia");
-    expect(phononVoiceFor("af_heart")).toBe("Delia");
-    expect(phononVoiceFor("am_michael")).toBe("Delia");
-  });
-});
 
 describe("speed", () => {
   it("clamps the model's native range", () => {
@@ -61,31 +44,7 @@ describe("splitPauseDirective", () => {
   });
 });
 
-describe("parseVoiceCatalog", () => {
-  it("keeps distinct English voices in catalog order", () => {
-    const catalog = [
-      '{"name":"Delia","language":"en"}',
-      '{"name":"Coralie","language":"fr"}',
-      '{"name":"Trevor","language":"en"}',
-      '{"name":"Delia","language":"en"}',
-    ].join("\n");
-    expect(parseVoiceCatalog(catalog)).toEqual(["Delia", "Trevor"]);
-  });
-
-  it("skips a truncated line", () => {
-    expect(parseVoiceCatalog('{"name":"Delia","language":"en"}\n{"name":')).toEqual(["Delia"]);
-  });
-});
-
 describe("model asset URLs", () => {
-  it("puts the proxy root under the environment that serves it", () => {
-    expect(modelAssetBase("http://127.0.0.1:1338/")).toBe("http://127.0.0.1:1338/v1/audio/model/");
-  });
-
-  it("resolves the catalog through the same proxy", () => {
-    expect(voiceCatalogUrl("")).toMatch(/^\/v1\/audio\/model\/gradium\/phonon-voices\/resolve\//);
-  });
-
   it("sends a pinned Hub file to the environment and leaves other URLs alone", () => {
     expect(
       rewriteModelUrl(

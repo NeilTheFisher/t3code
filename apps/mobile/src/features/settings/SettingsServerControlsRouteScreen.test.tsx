@@ -96,6 +96,22 @@ vi.mock("./components/SettingsEnvironmentFilterHeader", () => ({
 vi.mock("./components/DatabaseStorageNotice", () => ({ DatabaseStorageNotice: () => null }));
 vi.mock("./components/SettingsSection", () => ({ SettingsSection: Children }));
 vi.mock("../../components/ui/ListChoiceRow", () => ({ ListChoiceRow: () => null }));
+vi.mock("../../components/ui/ListRow", () => ({
+  ListRow: ({
+    label,
+    description,
+    onPress,
+  }: {
+    label: string;
+    description?: string;
+    onPress: () => void;
+  }) => (
+    <button onClick={onPress}>
+      {label}
+      {description ? `: ${description}` : ""}
+    </button>
+  ),
+}));
 vi.mock("./components/SettingsSwitchRow", () => ({
   SettingsSwitchRow: ({
     label,
