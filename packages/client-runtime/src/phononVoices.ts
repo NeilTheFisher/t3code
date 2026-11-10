@@ -8,16 +8,47 @@
 export const PHONON_DEFAULT_VOICE = "Delia";
 
 /**
- * The model's English voices, offered when the environment's catalog cannot be
- * fetched. Partial on purpose: it exists so the picker still works offline.
+ * Every English voice the pinned catalog lists, so the picker exists before the
+ * environment's catalog answers and still works offline. Order matches the catalog.
  */
 export const PHONON_FALLBACK_VOICES: readonly string[] = [
+  "Zoey",
+  "Juniper",
+  "Everly",
+  "Harper",
+  "Hadley",
   "Delia",
   "Easton",
-  "Harper",
-  "Juniper",
-  "Maeve",
+  "Micah",
   "Trevor",
+  "Russell",
+  "Preston",
+  "Miles",
+  "Maeve",
+  "Freya",
+  "Pippa",
+  "Elodie-Rose",
+  "Imogen",
+  "Lottie",
+  "Alfie",
+  "Hugh",
+  "Edwin",
+  "Spencer",
+  "Toby",
+  "Teddy",
+  "Bryony",
+  "Captain Silas Blackwater",
+  "Morwenna of the Deep",
+  "Old Mortlake",
+  "Azgorath",
+  "Fennick the Young Elf",
+  "The Thing Under the Stairs",
+  "Vyrmathrax the Ancient",
+  "Grub the Ogre",
+  "Master Aldric",
+  "The Snow Queen",
+  "Sir Bramwell",
+  "Fairy Godmother",
 ];
 
 const MODEL_ASSET_PREFIX = "/v1/audio/model/";
