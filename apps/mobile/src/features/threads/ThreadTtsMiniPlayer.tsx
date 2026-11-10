@@ -36,7 +36,7 @@ export const ThreadTtsMiniPlayer = memo(function ThreadTtsMiniPlayer(props: {
   const [barWidth, setBarWidth] = useState(0);
   if (playback === null) return null;
 
-  const { isLoading, isPlaying, isPaused, currentTime, duration, rate } = playback;
+  const { isLoading, isPlaying, isPaused, currentTime, duration, rate, detail } = playback;
   const progressFraction = duration > 0 ? Math.min(1, Math.max(0, currentTime / duration)) : 0;
 
   const cycleRate = () => {
@@ -105,6 +105,11 @@ export const ThreadTtsMiniPlayer = memo(function ThreadTtsMiniPlayer(props: {
           <Text className="font-t3-medium text-xs text-foreground" numberOfLines={1}>
             {playback.title ?? "Narrating"}
           </Text>
+          {detail !== null ? (
+            <Text className="text-2xs text-foreground-muted" numberOfLines={1}>
+              {detail}
+            </Text>
+          ) : null}
           <View className="flex-row items-center gap-1.5">
             <View
               onLayout={(event) => setBarWidth(event.nativeEvent.layout.width)}
