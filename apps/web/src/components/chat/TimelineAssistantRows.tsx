@@ -243,6 +243,7 @@ function AssistantCopyButton({
           messageId={message.id}
           text={playState.text ?? ""}
           threadRef={ctx.threadRef}
+          threadTitle={ctx.threadTitle}
           variant="ghost"
         />
       ) : null}
