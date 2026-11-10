@@ -1286,7 +1286,6 @@ describe("ChatMarkdown TTS paragraph highlight", () => {
       status: "playing",
       playingMessageId: messageId,
       activeParagraph: 1,
-      activeParagraphCue: "second paragraph",
     });
     onTestFinished(() => {
       useAudioPlayerStore.getState().setIdle();
@@ -1321,7 +1320,6 @@ describe("ChatMarkdown TTS paragraph highlight", () => {
       status: "playing",
       playingMessageId: messageId,
       activeParagraph: 1,
-      activeParagraphCue: ttsHighlight.cues[1]!,
     });
     onTestFinished(() => {
       useAudioPlayerStore.getState().setIdle();

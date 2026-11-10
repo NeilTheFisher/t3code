@@ -3763,6 +3763,7 @@ export default function ChatView(props: ChatViewProps) {
                     displayedThreadRef?.environmentId ?? activeThread.environmentId
                   }
                   routeThreadKey={displayedTimelineKey}
+                  threadTitle={activeThread.title}
                   displayThreadKey={displayedTimelineKey}
                   announceTurnStatus={!isProviderSubagent}
                   onOpenToolDiff={parentPanel?.openToolDiff ?? onOpenToolDiffStable}
