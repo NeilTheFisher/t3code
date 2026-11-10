@@ -2,15 +2,7 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 import { AudioLinesIcon, MicIcon, MicOffIcon, MinusIcon, PhoneOffIcon } from "lucide-react";
-import {
-  createContext,
-  type ReactNode,
-  type RefObject,
-  useContext,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { createContext, type ReactNode, type RefObject, useEffect, useRef, useState } from "react";
 
 import { type DraftId, useComposerDraftStore } from "../../composerDraftStore";
 import { readThreadDetail } from "../../state/entities";
@@ -1081,10 +1073,4 @@ export function VoiceSessionProvider({ children }: { readonly children: ReactNod
       ) : null}
     </VoiceSessionContext.Provider>
   );
-}
-
-export function useVoiceSession(): VoiceSessionContextValue {
-  const context = useContext(VoiceSessionContext);
-  if (!context) throw new Error("useVoiceSession must be used inside VoiceSessionProvider.");
-  return context;
 }
