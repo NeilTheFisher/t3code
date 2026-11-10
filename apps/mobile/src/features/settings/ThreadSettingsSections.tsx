@@ -320,7 +320,7 @@ export function SpokenSettingsSection() {
 
   return (
     <View className="gap-3">
-      <SettingsSection title="Spoken messages">
+      <SettingsSection title="Text-to-speech">
         <SettingsSwitchRow
           icon="speaker.wave.2"
           label="Autoplay spoken messages"
