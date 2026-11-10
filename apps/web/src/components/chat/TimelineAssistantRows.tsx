@@ -64,6 +64,8 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
               skills={ctx.skills}
               headingLevelOffset={MESSAGE_HEADING_LEVEL}
               ttsMessageId={row.message.id}
+              ttsEnabled={ctx.ttsEnabled}
+              ttsThreadTitle={ctx.threadTitle}
               onUseArtifactTemplate={ctx.onUseArtifactTemplate}
               onRunShellCommand={ctx.onRunShellCommand}
               onImageExpand={ctx.onImageExpand}

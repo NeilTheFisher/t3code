@@ -7,7 +7,7 @@
 import { type MessageId, type ScopedThreadRef } from "@t3tools/contracts";
 import { useClientSettings } from "./useSettings";
 import { useAudioPlayerStore } from "~/audioPlayerStore";
-import { markdownToSpokenText, toSpokenUnits } from "~/lib/markdownToSpokenText";
+import { markdownToSpokenText, toSpokenUnits, type SpokenUnit } from "~/lib/markdownToSpokenText";
 import {
   convergeEstimatedDuration,
   estimateSpokenDuration,
@@ -22,6 +22,16 @@ import { resolveTtsEnvironmentBase } from "~/lib/ttsEnvironmentBase";
 import { localSpeechAvailable, streamPhononChunks, TTS_PCM_SAMPLE_RATE } from "~/lib/phononSpeech";
 
 const TITLE_MAX_CHARS = 80;
+
+/**
+ * A live narration out of text waits this long, in audio-clock seconds, before
+ * it settles. Covers a message that stopped streaming while its row was
+ * unmounted, so the player cannot sit "playing" over silence forever.
+ */
+const LIVE_WAIT_LIMIT_SECONDS = 15;
+
+/** A sentence that ends here is finished; a live narration may speak it. */
+const SETTLED_UNIT_TEXT = /[.!?…]["'”’)\]]*(?:\s*\[pause:[\d.]+s\])?$/;
 
 /** Display excerpt of the synthesized text, prepared once at play time. */
 function excerptTitle(text: string): string {
@@ -100,6 +110,16 @@ interface EngineState {
   pendingSeekTime: number | null;
   /** A seek to a paragraph with no audio yet, applied when its audio arrives. */
   pendingSeekParagraph: number | null;
+  /** The source text can keep growing (a message that is still streaming). */
+  live: boolean;
+  /** Live, and every settled paragraph is synthesized: waiting for more text. */
+  awaitingText: boolean;
+  /** Audio-clock time the session started waiting for text. */
+  waitingSince: number | null;
+  /** A unit to synthesize even though it is the tail still being written. */
+  forceTailIndex: number | null;
+  /** Unit to resume synthesis at after an out-of-order seek. */
+  resumeIndex: number | null;
 }
 
 let audioContext: AudioContext | null = null;
@@ -122,6 +142,10 @@ let applyRateChange: ((rate: number) => void) | null = null;
  * of waiting for the sequential stream to reach it.
  */
 let restartFromParagraph: ((index: number) => void) | null = null;
+/** Set by `startPlayback` while a live narration can grow: appends new paragraphs. */
+let appendNarrationText: ((text: string) => void) | null = null;
+/** Set by `startPlayback` while a live narration waits: the text is now final. */
+let finishNarrationText: (() => void) | null = null;
 /** Normalized text for cue matching: lowercase, whitespace collapsed. */
 function cueOf(paragraph: string): string {
   return paragraph
@@ -190,6 +214,8 @@ function teardown(): void {
   paragraphCues = [];
   applyRateChange = null;
   restartFromParagraph = null;
+  appendNarrationText = null;
+  finishNarrationText = null;
   useAudioPlayerStore.getState().setActiveParagraph(null);
 }
 
@@ -224,13 +250,21 @@ function startProgressLoop(): void {
     // Only settle when the stream is fully scheduled AND every source has
     // finished. During streaming, more sources may still arrive.
     const ctxNow = audioContext.currentTime;
-    const allDone =
-      e.streamDone &&
-      scheduledSources.length > 0 &&
-      scheduledSources.every(({ startedAt, duration }) => ctxNow >= startedAt + duration);
+    const allFinished = scheduledSources.every(
+      ({ startedAt, duration }) => ctxNow >= startedAt + duration,
+    );
+    const allDone = e.streamDone && scheduledSources.length > 0 && allFinished;
     if (allDone) {
       finishPlayback();
       return;
+    }
+    // A live narration holds the player open for the rest of a streaming
+    // message; settle when that text stops arriving instead of spinning.
+    if (e.awaitingText && allFinished) {
+      e.waitingSince ??= ctxNow;
+      if (ctxNow - e.waitingSince > LIVE_WAIT_LIMIT_SECONDS) finishNarrationText?.();
+    } else {
+      e.waitingSince = null;
     }
     progressHandle = requestAnimationFrame(tick);
   };
@@ -408,6 +442,30 @@ export interface PlayOptions {
   speed?: number | undefined;
   /** Playing thread's title for the global player; the excerpt stands in when absent. */
   title?: string | undefined;
+  /** Spoken-unit index to begin at, for narration started from a paragraph. */
+  startParagraph?: number | undefined;
+  /** The message is still streaming: keep the session open as paragraphs arrive. */
+  live?: boolean | undefined;
+}
+
+/** Opening words of every spoken paragraph of `text`, for DOM cue matching. */
+export function paragraphCuesFor(text: string): string[] {
+  return toSpokenUnits(text).map((unit) => cueOf(unit.text));
+}
+
+/**
+ * Grow a live narration with a message's latest text, so paragraphs that
+ * arrived while it played join the same session.
+ */
+export function syncPlaybackText(id: MessageId, text: string): void {
+  if (engine === null || engine.playingMessageId !== id || !engine.live) return;
+  appendNarrationText?.(text);
+}
+
+/** The message stopped streaming: speak what is left and let the session end. */
+export function completePlaybackText(id: MessageId): void {
+  if (engine === null || engine.playingMessageId !== id || !engine.live) return;
+  finishNarrationText?.();
 }
 
 export async function startPlayback(
@@ -422,7 +480,7 @@ export async function startPlayback(
     return;
   }
 
-  const units = toSpokenUnits(text);
+  const units: SpokenUnit[] = toSpokenUnits(text);
   const spoken = markdownToSpokenText(text);
   // Playback is driven by `units`, so a message that flattens to a non-empty
   // string of nothing but pauses (a lone code block or rule) still has no unit
@@ -432,6 +490,7 @@ export async function startPlayback(
     useAudioPlayerStore.getState().setError("Nothing to read aloud.", id);
     return;
   }
+  const startIndex = Math.min(Math.max(0, options.startParagraph ?? 0), units.length - 1);
   const speechServerUrl = resolveTtsEnvironmentBase(threadRef?.environmentId ?? null);
   // teardown() clears `paragraphCues`, so the new cues must be assigned after
   // it — assigning first left every cue null and suppressed all highlighting.
@@ -456,7 +515,15 @@ export async function startPlayback(
     playingMessageId: id,
     chunks: [],
     scheduledDuration: 0,
-    duration: estimateSpokenDuration(spoken, rate),
+    duration: estimateSpokenDuration(
+      startIndex === 0
+        ? spoken
+        : units
+            .slice(startIndex)
+            .map((unit) => unit.text)
+            .join(" "),
+      rate,
+    ),
     streamDone: false,
     baseTime: ctx.currentTime + 0.05,
     nextStartTime: ctx.currentTime + 0.05,
@@ -465,11 +532,18 @@ export async function startPlayback(
     paragraphSpans: [],
     spokenCharCounts,
     synthesizedChars: 0,
-    nextParagraphIndex: 0,
+    nextParagraphIndex: startIndex,
     pendingSeekTime: null,
     pendingSeekParagraph: null,
+    live: options.live === true,
+    awaitingText: false,
+    waitingSince: null,
+    forceTailIndex: options.live === true && startIndex === units.length - 1 ? startIndex : null,
+    resumeIndex: null,
   };
   const e = engine;
+  // Reflect a start at a later paragraph straight away, before its audio lands.
+  if (startIndex > 0) useAudioPlayerStore.getState().setActiveParagraph(startIndex);
 
   /** Recompute the display duration estimate from synthesized evidence. */
   const refreshEstimate = () => {
@@ -574,51 +648,99 @@ export async function startPlayback(
     });
   };
 
+  /** Whether a spoken unit ends a sentence, so a live narration may speak it. */
+  const isSettledUnit = (unit: SpokenUnit): boolean => SETTLED_UNIT_TEXT.test(unit.text.trimEnd());
+
   /**
-   * Synthesize units from `fromIndex` onward, one request at a time, eagerly so
-   * any paragraph is seekable. Each call owns its AbortController, so a speed
-   * change can replace the worker without stale chunks.
+   * How far synthesis may run. While a message streams, its last sentence is
+   * still being written, so it waits until it settles — or until the reader
+   * started/seeks straight at it — instead of speaking a fragment twice.
    */
-  const runSynthesis = (fromIndex: number, owner = new AbortController()): Promise<void> => {
+  const synthesisEnd = (): number => {
+    if (!e.live) return units.length;
+    const last = units.length - 1;
+    if (last < 0) return 0;
+    if (e.forceTailIndex === last || isSettledUnit(units[last]!)) return units.length;
+    return last;
+  };
+
+  /** Snap the display duration to the exact extent and let the loop settle idle. */
+  const settleStream = (): void => {
+    abortController = null;
+    e.streamDone = true;
+    e.awaitingText = false;
+    e.waitingSince = null;
+    e.duration = e.scheduledDuration;
+    useAudioPlayerStore.getState().setSynthesizedParagraphs(e.nextParagraphIndex);
+    useAudioPlayerStore.getState().setProgress(currentHead(), e.duration);
+  };
+
+  let worker: AbortController | null = null;
+
+  /**
+   * Synthesize every settled unit, one request at a time. Each run owns its
+   * AbortController, so a speed change or an out-of-order seek can replace it
+   * without stale chunks. A live run stops when it catches up with the text and
+   * waits for the next paragraph instead of ending the stream.
+   */
+  const pump = async (initial?: AbortController): Promise<void> => {
+    if (worker !== null) return;
+    const owner = initial ?? new AbortController();
+    worker = owner;
     abortController = owner;
-    return (async () => {
-      try {
-        for (let index = fromIndex; index < units.length; index++) {
-          const unit = units[index]!;
-          // The trailing pause is silence the server renders; drop it on the
-          // last unit so playback does not end on dead air.
-          const unitText =
-            index === units.length - 1
-              ? unit.text
-              : unit.pauseAfter > 0
-                ? `${unit.text} [pause:${unit.pauseAfter}s]`
-                : unit.text;
-          await synthesizeUnit(unitText, index, owner);
-          if (engine !== e || owner.signal.aborted) return;
-          e.synthesizedChars += spokenCharCounts[index] ?? 0;
-          e.nextParagraphIndex = index + 1;
-          refreshEstimate();
-        }
+    try {
+      e.awaitingText = false;
+      e.waitingSince = null;
+      let index = e.resumeIndex ?? e.nextParagraphIndex;
+      e.resumeIndex = null;
+      while (index < synthesisEnd()) {
+        const unit = units[index]!;
+        // The trailing pause is silence the server renders; drop it on the
+        // last unit so playback does not end on dead air.
+        const unitText =
+          index === units.length - 1
+            ? unit.text
+            : unit.pauseAfter > 0
+              ? `${unit.text} [pause:${unit.pauseAfter}s]`
+              : unit.text;
+        await synthesizeUnit(unitText, index, owner);
         if (engine !== e || owner.signal.aborted) return;
-        abortController = null; // all streams done; progress loop may now settle idle
-        // Snap the display duration to the exact synthesized extent.
-        e.streamDone = true;
-        e.duration = e.scheduledDuration;
-        useAudioPlayerStore.getState().setSynthesizedParagraphs(e.nextParagraphIndex);
-        useAudioPlayerStore.getState().setProgress(currentHead(), e.duration);
-      } catch (error) {
-        if (owner.signal.aborted) {
-          // Superseded by a restart or stop; that path owns the state now.
-          return;
-        }
-        abortController = null;
-        if (engine !== e) return;
-        const message = error instanceof Error ? error.message : "TTS request failed.";
-        useAudioPlayerStore.getState().setError(message, id);
-        teardown();
-        throw error;
+        e.synthesizedChars += spokenCharCounts[index] ?? 0;
+        e.nextParagraphIndex = index + 1;
+        index += 1;
+        if (e.forceTailIndex !== null && index > e.forceTailIndex) e.forceTailIndex = null;
+        refreshEstimate();
       }
-    })();
+      abortController = null; // all streams done; progress loop may now settle idle
+      if (e.live) {
+        e.awaitingText = true;
+        return;
+      }
+      settleStream();
+    } catch (error) {
+      if (owner.signal.aborted) {
+        // Superseded by a restart or stop; that path owns the state now.
+        return;
+      }
+      abortController = null;
+      if (engine !== e) return;
+      const message = error instanceof Error ? error.message : "TTS request failed.";
+      useAudioPlayerStore.getState().setError(message, id);
+      teardown();
+      throw error;
+    } finally {
+      if (worker === owner) worker = null;
+    }
+  };
+
+  /** Drop the in-flight request and synthesize again from the queue. */
+  const restartWorker = (): void => {
+    const owner = worker;
+    worker = null;
+    owner?.abort();
+    void pump().catch(() => {
+      // The worker already reported the failure through the store.
+    });
   };
 
   /**
@@ -638,8 +760,6 @@ export async function startPlayback(
     }
     keepThrough = Math.min(keepThrough, e.nextParagraphIndex - 1);
 
-    if (abortController !== null) abortController.abort();
-
     e.chunks = e.chunks.filter((chunk) => chunk.paragraph <= keepThrough);
     e.paragraphSpans = e.paragraphSpans.slice(0, keepThrough + 1);
     e.scheduledDuration = keepThrough >= 0 ? (e.paragraphSpans[keepThrough]?.end ?? 0) : 0;
@@ -650,9 +770,7 @@ export async function startPlayback(
     // Re-anchor on the truncated timeline, then synthesize the rest anew.
     rescheduleAt(head);
     refreshEstimate();
-    void runSynthesis(keepThrough + 1).catch(() => {
-      // The worker already reported the failure through the store.
-    });
+    restartWorker();
   };
   applyRateChange = handleRateChange;
 
@@ -664,7 +782,6 @@ export async function startPlayback(
    */
   const handleSeekToParagraph = (index: number): void => {
     const keepThrough = e.nextParagraphIndex - 1;
-    if (abortController !== null) abortController.abort();
     e.chunks = e.chunks.filter((chunk) => chunk.paragraph <= keepThrough);
     e.paragraphSpans = e.paragraphSpans.slice(0, Math.max(0, keepThrough + 1));
     e.scheduledDuration = keepThrough >= 0 ? (e.paragraphSpans[keepThrough]?.end ?? 0) : 0;
@@ -673,22 +790,73 @@ export async function startPlayback(
     e.streamDone = false;
     e.pendingSeekParagraph = index;
     e.pendingSeekTime = null;
+    // The target may be the sentence the message is still writing.
+    e.forceTailIndex = e.live && index === units.length - 1 ? index : null;
+    e.resumeIndex = index;
     rescheduleAt(e.scheduledDuration);
     refreshEstimate();
-    void runSynthesis(index).catch(() => {
-      // The worker already reported the failure through the store.
-    });
+    restartWorker();
   };
   restartFromParagraph = handleSeekToParagraph;
 
-  await runSynthesis(0, controller);
+  /**
+   * Grow the narration with a streaming message's latest text. Units past the
+   * synthesized prefix were never spoken, so they are replaced by the new tail:
+   * a partially written sentence changes as it fills in.
+   */
+  const growNarration = (latest: string): void => {
+    const next = toSpokenUnits(latest);
+    if (next.length <= e.nextParagraphIndex) return;
+    const settled = e.nextParagraphIndex;
+    units.length = settled;
+    spokenCharCounts.length = settled;
+    paragraphCues.length = settled;
+    for (let index = settled; index < next.length; index++) {
+      const unit = next[index]!;
+      units.push(unit);
+      spokenCharCounts.push(unit.text.length);
+      paragraphCues.push(cueOf(unit.text));
+    }
+    refreshEstimate();
+    void pump().catch(() => {
+      // The worker already reported the failure through the store.
+    });
+  };
+  appendNarrationText = growNarration;
+
+  /** The message's text is final: speak the last sentence and let it settle. */
+  const finishNarration = (): void => {
+    if (!e.live) return;
+    e.live = false;
+    e.forceTailIndex = null;
+    e.awaitingText = false;
+    e.waitingSince = null;
+    void pump().catch(() => {
+      // The worker already reported the failure through the store.
+    });
+  };
+  finishNarrationText = finishNarration;
+
+  await pump(controller);
+}
+
+export interface PlaybackStart {
+  /** Spoken-unit index to begin at (the paragraph that was clicked). */
+  startParagraph?: number | undefined;
+  /** The text can still grow: keep the session open for appended paragraphs. */
+  live?: boolean | undefined;
 }
 
 export function useTtsPlayer() {
   const tts = useClientSettings((s) => s.tts);
 
-  const play = (id: MessageId, text: string, threadRef: ScopedThreadRef | null, title?: string) =>
-    startPlayback(id, text, threadRef, { voice: tts.voice, title });
+  const play = (
+    id: MessageId,
+    text: string,
+    threadRef: ScopedThreadRef | null,
+    title?: string,
+    start?: PlaybackStart,
+  ) => startPlayback(id, text, threadRef, { voice: tts.voice, title, ...start });
 
   return {
     play,

@@ -561,11 +561,21 @@ describe("ChatMarkdown Windows file links", () => {
 const ttsHighlight = vi.hoisted(() => ({
   cues: [] as string[],
   seek: vi.fn<(index: number) => void>(),
+  play: vi.fn<(...args: unknown[]) => Promise<void>>(async () => {}),
+  sync: vi.fn<(id: string, text: string) => void>(),
+  complete: vi.fn<(id: string) => void>(),
 }));
 vi.mock(import("~/hooks/useTtsPlayer"), () => ({
   canSeekToParagraph: () => true,
   getActiveParagraphCues: () => ttsHighlight.cues,
+  paragraphCuesFor: () => ttsHighlight.cues,
   seekToParagraph: (index: number) => ttsHighlight.seek(index),
+  syncPlaybackText: (id: string, text: string) => ttsHighlight.sync(id, text),
+  completePlaybackText: (id: string) => ttsHighlight.complete(id),
+  useTtsPlayer: () => ({ play: ttsHighlight.play, stop: () => {} }),
+  // The spoken queue imports these; it loads through the click handler.
+  startPlayback: async () => {},
+  stopPlayback: () => {},
 }));
 
 describe("ChatMarkdown TTS paragraph highlight", () => {
@@ -630,5 +640,38 @@ describe("ChatMarkdown TTS paragraph highlight", () => {
       item!.click();
     });
     expect(ttsHighlight.seek).toHaveBeenCalledWith(1);
+  });
+
+  it("starts a narration at the paragraph a ctrl-click lands on", async () => {
+    setup();
+    const messageId = MessageId.make("msg-tts-start");
+    ttsHighlight.cues = ["first paragraph", "second paragraph"];
+    ttsHighlight.play.mockReset();
+    onTestFinished(() => {
+      ttsHighlight.play.mockReset();
+    });
+
+    await using screen = await renderText("First paragraph.\n\nSecond paragraph.", {
+      ttsMessageId: messageId,
+      ttsEnabled: true,
+    });
+    const blocks = [...screen.container.querySelectorAll<HTMLElement>(".chat-markdown p")];
+
+    // A plain click while nothing narrates is inert.
+    await act(() => {
+      blocks[1]!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(ttsHighlight.play).not.toHaveBeenCalled();
+
+    await act(() => {
+      blocks[1]!.dispatchEvent(new MouseEvent("click", { bubbles: true, ctrlKey: true }));
+    });
+    expect(ttsHighlight.play).toHaveBeenCalledWith(
+      messageId,
+      "First paragraph.\n\nSecond paragraph.",
+      null,
+      undefined,
+      { startParagraph: 1, live: false },
+    );
   });
 });
