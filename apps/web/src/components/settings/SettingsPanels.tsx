@@ -86,7 +86,7 @@ import { Button } from "../ui/button";
 import { DraftInput } from "../ui/draft-input";
 import { Input } from "../ui/input";
 import { useTtsVoices } from "~/hooks/useTtsVoices";
-import { phononVoiceFor } from "~/lib/phononModel";
+import { phononVoiceFor } from "@t3tools/client-runtime/phonon-voices";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { ScopedSwitch } from "./ScopedSwitch";

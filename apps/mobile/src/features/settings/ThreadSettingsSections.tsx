@@ -4,6 +4,8 @@ import {
   isManagedSettingPath,
   type ServerSettingsPatch,
 } from "@t3tools/contracts";
+import { PHONON_DEFAULT_VOICE, phononVoiceFor } from "@t3tools/client-runtime/phonon-voices";
+import { useNavigation } from "@react-navigation/native";
 import { useEnvironmentsWithScope } from "../../state/session";
 import { AutoSettleDaysField } from "./components/AutoSettleDaysField";
 import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
@@ -16,6 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts";
 import { supportsSharedSettingsSync } from "@t3tools/client-runtime/state/shared-settings";
 import { AppText as Text } from "../../components/ui/AppText";
+import { ListRow } from "../../components/ui/ListRow";
 import { useEnvironments } from "../../state/environments";
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
 import { serverEnvironment } from "../../state/server";
@@ -301,15 +304,19 @@ function MachineBetaSection({
 }
 
 /**
- * Device-local counterpart of web's Settings → General → Text-to-speech →
- * Autoplay. Mobile has no client-settings sync, so this lives in mobile
- * preferences and defaults to on.
+ * Device-local counterpart of web's Settings → Chat → Text-to-speech rows.
+ * Mobile has no client-settings sync, so autoplay and the voice live in mobile
+ * preferences; autoplay defaults to on and the voice to the model's default.
  */
 export function SpokenSettingsSection() {
   const savePreferences = useAtomSet(updateMobilePreferencesAtom);
   const preferences = useAtomValue(mobilePreferencesAtom);
+  const navigation = useNavigation();
+  const { selectedTargets } = useSettingsEnvironmentFilter();
   const speakAutoplay =
     !AsyncResult.isSuccess(preferences) || preferences.value.speakAutoplay !== false;
+  const storedVoice = AsyncResult.isSuccess(preferences) ? preferences.value.speakVoice : undefined;
+  const speakVoice = storedVoice === undefined ? PHONON_DEFAULT_VOICE : phononVoiceFor(storedVoice);
 
   return (
     <View className="gap-3">
@@ -319,6 +326,15 @@ export function SpokenSettingsSection() {
           label="Autoplay spoken messages"
           value={speakAutoplay}
           onValueChange={(value) => savePreferences({ speakAutoplay: value })}
+        />
+        <ListRow
+          label="Voice"
+          description={speakVoice}
+          onPress={() =>
+            navigation.navigate("SettingsTtsVoices", {
+              environmentId: selectedTargets[0]?.environmentId ?? null,
+            })
+          }
         />
       </SettingsSection>
       <Text className="px-2 text-sm text-foreground-muted">

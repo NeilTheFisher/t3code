@@ -397,7 +397,7 @@ export const LoadBalancingWeights = Schema.Record(
 export const DiffColorScheme = Schema.Literals(["red-green", "blue-orange"]);
 
 /** Phonon's English default; the model's own name is the only vocabulary clients store. */
-export const DEFAULT_TTS_VOICE = "Delia";
+const DEFAULT_TTS_VOICE = "Delia";
 
 export const TtsClientSettings = Schema.Struct({
   enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
