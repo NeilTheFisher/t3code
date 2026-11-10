@@ -188,7 +188,7 @@ export function environmentContextRecord(
   };
 }
 
-export function commitContextId(sha: string): ComposerContextId {
+function commitContextId(sha: string): ComposerContextId {
   return toKindScopedComposerContextId("commit", sha);
 }
 
@@ -197,7 +197,7 @@ export function commitContextReference(record: CommitContextRecord): ComposerCon
 }
 
 /** The chip's label leads with the abbreviated sha; the record keeps the full one. */
-export function commitContextLabel(sha: string, subject: string): string {
+function commitContextLabel(sha: string, subject: string): string {
   return sanitizeComposerContextLabel(`${sha.slice(0, 8)} ${subject}`, "commit");
 }
 

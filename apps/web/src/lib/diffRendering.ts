@@ -215,7 +215,7 @@ function compactPartialHunkOffsets(file: FileDiffMetadata): FileDiffMetadata {
  * patch"). The parser drops those markers, leaving a hunk-less FileDiffMetadata
  * whose virtualized rendering can crash, so they render as static rows instead.
  */
-export function extractBinaryPatchPaths(patch: string): Set<string> {
+function extractBinaryPatchPaths(patch: string): Set<string> {
   const binaryPaths = new Set<string>();
   const lines = patch.split("\n");
   let currentPaths: string[] = [];
@@ -352,34 +352,6 @@ export function getRenderablePatch(
       text: patch,
       reason: "Failed to parse patch. Showing raw patch.",
     };
-  }
-}
-
-/**
- * Synthesize a renderable diff from before/after text (e.g. Claude Edit
- * old_string/new_string, which carry no provider patch). Line numbers are
- * relative to the snippet, not the source file.
- */
-export function getRenderablePatchFromContents(
-  oldContents: string,
-  newContents: string,
-  name: string,
-  cacheScope = "inline-edit",
-): RenderablePatch | null {
-  if (oldContents === newContents) return null;
-  try {
-    const cacheKey = buildPatchCacheKey(
-      `${name}\x00${oldContents}\x00\x00${newContents}`,
-      cacheScope,
-    );
-    const fileDiff = parseDiffFromFile(
-      { name, contents: oldContents, cacheKey: `${cacheKey}:old` },
-      { name, contents: newContents, cacheKey: `${cacheKey}:new` },
-    );
-    if (fileDiff.hunks.length === 0) return null;
-    return { kind: "files", files: [fileDiff], binaryFiles: [], sourceFiles: [fileDiff] };
-  } catch {
-    return null;
   }
 }
 
