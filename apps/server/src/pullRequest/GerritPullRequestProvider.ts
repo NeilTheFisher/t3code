@@ -952,5 +952,3 @@ export const make = Effect.gen(function* () {
   return provider;
 });
 
-/** Exported for tests that only need the query a listing builds. */
-export { listSearch };

@@ -5,7 +5,7 @@ import * as Cause from "effect/Cause";
  * (`gh`, `glab`, `az`). Callers still fail, so backoff works, but must not warn on
  * every sweep for a fact that cannot change.
  */
-export function isProviderCliUnavailableCause(cause: unknown): boolean {
+function isProviderCliUnavailableCause(cause: unknown): boolean {
   let current: unknown = cause;
   for (let depth = 0; depth < 6 && current !== null && current !== undefined; depth += 1) {
     if (typeof current !== "object") {

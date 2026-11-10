@@ -134,7 +134,7 @@ export class VoiceSessionService extends Context.Service<
   }
 >()("t3/voice/VoiceSessionService") {}
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const secretStore = yield* ServerSecretStore.ServerSecretStore;
   const httpClient = yield* HttpClient.HttpClient;
 

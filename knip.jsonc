@@ -48,12 +48,9 @@
       "ignore": ["npm-launcher/**", ".knip-test-*/**"],
     },
     "apps/server": {
-      // Vite+ pack entries and the launcher used by installed background services.
+      // Vite+ pack entries.
       "entry": [
-        "src/bin.ts!",
         "src/claude-history-worker.ts!",
-        "scripts/cli.ts",
-        "scripts/fetch-expo-schema.ts",
         "scripts/probe-claude-fork-local-rollback-replay.ts",
         "scripts/update-test-shard-weights.ts",
         "scripts/verify-background-live.ts",
@@ -115,7 +112,6 @@
     "apps/mobile": {
       // Expo loads plugins and the fingerprint config by string; Metro embeds the browser entry in the native WebView.
       "entry": [
-        "index.ts!",
         "fingerprint.config.js",
         "plugins/*.cjs",
         "scripts/generate-device-stream.mts",
@@ -143,7 +139,6 @@
       "entry": [
         "alchemy.run.ts!",
         "scripts/install.ts",
-        "scripts/install-ci.ts",
         "src/runHook.ts",
         "src/flush.ts",
         "src/nativeRunHook.js",
