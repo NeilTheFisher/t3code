@@ -54,6 +54,8 @@ export interface TimelineRowSharedState {
   timestampFormat: TimestampFormat;
   routeThreadKey: string;
   threadRef: ScopedThreadRef | null;
+  /** Title of the thread these rows belong to, for the global player's label. */
+  threadTitle: string | undefined;
   markdownCwd: string | undefined;
   resolvedTheme: "light" | "dark";
   /** Read-aloud controls appear on assistant rows only when the user turned TTS on. */
