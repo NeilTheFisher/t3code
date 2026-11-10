@@ -207,6 +207,49 @@ describe("isTrustedAudioPermissionRequest", () => {
   });
 });
 
+describe("isTrustedMainWindowPermission", () => {
+  it("allows clipboard writes from the T3 renderer origin", () => {
+    assert.isTrue(
+      DesktopWindow.isTrustedMainWindowPermission({
+        applicationUrl: "t3code://app/",
+        requestingUrl: "t3code://app/",
+        permission: "clipboard-sanitized-write",
+        mediaTypes: [],
+      }),
+    );
+  });
+
+  it("keeps other permissions and foreign origins denied", () => {
+    assert.isFalse(
+      DesktopWindow.isTrustedMainWindowPermission({
+        applicationUrl: "t3code://app/",
+        requestingUrl: "https://example.com/",
+        permission: "clipboard-sanitized-write",
+        mediaTypes: [],
+      }),
+    );
+    assert.isFalse(
+      DesktopWindow.isTrustedMainWindowPermission({
+        applicationUrl: "t3code://app/",
+        requestingUrl: "t3code://app/",
+        permission: "notifications",
+        mediaTypes: [],
+      }),
+    );
+  });
+
+  it("still allows audio capture from the T3 renderer origin", () => {
+    assert.isTrue(
+      DesktopWindow.isTrustedMainWindowPermission({
+        applicationUrl: "t3code-dev://app/",
+        requestingUrl: "t3code-dev://app/task/123",
+        permission: "media",
+        mediaTypes: ["audio"],
+      }),
+    );
+  });
+});
+
 const layerDesktopAssets = Layer.succeed(DesktopAssets.DesktopAssets, {
   iconPaths: Effect.succeed({
     ico: Option.none<string>(),

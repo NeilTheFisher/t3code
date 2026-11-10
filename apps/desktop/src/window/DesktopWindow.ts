@@ -252,6 +252,30 @@ export function isTrustedAudioPermissionRequest(input: {
   }
 }
 
+/**
+ * Electron asks for `clipboard-sanitized-write` before the async Clipboard API
+ * writes, and it consults both permission handlers. The main window only ever
+ * serves the bundled app, so copies from the app origin are allowed alongside
+ * the audio capture the voice features need.
+ */
+export function isTrustedMainWindowPermission(input: {
+  readonly applicationUrl: string;
+  readonly requestingUrl: string;
+  readonly permission: string;
+  readonly mediaTypes: ReadonlyArray<string>;
+}): boolean {
+  if (
+    input.permission === "clipboard-sanitized-write" &&
+    isSameOriginRendererNavigation({
+      applicationUrl: input.applicationUrl,
+      navigationUrl: input.requestingUrl,
+    })
+  ) {
+    return true;
+  }
+  return isTrustedAudioPermissionRequest(input);
+}
+
 function isRetryableDevelopmentRendererLoadFailure(input: {
   readonly applicationUrl: string;
   readonly errorCode: number;
@@ -470,7 +494,7 @@ export const make = Effect.gen(function* () {
     yield* rendererHistory.register(window.webContents, { surface: "main" });
     window.webContents.session.setPermissionCheckHandler(
       (_webContents, permission, requestingOrigin, details) =>
-        isTrustedAudioPermissionRequest({
+        isTrustedMainWindowPermission({
           applicationUrl,
           requestingUrl: requestingOrigin,
           permission,
@@ -480,7 +504,7 @@ export const make = Effect.gen(function* () {
     window.webContents.session.setPermissionRequestHandler(
       (_webContents, permission, callback, details) => {
         callback(
-          isTrustedAudioPermissionRequest({
+          isTrustedMainWindowPermission({
             applicationUrl,
             requestingUrl: details.requestingUrl,
             permission,
