@@ -1,4 +1,4 @@
-export function synthesizeUnifiedDiff(oldText: string, newText: string): string {
+function synthesizeUnifiedDiff(oldText: string, newText: string): string {
   const oldLines = oldText === "" ? [] : oldText.split("\n");
   const newLines = newText === "" ? [] : newText.split("\n");
   if (oldLines[oldLines.length - 1] === "") oldLines.pop();
@@ -106,9 +106,7 @@ function patchPathFromHeaders(patch: string): string | undefined {
  * Split a possibly multi-file `apply_patch` payload into one diff per file.
  * Returns `undefined` when no file path can be resolved.
  */
-export function splitUnifiedDiffByFile(
-  patch: string,
-): Array<{ path: string; diff: string }> | undefined {
+function splitUnifiedDiffByFile(patch: string): Array<{ path: string; diff: string }> | undefined {
   const parts = patch.split(/(?=^diff --git )/m).filter((part) => part.trim().length > 0);
   const results: Array<{ path: string; diff: string }> = [];
   for (const part of parts.length > 0 ? parts : [patch]) {
