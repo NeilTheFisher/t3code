@@ -8,7 +8,7 @@ import {
 } from "expo-audio";
 import { File, Paths } from "expo-file-system";
 import { useSyncExternalStore } from "react";
-import { Alert } from "react-native";
+import { Alert, AppState } from "react-native";
 
 import { markdownToSpokenText, splitSpokenUnits } from "../../lib/spokenText";
 import { synthesizePhononWav } from "./phononEngine";
@@ -21,6 +21,14 @@ const TITLE_MAX_CHARS = 80;
 const ESTIMATED_CHARS_PER_SECOND = 15;
 /** Selectable narration speeds; 1x is the default. */
 export const NARRATION_RATES = [1, 1.25, 1.5, 2] as const;
+/**
+ * Paragraphs synthesized ahead of the playback head. Each one costs a WAV and
+ * a bridge message, so a small window keeps memory and RN-thread work bounded
+ * while still hiding synthesis latency behind playback.
+ */
+const LOOKAHEAD_UNITS = 2;
+/** Shown while a cold engine downloads its model; never passed to synthesis. */
+const MODEL_LOADING_DETAIL = "Downloading the voice model…";
 
 /** One synthesized sentence, tagged with the markdown block it was read from. */
 interface SpokenUnit {
@@ -38,6 +46,8 @@ interface MessageTtsState {
   /** Markdown block currently being read, for the in-thread highlight. */
   readonly activeBlock: number | null;
   readonly rate: number;
+  /** Transient engine status (model download); display only. */
+  readonly detail: string | null;
 }
 
 const IDLE: MessageTtsState = {
@@ -48,6 +58,7 @@ const IDLE: MessageTtsState = {
   error: null,
   activeBlock: null,
   rate: 1,
+  detail: null,
 };
 
 let state: MessageTtsState = IDLE;
@@ -66,17 +77,31 @@ export interface MessageTtsProgress {
 let progress: MessageTtsProgress = { currentTime: 0, duration: 0 };
 const progressListeners = new Set<() => void>();
 
-// Every spoken unit is synthesized to a WAV file before the playlist starts, so
-// a backgrounded or suspended WebView can never stall playback or seeking.
 let playlist: AudioPlaylist | null = null;
 let units: SpokenUnit[] = [];
 /** First unit index for each markdown block, or undefined when it has no speech. */
 let blockStarts: number[] = [];
 let observedDurations: number[] = [];
-/** Bumped on every stop/play so in-flight synthesis is discarded. */
+/** WAV uri per unit, once synthesized. Kept across seeks so disk cache is reused. */
+let files: (string | null)[] = [];
+/** Unit index of the first track in the native playlist. */
+let playlistStartUnit = 0;
+/** Unit indices in the playlist, in track order. */
+let playlistUnits: number[] = [];
+/** Next unit the sequential synthesizer will request. */
+let synthCursor = 0;
+/** Unit under the playback head, for the look-ahead window. */
+let headUnit = 0;
+/** In-flight synthesis count; the engine itself runs one at a time. */
+let synthBusy = 0;
+/** Bumped on every stop, play, or restart so in-flight synthesis is discarded. */
 let generation = 0;
-/** Aborts the paragraph loop when the narration is stopped or replaced. */
 let synthesisController: AbortController | null = null;
+/** True while the app is backgrounded: queued audio plays, synthesis pauses. */
+let synthesisSuspended = false;
+let modelLoading = false;
+/** Whether the first track has started playing. */
+let started = false;
 /** Ignore a `didJustFinish` until this time; a seek emits one for the old track. */
 let ignoreFinishUntil = 0;
 /** Chosen speed, kept across narrations. */
@@ -90,7 +115,8 @@ function setState(next: MessageTtsState) {
     next.status === state.status &&
     next.error === state.error &&
     next.activeBlock === state.activeBlock &&
-    next.rate === state.rate
+    next.rate === state.rate &&
+    next.detail === state.detail
   ) {
     return;
   }
@@ -176,17 +202,25 @@ function updateProgress(index: number, currentTime: number) {
   setProgress(elapsedBefore(index) + currentTime, totalDuration());
 }
 
+function failPlayback(error: unknown) {
+  const message = error instanceof Error ? error.message : "Playback failed.";
+  stopMessageTts();
+  setState({ ...IDLE, rate: currentRate, error: message });
+  Alert.alert("Playback failed", message);
+}
+
 function onPlaylistStatus(status: PlaylistStatusEvent) {
   if (state.messageId === null) return;
   const errorMessage = readPlaybackError(status.error);
   if (errorMessage !== null) {
-    stopMessageTts();
-    setState({ ...IDLE, rate: currentRate, error: errorMessage });
-    Alert.alert("Playback failed", errorMessage);
+    failPlayback(errorMessage);
     return;
   }
 
-  const unit = status.currentIndex ?? 0;
+  const track = status.currentIndex ?? 0;
+  const unit = playlistUnits[track];
+  if (unit === undefined) return;
+  headUnit = unit;
   if (Number.isFinite(status.duration) && status.duration > 0) {
     observedDurations[unit] = status.duration;
   }
@@ -194,9 +228,14 @@ function onPlaylistStatus(status: PlaylistStatusEvent) {
   updateProgress(unit, status.currentTime ?? 0);
 
   if (status.didJustFinish && Date.now() >= ignoreFinishUntil) {
-    // Each track reports its own finish; only the last one ends the narration.
-    if (unit >= units.length - 1) stopMessageTts();
+    const appendedThrough = playlistStartUnit + playlistUnits.length;
+    // Each track reports its own finish. Only the last track of a fully
+    // synthesized narration ends it; otherwise the player waits for the next
+    // paragraph (a backgrounded WebView can leave it waiting).
+    if (appendedThrough >= units.length && synthBusy === 0) stopMessageTts();
   }
+  // A newly allowed paragraph may start synthesizing as the head advances.
+  pumpSynthesis();
 }
 
 function getPlaylist(): AudioPlaylist {
@@ -240,6 +279,7 @@ export function stopMessageTts() {
   generation += 1;
   synthesisController?.abort();
   synthesisController = null;
+  synthBusy = 0;
   if (playlist !== null) {
     playlist.pause();
     playlist.clear();
@@ -247,6 +287,13 @@ export function stopMessageTts() {
   units = [];
   blockStarts = [];
   observedDurations = [];
+  files = [];
+  playlistStartUnit = 0;
+  playlistUnits = [];
+  synthCursor = 0;
+  headUnit = 0;
+  started = false;
+  modelLoading = false;
   setProgress(0, 0);
   setState({ ...IDLE, rate: currentRate });
 }
@@ -261,6 +308,7 @@ export function resumeMessageTts() {
   if (playlist === null || state.status !== "paused") return;
   playlist.play();
   setState({ ...state, status: "playing" });
+  pumpSynthesis();
 }
 
 /** Change the narration speed. Applies to the current and later segments. */
@@ -270,27 +318,212 @@ export function setNarrationRate(rate: number) {
   if (state.messageId !== null) setState({ ...state, rate });
 }
 
-/** Move the playback head to unit `index`. Every unit has audio by now. */
-function seekToUnit(index: number) {
-  if (state.messageId === null || units.length === 0) return;
-  const target = Math.max(0, Math.min(index, units.length - 1));
+function ensureSynthesisController(): AbortController | null {
+  if (state.messageId === null) return null;
+  if (synthesisController === null || synthesisController.signal.aborted) {
+    synthesisController = new AbortController();
+  }
+  return synthesisController;
+}
+
+/** File for one unit's WAV; the name carries the text hash so edits never reuse audio. */
+function segmentFile(messageId: string, index: number, text: string, voice: string): File {
+  return new File(
+    Paths.cache,
+    `t3-tts-${messageId.replace(/[^a-zA-Z0-9._-]/g, "_")}-${index}-${hashSpeech(text, voice)}.wav`,
+  );
+}
+
+async function writeSegment(
+  base64: string,
+  file: File,
+  forGeneration: number,
+): Promise<string | null> {
+  if (file.exists) return file.uri;
+  file.create({ overwrite: true });
+  await file.write(base64, { encoding: "base64" });
+  // A stop, seek, or new message while the write was in flight wins.
+  return forGeneration === generation ? file.uri : null;
+}
+
+/**
+ * Synthesize one unit. The engine serializes model work; the WAV write runs
+ * natively and overlaps the next unit's synthesis.
+ */
+async function synthesizeUnit(
+  messageId: string,
+  index: number,
+  environmentId: EnvironmentId,
+  voice: string,
+  forGeneration: number,
+  signal: AbortSignal,
+) {
+  synthBusy += 1;
+  try {
+    const unit = units[index];
+    if (unit === undefined) return;
+    const file = segmentFile(messageId, index, unit.text, voice);
+    let uri: string | null = file.exists ? file.uri : null;
+    if (uri === null) {
+      const base64 = await synthesizePhononWav({
+        environmentId,
+        text: unit.text,
+        voice,
+        fallbackVoice: PHONON_DEFAULT_VOICE,
+        signal,
+        onLoadingModel: () => {
+          if (forGeneration !== generation || modelLoading) return;
+          modelLoading = true;
+          setState({ ...state, detail: MODEL_LOADING_DETAIL });
+        },
+      });
+      if (forGeneration !== generation) return;
+      uri = await writeSegment(base64, file, forGeneration);
+    }
+    if (uri === null || forGeneration !== generation) return;
+    files[index] = uri;
+    modelLoading = false;
+    if (state.detail === MODEL_LOADING_DETAIL) setState({ ...state, detail: null });
+    flushAppendable();
+  } catch (error) {
+    if (
+      forGeneration !== generation ||
+      (error instanceof Error && error.name === "AbortError") ||
+      signal.aborted
+    ) {
+      return;
+    }
+    failPlayback(error);
+  } finally {
+    if (forGeneration === generation) synthBusy = Math.max(0, synthBusy - 1);
+  }
+}
+
+/**
+ * Ask for paragraphs up to `LOOKAHEAD_UNITS` past the head. The engine queues
+ * them one at a time, so the cap bounds memory and bridge traffic rather than
+ * model parallelism (the model shares one KV cache).
+ */
+function pumpSynthesis() {
+  if (synthesisSuspended || state.messageId === null || activeEnvironment === null) return;
+  const controller = ensureSynthesisController();
+  if (controller === null) return;
+  const messageId = state.messageId;
+  const environmentId = activeEnvironment;
+  const voice = activeVoice;
+  while (synthCursor < units.length && synthCursor - headUnit <= LOOKAHEAD_UNITS) {
+    const index = synthCursor;
+    synthCursor += 1;
+    if (files[index] !== null) continue;
+    void synthesizeUnit(messageId, index, environmentId, voice, generation, controller.signal);
+  }
+  flushAppendable();
+}
+
+/** Environment and voice of the active narration. */
+let activeEnvironment: EnvironmentId | null = null;
+let activeVoice = PHONON_DEFAULT_VOICE;
+
+/** Add every synthesized unit that is contiguous with the playlist, in order. */
+function flushAppendable() {
+  for (;;) {
+    const index = playlistStartUnit + playlistUnits.length;
+    if (index >= units.length) return;
+    const uri = files[index];
+    if (uri === null || uri === undefined) return;
+    appendTrack(index, uri);
+  }
+}
+
+function appendTrack(index: number, uri: string) {
+  if (index !== playlistStartUnit + playlistUnits.length) return;
+  const audio = getPlaylist();
+  playlistUnits.push(index);
+  audio.add({ uri });
+  if (!started) {
+    started = true;
+    audio.playbackRate = currentRate;
+    audio.play();
+    setState({ ...state, status: "playing", activeBlock: units[index]?.block ?? null });
+    return;
+  }
+  // The playlist ran dry while this paragraph was being synthesized (slow
+  // engine, or a suspended WebView). Continue at the new track.
+  if (state.status === "playing" && !audio.playing) {
+    audio.skipTo(playlistUnits.length - 1);
+    audio.play();
+  }
+}
+
+/** Re-request from the first unit that has no audio, after a suspension. */
+function resetCursorToFirstMissing() {
+  let index = playlistStartUnit;
+  while (index < units.length && files[index] !== null) index += 1;
+  synthCursor = index;
+}
+
+/** Seek to unit `index` when it is already in the playlist. */
+function seekWithinPlaylist(track: number, unit: number) {
   const audio = getPlaylist();
   ignoreFinishUntil = Date.now() + 600;
-  if (audio.currentIndex === target) {
+  if (audio.currentIndex === track) {
     // Already on this track, so skipTo would no-op; rewind it to restart. This
     // is what makes tapping the paragraph you started on seek back to its start.
     void audio.seekTo(0).catch(() => undefined);
   } else {
-    audio.skipTo(target);
+    audio.skipTo(track);
   }
-  setActiveBlockFor(target);
-  setProgress(elapsedBefore(target), totalDuration());
+  headUnit = unit;
+  setActiveBlockFor(unit);
+  setProgress(elapsedBefore(unit), totalDuration());
   // Seeking while paused resumes, so a tap always plays.
   if (state.status === "playing") audio.play();
   else if (state.status === "paused") {
     audio.play();
     setState({ ...state, status: "playing" });
   }
+  pumpSynthesis();
+}
+
+/**
+ * Seek to a paragraph with no audio in the playlist yet: cancel in-flight
+ * synthesis, drop queued-but-unplayed tracks, and restart the stream there.
+ * Files already on disk are reused, so a repeated seek is instant.
+ */
+function restartFromUnit(target: number) {
+  generation += 1;
+  synthesisController?.abort();
+  synthesisController = new AbortController();
+  synthBusy = 0;
+  const audio = getPlaylist();
+  ignoreFinishUntil = Date.now() + 600;
+  audio.pause();
+  audio.clear();
+  playlistStartUnit = target;
+  playlistUnits = [];
+  headUnit = target;
+  synthCursor = target;
+  started = false;
+  setState({ ...state, status: "loading", activeBlock: units[target]?.block ?? null });
+  setProgress(elapsedBefore(target), totalDuration());
+  flushAppendable();
+  pumpSynthesis();
+}
+
+/** Move the playback head to unit `index`. */
+function seekToUnit(index: number) {
+  if (state.messageId === null || units.length === 0) return;
+  const target = Math.max(0, Math.min(index, units.length - 1));
+  if (!started) {
+    restartFromUnit(target);
+    return;
+  }
+  const track = target - playlistStartUnit;
+  if (track >= 0 && track < playlistUnits.length) {
+    seekWithinPlaylist(track, target);
+    return;
+  }
+  restartFromUnit(target);
 }
 
 /** Seek to a fraction of the whole narration, used by the mini-player scrub bar. */
@@ -346,40 +579,6 @@ function hashSpeech(text: string, voice: string): string {
   return (hash >>> 0).toString(36);
 }
 
-/**
- * One unit's WAV, synthesized on this device and cached on disk. Repeating a
- * narration or seeking back and forth reuses the file instead of re-synthesizing.
- */
-async function synthesizeSegment(
-  text: string,
-  messageId: string,
-  index: number,
-  environmentId: EnvironmentId,
-  voice: string,
-  forGeneration: number,
-  signal: AbortSignal,
-): Promise<string | null> {
-  const file = new File(
-    Paths.cache,
-    `t3-tts-${messageId.replace(/[^a-zA-Z0-9._-]/g, "_")}-${index}-${hashSpeech(text, voice)}.wav`,
-  );
-  if (file.exists) return file.uri;
-
-  const base64 = await synthesizePhononWav({
-    environmentId,
-    text,
-    voice,
-    signal,
-  });
-  // A stop or a new message while this synthesis was in flight wins.
-  if (forGeneration !== generation) return null;
-
-  if (file.exists) file.delete();
-  file.create({ overwrite: true });
-  await file.write(base64, { encoding: "base64" });
-  return file.uri;
-}
-
 export async function playMessageTts(
   messageId: string,
   threadId: string,
@@ -402,11 +601,18 @@ export async function playMessageTts(
   }
 
   stopMessageTts();
-  const forGeneration = generation;
   units = built.units;
   blockStarts = built.blockStarts;
-  const controller = new AbortController();
-  synthesisController = controller;
+  files = new Array(units.length).fill(null);
+  observedDurations = new Array(units.length).fill(undefined);
+  playlistStartUnit = 0;
+  playlistUnits = [];
+  synthCursor = 0;
+  headUnit = 0;
+  started = false;
+  activeEnvironment = environmentId;
+  activeVoice = voice;
+  synthesisController = new AbortController();
   setState({
     messageId,
     threadId,
@@ -415,52 +621,38 @@ export async function playMessageTts(
     error: null,
     activeBlock: null,
     rate: currentRate,
+    detail: null,
   });
   setProgress(0, totalDuration());
 
-  try {
-    if (!audioModeConfigured) {
-      audioModeConfigured = true;
-      await setAudioModeAsync({ playsInSilentMode: true, interruptionMode: "mixWithOthers" }).catch(
-        () => undefined,
-      );
-    }
-
-    // Synthesize the whole message before playback: the WebView is not needed
-    // once this returns, so backgrounding or suspending it cannot stall audio,
-    // and every paragraph has a file to seek to.
-    const uris: string[] = [];
-    for (let index = 0; index < units.length; index += 1) {
-      if (forGeneration !== generation) return;
-      const uri = await synthesizeSegment(
-        units[index]!.text,
-        messageId,
-        index,
-        environmentId,
-        voice,
-        forGeneration,
-        controller.signal,
-      );
-      if (uri === null || forGeneration !== generation) return;
-      uris.push(uri);
-    }
-
-    const audio = getPlaylist();
-    audio.playbackRate = currentRate;
-    for (const uri of uris) audio.add({ uri });
-    audio.play();
-    setState({ ...state, status: "playing", activeBlock: units[0]!.block });
-  } catch (cause) {
-    // A stop, a replaced message, or the screen closing owns the state already.
-    if (forGeneration !== generation || (cause instanceof Error && cause.name === "AbortError")) {
-      stopMessageTts();
-      return;
-    }
-    const message = cause instanceof Error ? cause.message : "Could not play this message.";
-    stopMessageTts();
-    Alert.alert("Playback failed", message);
+  if (!audioModeConfigured) {
+    audioModeConfigured = true;
+    await setAudioModeAsync({ playsInSilentMode: true, interruptionMode: "mixWithOthers" }).catch(
+      () => undefined,
+    );
   }
+  // Playback starts as soon as the first paragraph is on disk; later paragraphs
+  // are synthesized ahead of the head while audio plays.
+  pumpSynthesis();
 }
+
+// A backgrounded WebView is suspended by iOS/Android. Stop asking it for audio
+// and let the tracks already on disk keep playing; resume where synthesis left
+// off when the app returns.
+AppState.addEventListener("change", (next) => {
+  if (next === "active") {
+    if (!synthesisSuspended) return;
+    synthesisSuspended = false;
+    if (state.messageId === null) return;
+    resetCursorToFirstMissing();
+    pumpSynthesis();
+    return;
+  }
+  if (next !== "background" && next !== "inactive") return;
+  synthesisSuspended = true;
+  synthesisController?.abort();
+  synthesisController = null;
+});
 
 export function useMessageTtsStatus(messageId: string) {
   const snapshot = useSyncExternalStore(subscribe, getState, getState);
@@ -469,6 +661,7 @@ export function useMessageTtsStatus(messageId: string) {
     isLoading: isThis && snapshot.status === "loading",
     isPlaying: isThis && snapshot.status === "playing",
     isPaused: isThis && snapshot.status === "paused",
+    detail: isThis ? snapshot.detail : null,
   };
 }
 
@@ -486,6 +679,7 @@ export interface ThreadTtsPlayback {
   readonly rate: number;
   readonly currentTime: number;
   readonly duration: number;
+  readonly detail: string | null;
 }
 
 export function useThreadTtsPlayback(threadId: string): ThreadTtsPlayback | null {
@@ -504,6 +698,7 @@ export function useThreadTtsPlayback(threadId: string): ThreadTtsPlayback | null
     rate: snapshot.rate,
     currentTime: progressSnapshot.currentTime,
     duration: progressSnapshot.duration,
+    detail: snapshot.detail,
   };
 }
 
