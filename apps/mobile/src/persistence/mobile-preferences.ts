@@ -18,6 +18,7 @@ import {
   PullRequestMergeMethod,
   type SidebarProjectGroupingMode,
 } from "@t3tools/contracts";
+import { PHONON_DEFAULT_VOICE, phononVoiceFor } from "@t3tools/client-runtime/phonon-voices";
 import { ToolCallVisibility } from "@t3tools/contracts/settings";
 import type { AndroidNavigationStyle } from "../lib/androidNavigationStyle";
 import type { ComposerEnterBehavior } from "../lib/composerEnterBehavior";
@@ -180,6 +181,11 @@ export interface Preferences {
    * means on.
    */
   readonly speakAutoplay?: boolean;
+  /**
+   * Device-local counterpart of web's `tts.voice`: the speech model voice this
+   * device narrates with. A catalog name; `PHONON_DEFAULT_VOICE` until chosen.
+   */
+  readonly speakVoice?: string;
   /** Device-local counterpart of web's `sidebarWorkingShelfEnabled` beta. */
   readonly workingShelfEnabled?: boolean;
   /** The kind of question the Workflows tab's Needs you list was last narrowed to. */
@@ -276,6 +282,7 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     projectGroupingMode?: SidebarProjectGroupingMode;
     toolCallVisibility?: ToolCallVisibility;
     speakAutoplay?: boolean;
+    speakVoice?: string;
     workingShelfEnabled?: boolean;
     workflowQuestionKind?: string;
     useLastProjectForNewThreads?: boolean;
@@ -426,6 +433,10 @@ function sanitizePreferences(parsed: Preferences): Preferences {
   if (typeof parsed.speakAutoplay === "boolean") {
     preferences.speakAutoplay = parsed.speakAutoplay;
   }
+  preferences.speakVoice =
+    typeof parsed.speakVoice === "string"
+      ? phononVoiceFor(parsed.speakVoice)
+      : PHONON_DEFAULT_VOICE;
   if (typeof parsed.workingShelfEnabled === "boolean") {
     preferences.workingShelfEnabled = parsed.workingShelfEnabled;
   }
@@ -639,7 +650,7 @@ const make = Effect.fn("MobilePreferencesStore.make")(function* () {
       }
     }
 
-    return parsed === null ? {} : sanitizePreferences(parsed);
+    return parsed === null ? { speakVoice: PHONON_DEFAULT_VOICE } : sanitizePreferences(parsed);
   });
 
   const load = lock
