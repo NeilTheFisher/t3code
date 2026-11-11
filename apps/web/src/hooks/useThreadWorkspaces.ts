@@ -128,34 +128,25 @@ export function useThreadWorkspaces(): ThreadWorkspacesController {
       ? noServerSettingsAtom
       : serverEnvironment.settingsValueAtom(environmentId),
   );
-  const client = useClientSettings((current) => ({
-    activeWorkspaceId: current.sidebarActiveThreadWorkspaceId,
-    enabled: current.sidebarThreadWorkspacesEnabled,
-  }));
+  const selectedWorkspaceId = useClientSettings(
+    (current) => current.sidebarActiveThreadWorkspaceId,
+  );
   const updateSettings = useAtomCommand(
     serverEnvironment.updateSettings,
     "thread workspaces update",
   );
 
-  // The settings row writes the client copy on some clients (the desktop app) while
-  // the strip reads the server copy, so honour either one, and show the strip as soon
-  // as the client opts in rather than waiting for the server settings to arrive.
-  const source = {
-    enabled: (serverSettings?.sidebarThreadWorkspacesEnabled ?? false) || client.enabled === true,
-    workspaces: serverSettings?.sidebarThreadWorkspaces ?? [],
-    assignments: serverSettings?.sidebarThreadWorkspaceAssignments ?? {},
-  };
-  const savedWorkspaces = () =>
-    effectiveThreadWorkspaces({
-      sidebarThreadWorkspacesEnabled: source.enabled,
-      sidebarThreadWorkspaces: source.workspaces,
-    });
-  const workspaces = savedWorkspaces();
+  const enabled = serverSettings?.sidebarThreadWorkspacesEnabled ?? false;
+  const assignments = serverSettings?.sidebarThreadWorkspaceAssignments ?? {};
+  const workspaces = effectiveThreadWorkspaces({
+    sidebarThreadWorkspacesEnabled: enabled,
+    sidebarThreadWorkspaces: serverSettings?.sidebarThreadWorkspaces ?? [],
+  });
   const activeWorkspaceId =
-    client.activeWorkspaceId !== null &&
-    (isUnsortedWorkspaceSelection(client.activeWorkspaceId, workspaces) ||
-      workspaces.some((workspace) => workspace.id === client.activeWorkspaceId))
-      ? client.activeWorkspaceId
+    selectedWorkspaceId !== null &&
+    (isUnsortedWorkspaceSelection(selectedWorkspaceId, workspaces) ||
+      workspaces.some((workspace) => workspace.id === selectedWorkspaceId))
+      ? selectedWorkspaceId
       : null;
 
   const writeServer = (patch: ServerSettingsPatch) => {
@@ -174,7 +165,7 @@ export function useThreadWorkspaces(): ThreadWorkspacesController {
     const id = createThreadWorkspaceId(workspaces);
     writeServer({
       sidebarThreadWorkspaces: [
-        ...savedWorkspaces(),
+        ...workspaces,
         {
           id,
           name: name.trim() || "Workspace",
@@ -191,7 +182,7 @@ export function useThreadWorkspaces(): ThreadWorkspacesController {
     patch: Partial<Pick<SidebarThreadWorkspace, "name" | "icon" | "tint">>,
   ) => {
     writeServer({
-      sidebarThreadWorkspaces: savedWorkspaces().map((workspace) =>
+      sidebarThreadWorkspaces: workspaces.map((workspace) =>
         workspace.id === workspaceId ? { ...workspace, ...patch } : workspace,
       ),
     });
@@ -199,15 +190,10 @@ export function useThreadWorkspaces(): ThreadWorkspacesController {
 
   const deleteWorkspace = (workspaceId: string) => {
     writeServer({
-      sidebarThreadWorkspaces: savedWorkspaces().filter(
-        (workspace) => workspace.id !== workspaceId,
-      ),
-      sidebarThreadWorkspaceAssignments: removeThreadWorkspaceAssignments(
-        source.assignments,
-        workspaceId,
-      ),
+      sidebarThreadWorkspaces: workspaces.filter((workspace) => workspace.id !== workspaceId),
+      sidebarThreadWorkspaceAssignments: removeThreadWorkspaceAssignments(assignments, workspaceId),
     });
-    if (client.activeWorkspaceId === workspaceId) setActiveWorkspaceId(null);
+    if (selectedWorkspaceId === workspaceId) setActiveWorkspaceId(null);
   };
 
   const assignThreads = (threadKeys: readonly string[], workspaceId: string | null) => {
@@ -215,13 +201,11 @@ export function useThreadWorkspaces(): ThreadWorkspacesController {
   };
 
   return {
-    enabled: source.enabled,
+    enabled,
     workspaces,
     activeWorkspaceId,
-    assignments: source.assignments,
-    filter: source.enabled
-      ? { assignments: source.assignments, workspaces, activeWorkspaceId }
-      : null,
+    assignments,
+    filter: enabled ? { assignments, workspaces, activeWorkspaceId } : null,
     activeWorkspace: workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? null,
     setActiveWorkspaceId,
     createWorkspace,
