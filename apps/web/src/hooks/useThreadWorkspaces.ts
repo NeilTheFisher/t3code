@@ -130,20 +130,21 @@ export function useThreadWorkspaces(): ThreadWorkspacesController {
   );
   const client = useClientSettings((current) => ({
     activeWorkspaceId: current.sidebarActiveThreadWorkspaceId,
+    enabled: current.sidebarThreadWorkspacesEnabled,
   }));
   const updateSettings = useAtomCommand(
     serverEnvironment.updateSettings,
     "thread workspaces update",
   );
 
-  const source =
-    serverSettings === null
-      ? { enabled: false, workspaces: [], assignments: {} }
-      : {
-          enabled: serverSettings.sidebarThreadWorkspacesEnabled,
-          workspaces: serverSettings.sidebarThreadWorkspaces,
-          assignments: serverSettings.sidebarThreadWorkspaceAssignments,
-        };
+  // The settings row writes the client copy on some clients (the desktop app) while
+  // the strip reads the server copy, so honour either one, and show the strip as soon
+  // as the client opts in rather than waiting for the server settings to arrive.
+  const source = {
+    enabled: (serverSettings?.sidebarThreadWorkspacesEnabled ?? false) || client.enabled === true,
+    workspaces: serverSettings?.sidebarThreadWorkspaces ?? [],
+    assignments: serverSettings?.sidebarThreadWorkspaceAssignments ?? {},
+  };
   const savedWorkspaces = () =>
     effectiveThreadWorkspaces({
       sidebarThreadWorkspacesEnabled: source.enabled,
