@@ -606,18 +606,6 @@ export const ClientSettingsSchema = Schema.Struct({
   sidebarThreadPreviewCount: SidebarThreadPreviewCount.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_THREAD_PREVIEW_COUNT)),
   ),
-  sidebarThreadWorkspacesEnabled: Schema.Boolean.pipe(
-    Schema.withDecodingDefault(Effect.succeed(true)),
-  ),
-  sidebarThreadWorkspaces: Schema.Array(SidebarThreadWorkspace).pipe(
-    Schema.withDecodingDefault(Effect.succeed([])),
-  ),
-  // Keyed by scoped thread key so assignments survive project and environment
-  // renames, which change the thread's display path but not its identity.
-  sidebarThreadWorkspaceAssignments: Schema.Record(
-    TrimmedNonEmptyString,
-    TrimmedNonEmptyString,
-  ).pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   // Null is the "All" selection: no workspace filter is applied.
   sidebarActiveThreadWorkspaceId: Schema.NullOr(TrimmedNonEmptyString).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
@@ -2191,11 +2179,6 @@ export const ClientSettingsPatch = Schema.Struct({
   threadDetailsItems: Schema.optionalKey(Schema.Record(Schema.String, Schema.Boolean)),
   sidebarWorkingShelfEnabled: Schema.optionalKey(Schema.Boolean),
   sidebarThreadPreviewCount: Schema.optionalKey(SidebarThreadPreviewCount),
-  sidebarThreadWorkspacesEnabled: Schema.optionalKey(Schema.Boolean),
-  sidebarThreadWorkspaces: Schema.optionalKey(Schema.Array(SidebarThreadWorkspace)),
-  sidebarThreadWorkspaceAssignments: Schema.optionalKey(
-    Schema.Record(TrimmedNonEmptyString, TrimmedNonEmptyString),
-  ),
   sidebarActiveThreadWorkspaceId: Schema.optionalKey(Schema.NullOr(TrimmedNonEmptyString)),
   sidebarProjectGroupingMode: Schema.optionalKey(SidebarProjectGroupingMode),
   sidebarProjectGroupingOverrides: Schema.optionalKey(
