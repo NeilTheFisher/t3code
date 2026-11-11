@@ -136,7 +136,9 @@ export function useThreadWorkspaces(): ThreadWorkspacesController {
     "thread workspaces update",
   );
 
-  const enabled = serverSettings?.sidebarThreadWorkspacesEnabled ?? false;
+  // Missing means on: workspaces are default-on, and a client that has not loaded
+  // the server settings yet must still render the strip rather than hide a feature.
+  const enabled = serverSettings?.sidebarThreadWorkspacesEnabled ?? true;
   const assignments = serverSettings?.sidebarThreadWorkspaceAssignments ?? {};
   const workspaces = effectiveThreadWorkspaces({
     sidebarThreadWorkspacesEnabled: enabled,
