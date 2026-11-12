@@ -38,6 +38,7 @@ import { useQueuedRunEdit } from "./chat/useQueuedRunEdit";
 import { recallCheckoutIsRepo, rememberCheckoutIsRepo } from "./ChatView.logic";
 import { useLogicalProjectEnvironments } from "../hooks/useLogicalProjectEnvironments";
 import { useStableCallback } from "../hooks/useStableCallback";
+import { useManagedPolicy } from "../state/managedPolicy";
 import { useProjectScriptEditing } from "./chat/useProjectScriptEditing";
 import { RightPanelSurfaceContent } from "./chat/RightPanelSurfaceContent";
 import { usePendingThreadRequests } from "./chat/usePendingThreadRequests";
@@ -71,6 +72,7 @@ import {
   type ThreadId,
   ProviderInteractionMode,
   resolveIdleCompaction,
+  resolveThreadIdleCompaction,
   RuntimeMode,
 } from "@t3tools/contracts";
 import {
@@ -464,6 +466,8 @@ export default function ChatView(props: ChatViewProps) {
     label: "load earlier thread history",
     reportFailure: false,
   });
+  const idleCompactionLocked =
+    useManagedPolicy(environmentId)?.lockedSettings.includes("idleCompaction") ?? false;
   const { environments } = useEnvironments();
   const providersByEnvironment = useEnvironmentProviders();
   const primaryEnvironment = usePrimaryEnvironment();
@@ -2529,12 +2533,42 @@ export default function ChatView(props: ChatViewProps) {
     pendingApprovals.length > 0 ||
     pendingUserInputs.length > 0;
   const compactDisabled = compactThreadUnavailable;
+  const idleCompactionInherited = resolveIdleCompaction(
+    settings,
+    activeProviderInstanceId ?? ProviderInstanceId.make("claudeAgent"),
+  );
+  // The shell drops fields it does not model, so read the thread the ask resolves against.
+  const idleCompactionMode =
+    serverProjection === null
+      ? idleCompactionInherited
+      : resolveThreadIdleCompaction(settings, serverProjection.thread, idleCompactionLocked);
+  // Only a Claude thread stores its own choice; every other picker hides the control.
+  const threadIdleCompaction =
+    isServerThread &&
+    serverProjection !== null &&
+    selectedProvider === "claudeAgent" &&
+    !idleCompactionLocked
+      ? idleCompactionMode
+      : null;
+  const handleIdleCompactionChange = useStableCallback((enabled: boolean) => {
+    if (serverProjection === null || !isServerThread) return;
+    void updateThreadMetadata({
+      environmentId,
+      input: {
+        threadId: serverProjection.thread.id,
+        // Off only pins "when you return" where the instance would otherwise compact early;
+        // everywhere else it hands the thread back to its instance.
+        idleCompaction: enabled
+          ? "beforeCacheExpires"
+          : idleCompactionInherited === "beforeCacheExpires"
+            ? "onReturn"
+            : null,
+      },
+    });
+  });
   const resumeCompactionTokens =
     activeContextWindow &&
-    resolveIdleCompaction(
-      settings,
-      activeProviderInstanceId ?? ProviderInstanceId.make("claudeAgent"),
-    ) !== "off" &&
+    idleCompactionMode !== "off" &&
     !resumeCompactionPermanentlyDismissed &&
     !nativeResumeCompactionDismissed &&
     !compactDisabled &&
@@ -3725,6 +3759,8 @@ export default function ChatView(props: ChatViewProps) {
                                 respondingRequestIds={respondingRequestIds}
                                 runtimeMode={runtimeMode}
                                 defaultRuntimeMode={defaultRuntimeMode}
+                                idleCompaction={threadIdleCompaction}
+                                handleIdleCompactionChange={handleIdleCompactionChange}
                                 lockedProvider={modelPickerLockedProvider}
                                 providerStatuses={providerStatuses as ServerProvider[]}
                                 providerCatalogKnown={serverConfig !== null}
