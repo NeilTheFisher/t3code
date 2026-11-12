@@ -43,6 +43,20 @@ export type ThreadWorkspaceTint = (typeof THREAD_WORKSPACE_TINTS)[number];
  */
 export const UNSORTED_WORKSPACE_SELECTION = "unsorted";
 
+const TINT_DOT_CLASS: Record<ThreadWorkspaceTint, string> = {
+  info: "bg-info",
+  warning: "bg-warning",
+  success: "bg-success",
+  error: "bg-error",
+  update: "bg-update",
+  primary: "bg-primary",
+};
+
+/** The strip's identity color for a row that belongs to a workspace. */
+export function threadWorkspaceDotClass(tint: string): string {
+  return TINT_DOT_CLASS[tint as ThreadWorkspaceTint] ?? TINT_DOT_CLASS.info;
+}
+
 export type ThreadWorkspaceAssignments = Readonly<Record<string, string>>;
 
 /** The workspace selection a thread list or search is scoped to; null means unfiltered. */
