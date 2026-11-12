@@ -138,7 +138,6 @@ import {
   type ProviderThreadId,
   type RunId,
   type ThreadId,
-  resolveIdleCompaction,
   isDelegatedAppThread,
 } from "@t3tools/contracts";
 
@@ -6226,7 +6225,6 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
   // `onElicitation` shows T3 Code's own requests and passes on the person's answer to each.
   yield* mcpSessions.showsApprovalRequests(adapterOptions.instanceId);
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const serverSettings = yield* Effect.serviceOption(ServerSettings.ServerSettingsService);
   const { attachmentsDir, fileSystem, path, random, idAllocator, queryRunner } = adapterOptions;
   const loadModelCatalog = (
     adapterOptions.modelCatalog ?? Effect.succeed(BUNDLED_CLAUDE_MODEL_CATALOG)
@@ -13773,14 +13771,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               if (request.dialogKind !== "resume_return") {
                 return { behavior: "cancelled" as const };
               }
-              const idleCompaction = Option.isSome(serverSettings)
-                ? yield* serverSettings.value.getSettings.pipe(
-                    Effect.map((settings) =>
-                      resolveIdleCompaction(settings, adapterOptions.instanceId),
-                    ),
-                    Effect.orElseSucceed(() => adapterOptions.settings.idleCompaction),
-                  )
-                : adapterOptions.settings.idleCompaction;
+              const idleCompaction =
+                input.idleCompaction === undefined
+                  ? adapterOptions.settings.idleCompaction
+                  : yield* input.idleCompaction;
               if (idleCompaction === "off") {
                 return { behavior: "completed" as const, result: "continue" as const };
               }
