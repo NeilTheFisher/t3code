@@ -36,6 +36,11 @@ describe("mobile thread workspaces", () => {
     expect(threadWorkspaceSettings(settings({ sidebarThreadWorkspacesEnabled: false }))).toBeNull();
   });
 
+  it("treats a settings snapshot without the flag as enabled", () => {
+    const { sidebarThreadWorkspacesEnabled: _omitted, ...withoutFlag } = settings();
+    expect(threadWorkspaceSettings(withoutFlag as ServerSettings)).not.toBeNull();
+  });
+
   it("treats an assignment to a deleted workspace as unassigned", () => {
     expect(
       threadWorkspaceIdForThread(
