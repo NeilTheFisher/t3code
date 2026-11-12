@@ -2330,6 +2330,18 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       },
     );
   })();
+  // A row shows its workspace only in the unfiltered list; the strip's filter
+  // already scopes the rest, and repeating it there would be noise.
+  const threadWorkspaceByKey = new Map<string, { readonly name: string; readonly tint: string }>();
+  if (threadWorkspaces.activeWorkspaceId === null) {
+    const workspaceById = new Map(threadWorkspaces.workspaces.map((entry) => [entry.id, entry]));
+    for (const [workspaceKey, workspaceId] of Object.entries(threadWorkspaces.assignments)) {
+      const workspace = workspaceById.get(workspaceId);
+      if (workspace !== undefined) {
+        threadWorkspaceByKey.set(workspaceKey, { name: workspace.name, tint: workspace.tint });
+      }
+    }
+  }
   const handleThreadDragEnd = (event: DragEndEvent) => {
     const point = pointAtPointer(event);
     const belowList = point !== null && pointerBelowThreadList(point);
@@ -3805,6 +3817,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                             snoozeSupported={serverConfigs.has(thread.environmentId)}
                             pinningSupported={serverConfigs.has(thread.environmentId)}
                             isPinned={thread.pinnedAt != null}
+                            threadWorkspace={threadWorkspaceByKey.get(threadKey) ?? null}
                             dropVerb={
                               dragState?.activeKey === threadKey
                                 ? resolveSidebarDropVerb(dragState.activeSection, dragTargetSection)
