@@ -10,7 +10,12 @@ import { expect, it } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
 
 import { render } from "../../../test/render";
-import { ComposerEffortColumn, describeComposerEffort } from "./ComposerModelEffort";
+import type { IdleCompactionMode } from "@t3tools/contracts/settings";
+import {
+  ComposerEffortColumn,
+  ComposerPickerFooter,
+  describeComposerEffort,
+} from "./ComposerModelEffort";
 import type { TraitsSelectionInput } from "./TraitsPicker";
 
 // Shaped like Devin over ACP: its session mode comes first, and its reasoning id is its own.
@@ -145,4 +150,40 @@ it("focuses a reasoning level by its first letter without selecting it", async (
   await expect
     .element(screen.getByRole("radio", { name: "High" }))
     .toHaveAttribute("aria-checked", "true");
+});
+
+function Footer(props: { idleCompaction: IdleCompactionMode | null }) {
+  const [mode, setMode] = useState<IdleCompactionMode>("onReturn");
+  return (
+    <ComposerPickerFooter
+      traits={null}
+      runtimeMode="approval-required"
+      runtimeModeOptions={[]}
+      onRuntimeModeChange={() => {}}
+      idleCompaction={props.idleCompaction === null ? null : mode}
+      onIdleCompactionChange={(enabled) => setMode(enabled ? "beforeCacheExpires" : "onReturn")}
+    />
+  );
+}
+
+it("toggles a thread's early idle compaction from the picker footer", async () => {
+  await using screen = await render(<Footer idleCompaction={"onReturn"} />, { router: false });
+  expect(screen.getByRole("button", { name: /expires: off$/ }).elements()).toHaveLength(1);
+  await userEvent.click(
+    screen.getByRole("button", {
+      name: "Compact this thread before its prompt cache expires: off",
+    }),
+  );
+  await expect
+    .element(
+      screen.getByRole("button", {
+        name: "Compact this thread before its prompt cache expires: on",
+      }),
+    )
+    .toHaveAttribute("aria-pressed", "true");
+});
+
+it("hides early idle compaction when the thread has no such choice", async () => {
+  await using screen = await render(<Footer idleCompaction={null} />, { router: false });
+  expect(screen.getByRole("button", { name: /Compact this thread/ }).elements()).toHaveLength(0);
 });
