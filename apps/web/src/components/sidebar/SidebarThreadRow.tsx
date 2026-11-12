@@ -110,6 +110,7 @@ import {
   setFileDragActive,
 } from "../Sidebar.logic";
 import { resolveLocalCheckoutBranchMismatch } from "../BranchToolbar.logic";
+import { threadWorkspaceDotClass } from "./threadWorkspaces";
 import {
   LINKED_ITEMS_PREVIEW_LIMIT,
   LinkedItemsOverflow,
@@ -617,6 +618,8 @@ type SidebarThreadRowProps = {
   pinningSupported: boolean;
   isPinned: boolean;
   sortable?: SortableThreadRowBag | undefined;
+  // Shown only while the list is unfiltered: the strip's filter already scopes it.
+  threadWorkspace?: { readonly name: string; readonly tint: string } | null;
   dropVerb: SidebarDropVerb | null;
   dragOverPinned: boolean;
   sweepAction: SidebarSweepAction | null;
@@ -1163,6 +1166,20 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     </span>
   );
 
+  // Which workspace a thread is filed in is otherwise invisible in the unfiltered list.
+  const threadWorkspaceChip = props.threadWorkspace ? (
+    <span className="inline-flex min-w-0 shrink items-center gap-1 text-3xs text-secondary-label">
+      <span
+        aria-hidden
+        className={cn(
+          "size-1.5 shrink-0 rounded-full",
+          threadWorkspaceDotClass(props.threadWorkspace.tint),
+        )}
+      />
+      <span className="max-w-16 truncate">{props.threadWorkspace.name}</span>
+    </span>
+  ) : null;
+
   const prBadgeShape = supportsMultiplePullRequests
     ? resolveThreadPullRequestBadge(thread.pullRequests)
     : null;
@@ -1414,6 +1431,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             )}
             {draftIndicator}
             {title}
+            {threadWorkspaceChip}
             {multiline ? titleLineIcons : null}
             {pinIndicator}
             {multiline ? null : terminalStatusIcon}
@@ -1774,6 +1792,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           </div>
           <div className="mt-1 flex min-w-0 items-center gap-1.5">
             {title}
+            {threadWorkspaceChip}
             {isRegeneratingTitle ? (
               <span role="status" className="sr-only">
                 <T>Regenerating title</T>
