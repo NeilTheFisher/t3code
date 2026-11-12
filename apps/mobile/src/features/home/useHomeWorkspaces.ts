@@ -22,7 +22,7 @@ export function useHomeWorkspaces(): HomeWorkspaces {
     const workspacesById = new Map<string, SidebarThreadWorkspace>();
     for (const [environmentId, config] of configs) {
       const settings = config.settings;
-      if (!settings.sidebarThreadWorkspacesEnabled) continue;
+      if (settings.sidebarThreadWorkspacesEnabled === false) continue;
       const workspaces = effectiveThreadWorkspaces(settings);
       byEnvironment.set(environmentId, {
         workspaces,

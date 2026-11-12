@@ -20,6 +20,7 @@ import {
   resolveProjectProviderInstanceEnabled,
   resolveProviderInstanceEnabled,
   resolveThreadIdleCompaction,
+  effectiveThreadWorkspaces,
   ServerSettings,
   ServerSettingsPatch,
   withIdleCompaction,
@@ -836,5 +837,26 @@ describe("server model preferences", () => {
     const input = { favorites: [], providerModelPreferences: {} };
     expect(encodeServerSettings(decodeServerSettings(input))).toMatchObject(input);
     expect(decodeServerSettingsPatch(input)).toEqual(input);
+  });
+});
+
+describe("effectiveThreadWorkspaces", () => {
+  it("seeds the default list when the settings snapshot predates the flag", () => {
+    // The server writes settings sparsely, so a snapshot can arrive without the
+    // key; workspaces are default-on and must not disappear with it.
+    const seeded = effectiveThreadWorkspaces({
+      sidebarThreadWorkspacesEnabled: undefined as unknown as boolean,
+      sidebarThreadWorkspaces: [],
+    });
+    expect(seeded.map((workspace) => workspace.id)).toEqual(["work", "personal"]);
+  });
+
+  it("keeps an explicitly disabled strip empty", () => {
+    expect(
+      effectiveThreadWorkspaces({
+        sidebarThreadWorkspacesEnabled: false,
+        sidebarThreadWorkspaces: [],
+      }),
+    ).toEqual([]);
   });
 });

@@ -15,6 +15,8 @@ import { primaryEnvironmentIdAtom } from "../state/primaryEnvironment";
 import { usePrimaryEnvironmentId } from "../state/environments";
 import { serverEnvironment } from "../state/server";
 import { useAtomCommand } from "../state/use-atom-command";
+import { toastManager } from "../components/ui/toast";
+import { stackedThreadToast } from "../components/ui/toastHelpers";
 import { getClientSettings, persistClientSettingsUpdate, useClientSettings } from "./useSettings";
 import {
   assignThreadToWorkspace,
@@ -59,7 +61,9 @@ function assignThreadsNow(
   const environmentId = appAtomRegistry.get(primaryEnvironmentIdAtom);
   if (environmentId === null) return;
   const settings = appAtomRegistry.get(serverEnvironment.settingsValueAtom(environmentId));
-  if (!settings?.sidebarThreadWorkspacesEnabled) return;
+  // Missing means on, exactly as the strip reads it: a settings snapshot that
+  // predates the key must not turn a drag into a no-op.
+  if (settings === null || settings.sidebarThreadWorkspacesEnabled === false) return;
   // A slot selection or a workspace deleted by another client is not a workspace
   // id; writing one would leave an assignment nothing can resolve.
   if (
@@ -99,7 +103,7 @@ export function fileNewThreadInWorkspace(
   const environmentId = appAtomRegistry.get(primaryEnvironmentIdAtom);
   if (environmentId === null) return;
   const settings = appAtomRegistry.get(serverEnvironment.settingsValueAtom(environmentId));
-  if (!settings?.sidebarThreadWorkspacesEnabled) return;
+  if (settings === null || settings.sidebarThreadWorkspacesEnabled === false) return;
   const workspaces = effectiveThreadWorkspaces(settings);
   const projectTarget =
     projectWorkspaceId !== null &&
@@ -199,7 +203,35 @@ export function useThreadWorkspaces(): ThreadWorkspacesController {
   };
 
   const assignThreads = (threadKeys: readonly string[], workspaceId: string | null) => {
+    if (threadKeys.length === 0) return;
+    // Undo has to restore each thread's own previous slot, not one shared value.
+    const previous = new Map<string, string | null>();
+    for (const key of threadKeys) previous.set(key, assignments[key] ?? null);
     assignThreadsNow(threadKeys, workspaceId, { label: "thread workspaces update" });
+    // The unfiltered list does not move a row, so the move is only visible here.
+    const target = workspaces.find((workspace) => workspace.id === workspaceId) ?? null;
+    const count = threadKeys.length;
+    const subject = count === 1 ? "Thread" : `${count} threads`;
+    toastManager.add(
+      stackedThreadToast({
+        type: "success",
+        title:
+          target === null
+            ? `Removed ${subject.toLowerCase()} from its workspace`
+            : `Moved ${subject.toLowerCase()} to ${target.name}`,
+        actionProps: {
+          children: "Undo",
+          onClick: () => {
+            for (const [key, previousWorkspaceId] of previous) {
+              assignThreadsNow([key], previousWorkspaceId, {
+                label: "thread workspaces undo",
+                reportFailure: false,
+              });
+            }
+          },
+        },
+      }),
+    );
   };
 
   return {

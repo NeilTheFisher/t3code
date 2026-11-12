@@ -16,7 +16,9 @@ export type ThreadWorkspaceSettings = {
 export function threadWorkspaceSettings(
   settings: ServerSettings | null | undefined,
 ): ThreadWorkspaceSettings | null {
-  if (settings?.sidebarThreadWorkspacesEnabled !== true) return null;
+  // Missing means on: workspaces are default-on and a settings snapshot that
+  // predates the key must not hide every thread.
+  if (settings == null || settings.sidebarThreadWorkspacesEnabled === false) return null;
   return {
     workspaces: effectiveThreadWorkspaces(settings),
     assignments: settings.sidebarThreadWorkspaceAssignments,

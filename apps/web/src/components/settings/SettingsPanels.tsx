@@ -825,7 +825,7 @@ export function GeneralSettingsPanel() {
           control={
             <ScopedSwitch
               settingKeys={["sidebarThreadWorkspacesEnabled"]}
-              checked={settings.sidebarThreadWorkspacesEnabled}
+              checked={settings.sidebarThreadWorkspacesEnabled ?? true}
               onCheckedChange={(checked) =>
                 updateSettings({ sidebarThreadWorkspacesEnabled: Boolean(checked) })
               }

@@ -125,7 +125,8 @@ const DEFAULT_THREAD_WORKSPACES: readonly SidebarThreadWorkspace[] = [
 export function effectiveThreadWorkspaces(
   settings: Pick<ServerSettings, "sidebarThreadWorkspacesEnabled" | "sidebarThreadWorkspaces">,
 ): readonly SidebarThreadWorkspace[] {
-  return settings.sidebarThreadWorkspacesEnabled && settings.sidebarThreadWorkspaces.length === 0
+  return settings.sidebarThreadWorkspacesEnabled !== false &&
+    settings.sidebarThreadWorkspaces.length === 0
     ? DEFAULT_THREAD_WORKSPACES
     : settings.sidebarThreadWorkspaces;
 }
