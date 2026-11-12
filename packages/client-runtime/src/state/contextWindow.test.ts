@@ -166,6 +166,9 @@ function sendInput(
     });
   }
   const selected = overrides.selected ?? claude;
+  if (overrides.threadIdleCompaction !== undefined) {
+    Object.assign(projection.thread, { idleCompaction: overrides.threadIdleCompaction });
+  }
   return {
     projection,
     visibleTurnItems: visibleTurnItems as never,
@@ -177,6 +180,7 @@ function sendInput(
     settings: { ...DEFAULT_SERVER_SETTINGS, ...overrides.settings },
     text: overrides.text ?? "back again",
     threadIdle: overrides.threadIdle ?? true,
+    idleCompactionLocked: overrides.idleCompactionLocked ?? false,
     now: overrides.now ?? returnedAt,
   };
 }
@@ -203,6 +207,24 @@ describe("shouldCompactBeforeSend", () => {
     { name: "within the fallback TTL", now: "2026-10-30T15:23:02.000Z", expected: false },
     { name: "under 200K", usedTokens: 150_000, expected: false },
     { name: "with idle compaction off", settings: { idleCompaction: "off" }, expected: false },
+    {
+      name: "with the thread itself set to never",
+      threadIdleCompaction: "off",
+      expected: false,
+    },
+    {
+      name: "with the thread set to compact while away",
+      settings: { idleCompaction: "off" },
+      threadIdleCompaction: "beforeCacheExpires",
+      expected: true,
+    },
+    {
+      name: "with a locked policy outranking the thread",
+      settings: { idleCompaction: "off" },
+      threadIdleCompaction: "beforeCacheExpires",
+      idleCompactionLocked: true,
+      expected: false,
+    },
     {
       name: "with the Claude instance overriding idle compaction to off",
       settings: {

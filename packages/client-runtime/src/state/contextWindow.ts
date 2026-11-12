@@ -1,5 +1,5 @@
 import {
-  resolveIdleCompaction,
+  resolveThreadIdleCompaction,
   type ModelSelection,
   type OrchestrationV2ProviderTurn,
   type OrchestrationV2ProviderTurnTokenUsage,
@@ -279,6 +279,8 @@ export function shouldCompactBeforeSend(input: {
   >;
   readonly text: string;
   readonly threadIdle: boolean;
+  /** A managed policy lock outranks the thread's own mode. */
+  readonly idleCompactionLocked: boolean;
   readonly now: string;
 }): boolean {
   const { projection } = input;
@@ -287,7 +289,8 @@ export function shouldCompactBeforeSend(input: {
     provider === undefined ||
     !input.threadIdle ||
     COMPACT_COMMAND_PATTERN.test(input.text) ||
-    resolveIdleCompaction(input.settings, provider.instanceId) === "off" ||
+    resolveThreadIdleCompaction(input.settings, projection.thread, input.idleCompactionLocked) ===
+      "off" ||
     !provider.slashCommands.some((command) => command.name === "compact") ||
     resolvePendingHandoff(projection, input.selection, input.providers) !== null ||
     projection.runtimeRequests.some((request) => request.status === "pending") ||
