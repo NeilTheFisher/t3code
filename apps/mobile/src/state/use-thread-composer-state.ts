@@ -898,8 +898,25 @@ export function useThreadComposerState(input: {
       compactTokens !== null &&
       !freshContext &&
       followUpDispatchMode === null &&
-      appAtomRegistry.get(fullHistoryThreadKeysAtom)[threadKey] !== true &&
-      resumeCompactionTokens(modelSelection, text, metadata.createdAt) !== null;
+      selectedEnvironmentRuntime?.connectionState === "connected" &&
+      selectedThreadProjection !== null &&
+      serverConfig != null &&
+      shouldCompactBeforeSend({
+        projection: selectedThreadProjection.projection,
+        visibleTurnItems: selectedThreadVisibleTurnItems,
+        selection: modelSelection,
+        providers: serverConfig.providers,
+        settings: serverConfig.settings,
+        text,
+        idleCompactionLocked:
+          serverConfig.managedPolicy?.lockedSettings.includes("idleCompaction") ?? false,
+        threadIdle:
+          !activeThreadBusy &&
+          !runlessWorkActive &&
+          !isCompacting &&
+          selectedThreadQueuedMessages.length === 0,
+        now: metadata.createdAt,
+      });
     const messageId = MessageId.make(metadata.messageId);
     onWillEnqueue?.();
     clearThreadComposerError(threadKey);
