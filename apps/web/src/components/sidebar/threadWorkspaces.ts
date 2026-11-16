@@ -95,6 +95,12 @@ export function threadNeedsWorkspaceAttention(thread: ThreadAttentionInput): boo
   return status === "approval" || status === "input" || status === "failed" || status === "limited";
 }
 
+/** The environment half of a thread key, or null when the key is not scoped. */
+export function environmentIdOfThreadKey(key: string): string | null {
+  const separator = key.indexOf(":");
+  return separator > 0 ? key.slice(0, separator) : null;
+}
+
 export function threadWorkspaceKeyFor(thread: ScopedThreadIdentity): string {
   return threadWorkspaceAssignmentKey(thread.environmentId, thread.id);
 }
