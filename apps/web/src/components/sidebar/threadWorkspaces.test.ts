@@ -6,6 +6,7 @@ import {
   assignThreadToWorkspace,
   countThreadWorkspaceAttention,
   createThreadWorkspaceId,
+  environmentIdOfThreadKey,
   filterThreadsByWorkspace,
   formatThreadWorkspaceAttentionCount,
   isUnsortedWorkspaceSelection,
@@ -295,5 +296,17 @@ describe("workspace attention", () => {
         attentionThread({ settledOverride: "settled", hasPendingApprovals: true }),
       ),
     ).toBe(false);
+  });
+});
+
+describe("environmentIdOfThreadKey", () => {
+  it("reads the environment half of a scoped thread key", () => {
+    expect(environmentIdOfThreadKey("env-a:thread-1")).toBe("env-a");
+    expect(environmentIdOfThreadKey("env-a:mcp:child-1")).toBe("env-a");
+  });
+
+  it("reports null for a key with no scope", () => {
+    expect(environmentIdOfThreadKey("thread-1")).toBeNull();
+    expect(environmentIdOfThreadKey(":thread-1")).toBeNull();
   });
 });

@@ -3,6 +3,7 @@ import { Atom } from "effect/reactivity";
 import {
   DEFAULT_THREAD_WORKSPACE_ICON,
   effectiveThreadWorkspaces,
+  EnvironmentId,
   threadWorkspaceAssignmentKey,
   type ServerSettings,
   type ServerSettingsPatch,
@@ -12,7 +13,7 @@ import { runAtomCommand } from "@t3tools/client-runtime/state/runtime";
 
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { primaryEnvironmentIdAtom } from "../state/primaryEnvironment";
-import { usePrimaryEnvironmentId } from "../state/environments";
+import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import { serverEnvironment } from "../state/server";
 import { useAtomCommand } from "../state/use-atom-command";
 import { toastManager } from "../components/ui/toast";
@@ -20,6 +21,7 @@ import { stackedThreadToast } from "../components/ui/toastHelpers";
 import { getClientSettings, persistClientSettingsUpdate, useClientSettings } from "./useSettings";
 import {
   assignThreadToWorkspace,
+  environmentIdOfThreadKey,
   createThreadWorkspaceId,
   isUnsortedWorkspaceSelection,
   removeThreadWorkspaceAssignments,
@@ -48,6 +50,24 @@ export type ThreadWorkspacesController = {
 const noServerSettingsAtom = Atom.make<ServerSettings | null>(null);
 
 /**
+ * The environment whose settings carry the workspace list. Normally the primary
+ * one, but a client connected only over a relay can have no primary resolved
+ * while its threads render; then the environment named by the thread keys is the
+ * one that owns them.
+ */
+function workspaceEnvironmentId(
+  threadKeys: readonly string[] = [],
+): EnvironmentId | null {
+  const primary = appAtomRegistry.get(primaryEnvironmentIdAtom);
+  if (primary !== null) return primary;
+  for (const key of threadKeys) {
+    const id = environmentIdOfThreadKey(key);
+    if (id !== null) return EnvironmentId.make(id);
+  }
+  return null;
+}
+
+/**
  * Merges assignments into the live settings rather than the ones captured at the
  * call site: a drag outlives its render, and thread creation runs outside React.
  */
@@ -55,22 +75,22 @@ function assignThreadsNow(
   threadKeys: readonly string[],
   workspaceId: string | null,
   command: { readonly label: string; readonly reportFailure?: boolean },
-): void {
-  // Workspaces belong to the primary environment, which is also the list the
-  // strip renders, so a thread from another environment still files into it.
-  const environmentId = appAtomRegistry.get(primaryEnvironmentIdAtom);
-  if (environmentId === null) return;
+): boolean {
+  // Workspaces belong to the environment that owns the threads, which is also the
+  // list the strip renders, so a thread from another environment still files in.
+  const environmentId = workspaceEnvironmentId(threadKeys);
+  if (environmentId === null) return false;
   const settings = appAtomRegistry.get(serverEnvironment.settingsValueAtom(environmentId));
   // Missing means on, exactly as the strip reads it: a settings snapshot that
   // predates the key must not turn a drag into a no-op.
-  if (settings === null || settings.sidebarThreadWorkspacesEnabled === false) return;
+  if (settings === null || settings.sidebarThreadWorkspacesEnabled === false) return false;
   // A slot selection or a workspace deleted by another client is not a workspace
   // id; writing one would leave an assignment nothing can resolve.
   if (
     workspaceId !== null &&
     !effectiveThreadWorkspaces(settings).some((workspace) => workspace.id === workspaceId)
   ) {
-    return;
+    return false;
   }
   const patch: ServerSettingsPatch = {
     sidebarThreadWorkspaceAssignments: assignThreadToWorkspace(
@@ -85,6 +105,7 @@ function assignThreadsNow(
     { environmentId, input: { patch } },
     command,
   );
+  return true;
 }
 
 /**
@@ -100,7 +121,8 @@ export function fileNewThreadInWorkspace(
   },
   projectWorkspaceId: string | null,
 ): void {
-  const environmentId = appAtomRegistry.get(primaryEnvironmentIdAtom);
+  const threadKey = threadWorkspaceAssignmentKey(threadRef.environmentId, threadRef.threadId);
+  const environmentId = workspaceEnvironmentId([threadKey]);
   if (environmentId === null) return;
   const settings = appAtomRegistry.get(serverEnvironment.settingsValueAtom(environmentId));
   if (settings === null || settings.sidebarThreadWorkspacesEnabled === false) return;
@@ -113,7 +135,7 @@ export function fileNewThreadInWorkspace(
   const target = projectTarget ?? getClientSettings().sidebarActiveThreadWorkspaceId;
   if (target === null || !workspaces.some((workspace) => workspace.id === target)) return;
   assignThreadsNow(
-    [threadWorkspaceAssignmentKey(threadRef.environmentId, threadRef.threadId)],
+    [threadKey],
     target,
     { label: "File thread in workspace", reportFailure: false },
   );
@@ -125,8 +147,20 @@ export function fileNewThreadInWorkspace(
  * no saved workspaces falls back to the seeded defaults without writing them, so
  * re-enabling the beta never resurrects a deleted workspace.
  */
+/** The strip's environment: primary when resolved, else the first connected one. */
+function useWorkspaceEnvironmentId(): EnvironmentId | null {
+  const primary = usePrimaryEnvironmentId();
+  const { isReady, environments } = useEnvironments();
+  if (primary !== null) return primary;
+  if (!isReady) return null;
+  const connected = environments.find(
+    (environment) => environment.connection.phase === "connected",
+  );
+  return (connected ?? environments[0])?.environmentId ?? null;
+}
+
 export function useThreadWorkspaces(): ThreadWorkspacesController {
-  const environmentId = usePrimaryEnvironmentId();
+  const environmentId = useWorkspaceEnvironmentId();
   const serverSettings = useAtomValue(
     environmentId === null
       ? noServerSettingsAtom
@@ -207,7 +241,11 @@ export function useThreadWorkspaces(): ThreadWorkspacesController {
     // Undo has to restore each thread's own previous slot, not one shared value.
     const previous = new Map<string, string | null>();
     for (const key of threadKeys) previous.set(key, assignments[key] ?? null);
-    assignThreadsNow(threadKeys, workspaceId, { label: "thread workspaces update" });
+    const dispatched = assignThreadsNow(threadKeys, workspaceId, {
+      label: "thread workspaces update",
+    });
+    // Nothing was written, so claiming success would be a lie.
+    if (!dispatched) return;
     // The unfiltered list does not move a row, so the move is only visible here.
     const target = workspaces.find((workspace) => workspace.id === workspaceId) ?? null;
     const count = threadKeys.length;
