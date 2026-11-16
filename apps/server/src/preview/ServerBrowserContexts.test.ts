@@ -143,24 +143,6 @@ describe("ServerBrowserContexts", () => {
     } finally {
       await pool.close();
     }
-  it("launches software raster at scale 2 unless the operator opts out", () => {
-    expect(previewBrowserArgs({})).toEqual([
-      "--disable-gpu",
-      "--force-device-scale-factor=2",
-      "--disable-blink-features=AutomationControlled",
-    ]);
-    expect(previewRenderScale({})).toBe(2);
-  });
-
-  it("uses hardware raster at the requested scale when the operator opts in", () => {
-    const env = { T3CODE_SERVER_BROWSER_GPU: "1", T3CODE_SERVER_BROWSER_SCALE: "1" };
-    expect(previewBrowserArgs(env)).toEqual([
-      "--ignore-gpu-blocklist",
-      "--enable-gpu",
-      "--force-device-scale-factor=1",
-      "--disable-blink-features=AutomationControlled",
-    ]);
-    expect(previewRenderScale(env)).toBe(1);
   });
 
   it("lazily shares one browser across concurrent isolated sessions and reuses each context", async () => {
@@ -504,4 +486,23 @@ describe("ServerBrowserContexts", () => {
       yield* Effect.promise(() => sendsOneChromeIdentity(host));
     }),
   );
+  it("launches software raster at scale 2 unless the operator opts out", () => {
+    expect(previewBrowserArgs({})).toEqual([
+      "--disable-gpu",
+      "--force-device-scale-factor=2",
+      "--disable-blink-features=AutomationControlled",
+    ]);
+    expect(previewRenderScale({})).toBe(2);
+  });
+
+  it("uses hardware raster at the requested scale when the operator opts in", () => {
+    const env = { T3CODE_SERVER_BROWSER_GPU: "1", T3CODE_SERVER_BROWSER_SCALE: "1" };
+    expect(previewBrowserArgs(env)).toEqual([
+      "--ignore-gpu-blocklist",
+      "--enable-gpu",
+      "--force-device-scale-factor=1",
+      "--disable-blink-features=AutomationControlled",
+    ]);
+    expect(previewRenderScale(env)).toBe(1);
+  });
 });

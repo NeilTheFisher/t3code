@@ -8,6 +8,35 @@ import AutoSettleDisabledAt from "./Migrations/056_ProjectionThreadsAutoSettleDi
 // Published previews assigned V2 to 53, then 54: keep their schema and import
 // progress while reserving main's ids. Every id below is offset by +2 because this
 // fork shipped migrations 36 and 37 first (see Migrations.ts).
+/** The history as startup's preview reconciliation leaves it, or null when startup rejects it. */
+export function reconciledV2PreviewHistory(
+  history: ReadonlyArray<{ readonly id: number; readonly name: string }>,
+): ReadonlyArray<{ readonly id: number; readonly name: string }> | null {
+  // The fork's ids are upstream's plus two: 55/56 are the preview ids, 57 is OrchestrationV2.
+  const later = history.filter((row) => row.id >= 55);
+  const legacy = later.find(
+    (row) => row.name === "OrchestrationV2" && (row.id === 55 || row.id === 56),
+  );
+  if (!legacy) return history;
+  const valid = later.every(
+    (row) =>
+      row === legacy ||
+      (legacy.id === 56 &&
+        ((row.id === 55 && row.name === "PullRequestFilesViewed") ||
+          (row.id === 57 && row.name === "RemoveRedundantProjectionIndexes"))),
+  );
+  if (!valid) return null;
+  return [
+    ...history.filter((row) => row.id < 55),
+    { id: 55, name: "PullRequestFilesViewed" },
+    { id: 56, name: "ProjectionThreadsAutoSettleDisabledAt" },
+    { id: 57, name: "OrchestrationV2" },
+    ...(history.some((row) => row.id === 57)
+      ? [{ id: 58, name: "RemoveRedundantProjectionIndexes" }]
+      : []),
+  ];
+}
+
 export const reconcileV2PreviewMigration = Effect.fn("reconcileV2PreviewMigration")(function* () {
   const sql = yield* SqlClient.SqlClient;
   return yield* sql.withTransaction(

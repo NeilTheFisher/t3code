@@ -22,6 +22,7 @@ it("detects draft edits during upload preparation without treating upload metada
   const draft: ComposerThreadDraftState = {
     prompt: "before",
     images: [],
+    commitContexts: [],
     files: [
       {
         type: "file",

@@ -1129,6 +1129,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       ) : null}
     </span>
   );
+  const accessibleTitle = isRenaming ? null : <span className="sr-only">{thread.title}</span>;
 
   // Which workspace a thread is filed in is otherwise invisible in the unfiltered list.
   const threadWorkspaceChip = props.threadWorkspace ? (
@@ -2078,12 +2079,6 @@ export const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props
               aria-describedby={`${props.resultId}-pr`}
               aria-label={accessibility.label}
               {...dragListeners}
-              onPointerDown={(event) => {
-                if (event.nativeEvent.isPrimary && event.nativeEvent.button === 0) {
-                  props.onDragStart(event.nativeEvent);
-                }
-                dragListeners?.onPointerDown?.(event);
-              }}
               onMouseMove={props.onHighlight}
               // Focus stays in the search box, as for Enter. A focused result would lose focus as
               // the results close, and its recovery scrolls the list away from the opened thread.

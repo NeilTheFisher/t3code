@@ -2333,7 +2333,7 @@ function persistedComposerDraftHasUserContent(draft: PersistedComposerThreadDraf
     (draft.reviewComments?.length ?? 0) > 0 ||
     (draft.threadContexts?.length ?? 0) > 0 ||
     (draft.environmentContexts?.length ?? 0) > 0 ||
-    draft.replyTo !== undefined
+    draft.replyTo !== undefined ||
     (draft.commitContexts?.length ?? 0) > 0
   );
 }
