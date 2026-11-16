@@ -3648,6 +3648,44 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
               )}
             </div>
           ) : null}
+          {/* A workspace view can be emptied by the project scope, which is invisible otherwise. */}
+          {!isSearchingThreads &&
+          workspaceFilter !== null &&
+          workspaceFilter.activeWorkspaceId !== null &&
+          sidebarListItems.length === 0 ? (
+            <div className="flex flex-col items-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground/60">
+              <span>
+                {workspaceFilter.activeWorkspaceId === "unsorted"
+                  ? "No unfiled threads"
+                  : `No threads in ${
+                      threadWorkspaces.workspaces.find(
+                        (workspace) => workspace.id === workspaceFilter.activeWorkspaceId,
+                      )?.name ?? "this workspace"
+                    }`}
+              </span>
+              {scopedProjectGroups.length > 0 ? (
+                <span>This project filter hides the rest.</span>
+              ) : null}
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                {scopedProjectGroups.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => setProjectScopeKeys([])}
+                    className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-sidebar-border px-2.5 py-1 text-2xs font-medium text-sidebar-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+                  >
+                    Show all projects
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => threadWorkspaces.setActiveWorkspaceId(null)}
+                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-sidebar-border px-2.5 py-1 text-2xs font-medium text-sidebar-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+                >
+                  Show all workspaces
+                </button>
+              </div>
+            </div>
+          ) : null}
           {!isSearchingThreads ? (
             <TooltipProvider
               key="sidebar-thread-tooltips-150"

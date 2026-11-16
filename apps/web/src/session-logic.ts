@@ -785,7 +785,7 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
         mcpApp,
         ...attemptMetadata,
       });
-      continue;
+      // The card sits beside the call's own work row, not instead of it.
     }
 
     if (STANDALONE_V2_ITEM_TYPES.has(item.type)) {

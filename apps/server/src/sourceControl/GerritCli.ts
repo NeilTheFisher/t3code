@@ -221,6 +221,7 @@ function classifyVcsError(error: VcsError, input: GerritErrorContext): GerritCli
     VcsProcessOutputReadError: (cause) => new GerritCliCommandError({ ...input, cause }),
     VcsProcessOutputLimitError: (cause) => new GerritCliCommandError({ ...input, cause }),
     VcsProcessMissingExitCodeError: (cause) => new GerritCliCommandError({ ...input, cause }),
+    VcsCheckpointStorageError: (cause) => new GerritCliCommandError({ ...input, cause }),
     VcsRepositoryDetectionError: (cause) => new GerritCliCommandError({ ...input, cause }),
     VcsUnsupportedOperationError: (cause) => new GerritCliCommandError({ ...input, cause }),
   });

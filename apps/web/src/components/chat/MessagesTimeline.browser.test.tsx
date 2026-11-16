@@ -4,7 +4,6 @@ import { flushSync } from "react-dom";
 import { AudioPreview } from "../files/AudioPreview";
 import { cdp, page, userEvent } from "vite-plus/test/browser";
 import { useAudioPlayerStore } from "~/audioPlayerStore";
-import { cdp, page } from "vite-plus/test/browser";
 import {
   ComposerContextId,
   EnvironmentId,

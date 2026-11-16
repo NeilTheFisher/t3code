@@ -477,6 +477,8 @@ export function useThreadComposerState(input: {
             !runlessWorkActive &&
             !isCompacting &&
             selectedThreadQueuedMessages.length === 0,
+          idleCompactionLocked:
+            serverConfig.managedPolicy?.lockedSettings.includes("idleCompaction") ?? false,
           now,
         })
       : null;
@@ -894,29 +896,7 @@ export function useThreadComposerState(input: {
     const metadata = makeQueuedMessageMetadata();
     // A fresh session drops the context a compaction would summarize. Only a send the notice
     // announced compacts, since the notice's minute clock can trail the exact deadline.
-    const compactBeforeSend =
-      compactTokens !== null &&
-      !freshContext &&
-      followUpDispatchMode === null &&
-      selectedEnvironmentRuntime?.connectionState === "connected" &&
-      selectedThreadProjection !== null &&
-      serverConfig != null &&
-      shouldCompactBeforeSend({
-        projection: selectedThreadProjection.projection,
-        visibleTurnItems: selectedThreadVisibleTurnItems,
-        selection: modelSelection,
-        providers: serverConfig.providers,
-        settings: serverConfig.settings,
-        text,
-        idleCompactionLocked:
-          serverConfig.managedPolicy?.lockedSettings.includes("idleCompaction") ?? false,
-        threadIdle:
-          !activeThreadBusy &&
-          !runlessWorkActive &&
-          !isCompacting &&
-          selectedThreadQueuedMessages.length === 0,
-        now: metadata.createdAt,
-      });
+    const compactBeforeSend = compactTokens !== null && !freshContext && followUpDispatchMode === null;
     const messageId = MessageId.make(metadata.messageId);
     onWillEnqueue?.();
     clearThreadComposerError(threadKey);

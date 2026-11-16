@@ -99,6 +99,41 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
   );
 }
 
+/** Text an agent sent with `send_to_user`, shown as its own words. */
+export function SentMessageTimelineRow({
+  row,
+}: {
+  row: Extract<TimelineRow, { kind: "sent-message" }>;
+}) {
+  const ctx = use(TimelineRowCtx);
+
+  return (
+    <div className="min-w-0 px-1 py-0.5">
+      <MessageAuthorHeading>T3 Code</MessageAuthorHeading>
+      {/* Sent messages have no message id; citations name their turn item instead. */}
+      <AssistantCitationSource
+        messageId={MessageId.make(row.id)}
+        {...(ctx.threadRef ? { threadRef: ctx.threadRef } : {})}
+        itemKey={row.id}
+        request={ctx.citationRequest}
+        listRef={ctx.listRef}
+      >
+        <ChatMarkdown
+          text={row.text}
+          cwd={ctx.markdownCwd}
+          threadRef={ctx.threadRef ?? undefined}
+          lineBreaks={shouldPreserveAssistantLineBreaks(row.text)}
+          skills={ctx.skills}
+          headingLevelOffset={MESSAGE_HEADING_LEVEL}
+          onUseArtifactTemplate={ctx.onUseArtifactTemplate}
+          onRunShellCommand={ctx.onRunShellCommand}
+          onImageExpand={ctx.onImageExpand}
+        />
+      </AssistantCitationSource>
+    </div>
+  );
+}
+
 function AssistantForkButton({
   projectedItem,
 }: {

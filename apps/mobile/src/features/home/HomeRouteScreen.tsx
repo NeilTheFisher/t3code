@@ -232,6 +232,7 @@ export function HomeRouteScreen() {
 
         <HomeWorkspaceRoot onFileThreadInWorkspace={fileThreadInWorkspace}>
         <HomeScreen
+          visible={visible}
           catalogState={catalogState}
           environments={environments}
           workspaces={workspaces}
