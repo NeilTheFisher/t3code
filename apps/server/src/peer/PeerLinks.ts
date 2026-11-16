@@ -56,6 +56,19 @@ export const probeTimeout = (origin: string) =>
 /** How long a listing waits on a link's addresses; a real call still gives a waking peer `probeTimeout`. */
 const LIST_PROBE_TIMEOUT = Duration.seconds(3);
 
+// A link is a pairing a person can revoke, and its copy promises a month before a
+// new pairing code is needed. The MCP client session a link signs in with lasts a
+// year so an idle link survives update cycles, so the link's own window is capped
+// here instead of inheriting the session's.
+const PEER_LINK_TTL_SECONDS = 30 * 24 * 60 * 60;
+
+const cappedLinkExpiry = (linkedAt: DateTime.Utc, expiresAt: DateTime.Utc) =>
+  DateTime.toUtc(
+    DateTime.isLessThan(DateTime.add(linkedAt, { seconds: PEER_LINK_TTL_SECONDS }), expiresAt)
+      ? DateTime.add(linkedAt, { seconds: PEER_LINK_TTL_SECONDS })
+      : expiresAt,
+  );
+
 /** Node's TLS verification code in a failed request's cause chain, if any. */
 export const certificateErrorCode = (error: unknown) => {
   let current = error;
@@ -285,7 +298,13 @@ const make = Effect.gen(function* () {
       linkedAt: DateTime.makeUnsafe(row.linked_at),
       // Its token predates link fencing, so the peer would not fence its work:
       // like an expired link, only a new pairing code brings it back.
-      expiresAt: DateTime.makeUnsafe(row.fenced === 1 ? row.expires_at : row.linked_at),
+      expiresAt:
+        row.fenced === 1
+          ? cappedLinkExpiry(
+              DateTime.makeUnsafe(row.linked_at),
+              DateTime.makeUnsafe(row.expires_at),
+            )
+          : DateTime.makeUnsafe(row.linked_at),
       lastReachedAt: row.last_reached_at === null ? null : DateTime.makeUnsafe(row.last_reached_at),
       lastError: row.last_error,
     } satisfies PeerLink;
@@ -533,7 +552,10 @@ const make = Effect.gen(function* () {
       urls: origins,
       access: input.access,
       linkedAt: now,
-      expiresAt: DateTime.add(now, { seconds: issued.expires_in }),
+      expiresAt: cappedLinkExpiry(
+        now,
+        DateTime.add(now, { seconds: issued.expires_in }),
+      ),
       lastReachedAt: now,
       lastError: null,
     };
