@@ -198,12 +198,8 @@ function makeRegistry(
       const updateState = input.state;
       if (updateState) {
         yield* Ref.update(updateStatesRef, (states) => [...states, updateState]);
-        const waiters = yield* Ref.get(statusWaiters);
-        for (const waiter of waiters.get(updateState.status) ?? []) {
-          yield* Deferred.succeed(waiter, undefined);
-        }
       }
-      return yield* Ref.updateAndGet(providersRef, (providers) =>
+      const providers = yield* Ref.updateAndGet(providersRef, (providers) =>
         providers.map((candidate) => {
           if (candidate.instanceId !== input.instanceId) {
             return candidate;
@@ -218,6 +214,15 @@ function makeRegistry(
           };
         }),
       );
+      // Wake status waiters only once the provider list shows the state: a waiter
+      // that resumes earlier reads the previous state and fails for no reason.
+      if (updateState) {
+        const waiters = yield* Ref.get(statusWaiters);
+        for (const waiter of waiters.get(updateState.status) ?? []) {
+          yield* Deferred.succeed(waiter, undefined);
+        }
+      }
+      return providers;
     });
 
     const registry: ProviderRegistry.ProviderRegistry["Service"] = {
