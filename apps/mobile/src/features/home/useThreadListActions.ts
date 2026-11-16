@@ -279,7 +279,7 @@ export function useThreadListActions(): {
                 }
               }
             },
-            (result) => result,
+            (result: boolean | undefined) => result === true,
           );
         } catch (error) {
           Dialog.alert(

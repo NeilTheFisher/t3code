@@ -6361,36 +6361,47 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
 
       // A remote ref maps to the local branch of the same name and nothing else: a
       // differently named branch that tracks it is a different branch.
-      const localTrackingBranch = null;
-
       const localTrackedBranchCandidate = deriveLocalBranchNameFromRemoteRef(input.refName);
-      const localTrackedBranchTargetExists =
-        remoteExists && !localInputExists && !localTrackingBranch && localTrackedBranchCandidate
+      const candidateTracksRemote =
+        remoteExists && !localInputExists && localTrackedBranchCandidate !== null
           ? yield* executeGit(
-              "GitVcsDriver.switchRef.localTrackedBranchTargetExists",
+              "GitVcsDriver.switchRef.candidateTracksRemote",
               input.cwd,
-              ["show-ref", "--verify", "--quiet", `refs/heads/${localTrackedBranchCandidate}`],
+              [
+                "for-each-ref",
+                "--format=%(upstream)",
+                `refs/heads/${localTrackedBranchCandidate}`,
+              ],
               {
                 timeoutMs: 5_000,
                 allowNonZeroExit: true,
               },
-            ).pipe(Effect.map((result) => result.exitCode === 0))
+            ).pipe(
+              Effect.map(
+                (result) =>
+                  result.exitCode === 0 &&
+                  result.stdout.trim() === `refs/remotes/${input.refName}`,
+              ),
+            )
           : false;
 
+      // Creating a branch that already exists is how a collision surfaces, so an
+      // untracked branch of the same name is never silently attached.
       const newTrackingBranch =
-        !localInputExists && remoteExists && !localTrackingBranch && !localTrackedBranchTargetExists
+        !localInputExists && remoteExists && !candidateTracksRemote
           ? localTrackedBranchCandidate
           : null;
 
       const checkoutArgs = localInputExists
         ? ["checkout", input.refName]
-        : newTrackingBranch
-          ? ["checkout", newTrackingBranch]
-          : remoteExists && !localTrackingBranch
-            ? ["checkout", "--track", input.refName]
-            : remoteExists && localTrackingBranch
-              ? ["checkout", localTrackingBranch]
-              : ["checkout", input.refName];
+        : remoteExists
+          ? [
+              "checkout",
+              candidateTracksRemote
+                ? (localTrackedBranchCandidate ?? input.refName)
+                : (newTrackingBranch ?? input.refName),
+            ]
+          : ["checkout", input.refName];
 
       yield* refuseOptionLikeRefName("GitVcsDriver.switchRef", input.cwd, checkoutArgs.at(-1));
 

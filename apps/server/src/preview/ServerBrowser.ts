@@ -108,7 +108,6 @@ const SavedProfilesJson = Schema.fromJsonString(
 );
 const decodeSavedProfiles = Schema.decodeUnknownEffect(SavedProfilesJson);
 const encodeSavedProfiles = Schema.encodeSync(SavedProfilesJson);
-const RENDER_SCALE = 2;
 // Chromium allows three unacked frames, so 100 ms pacing caps viewers near 30 fps.
 const RENDER_SCALE = previewRenderScale(process.env);
 // An ack is what lets Chromium send the next frame, so a paced ack is also a

@@ -49,7 +49,6 @@ import {
 } from "react";
 import {
   Alert,
-  Platform,
   Pressable,
   ScrollView,
   View,
