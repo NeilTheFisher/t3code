@@ -555,6 +555,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     ],
   },
   {
+    id: "screen-reader-window-title",
+    title: "Screen reader window title",
+    to: "/settings/chat",
+    searchTerms: [
+      "accessibility a11y screen reader nvda jaws voiceover orca narrator window title tab title alt tab taskbar thread status order working approval",
+    ],
+  },
+  {
     id: "guest-links",
     title: msg("Guest links"),
     to: "/settings/labs",
@@ -710,14 +718,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: [msg("test voice speech model transcription recognition")],
   },
   {
-    id: "thread-workspaces",
-    title: "Thread workspaces (beta)",
-    to: "/settings/general",
-    searchTerms: [
-      "workspace group threads personal work office sidebar footer strip drag organize context",
-    ],
-  },
-  {
     id: "auto-settle-inactive-threads",
     title: msg("Auto-settle inactive threads"),
     to: "/settings/threads",
@@ -781,6 +781,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     ],
   },
   {
+    id: "language",
+    title: msg("Language"),
+    to: "/settings/general",
+    searchTerms: [
+      "locale translation english deutsch german español spanish français french português portuguese brasil brazilian chinese 中文 japanese 日本語 korean 한국어 russian русский sprache idioma langue 语言 言語 언어 язык",
+    ],
+  },
+  {
     id: "time-format",
     title: msg("Time format"),
     to: "/settings/general",
@@ -830,12 +838,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: msg("Rich text composer"),
     to: "/settings/chat",
     searchTerms: [msg("composer rich text tiptap bold italic markdown styled wysiwyg")],
-  },
-  {
-    id: "composer-collapse",
-    title: "Collapse composer on scroll",
-    to: "/settings/chat",
-    searchTerms: ["composer rest resting scroll wheel conversation timeline shrink minimize"],
   },
   {
     id: "send-shortcut",
@@ -1309,14 +1311,6 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   ...sourceControlHostSearchItems(sourceControlClients.definitions),
   {
-    id: "gerrit-credentials",
-    title: "Gerrit HTTP credentials",
-    to: "/settings/source-control",
-    searchTerms: ["gerrit http base url username password credentials replies reviewers"],
-    environmentOnly: true,
-    scope: "environment-defaults",
-  },
-  {
     id: "source-control-writing-style",
     title: msg("Commit and pull request writing"),
     to: "/settings/source-control",
@@ -1563,6 +1557,28 @@ export const SETTINGS_SEARCH_ITEMS = [
       "workspace group threads personal work office sidebar footer strip drag organize context",
     ],
   },
+  {
+    id: "composer-collapse",
+    title: msg("Collapse composer on scroll"),
+    to: "/settings/chat",
+    searchTerms: ["composer rest resting scroll wheel conversation timeline shrink minimize"],
+  },
+  {
+    id: "gerrit-credentials",
+    title: msg("Gerrit HTTP credentials"),
+    to: "/settings/source-control",
+    searchTerms: ["gerrit http base url username password credentials replies reviewers"],
+    environmentOnly: true,
+    scope: "environment-defaults",
+  },
+  {
+    id: "thread-workspaces",
+    title: msg("Thread workspaces (beta)"),
+    to: "/settings/general",
+    searchTerms: [
+      "workspace group threads personal work office sidebar footer strip drag organize context",
+    ],
+  },
 ] as const satisfies ReadonlyArray<SettingsSearchItem>;
 
 export type SettingsSearchItemId = (typeof SETTINGS_SEARCH_ITEMS)[number]["id"];
@@ -1594,7 +1610,6 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/labs": null,
   "/settings/about": null,
   "/settings/archived": "project-defaults",
-  "/settings/voice-conversations": null,
 };
 
 const RENAMED_SETTINGS_PATHS: Readonly<Record<string, SettingsPath>> = {

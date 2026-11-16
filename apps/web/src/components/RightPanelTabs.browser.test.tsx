@@ -156,6 +156,8 @@ function panel(activeSurface: RightPanelSurface) {
   const noop = () => {};
   const props: RightPanelTabsProps = {
     mode: "inline",
+    onAddGitGraph: noop,
+    gitGraphAvailable: false,
     keybindings: [],
     getShortcutContext: () => ({
       terminalFocus: false,

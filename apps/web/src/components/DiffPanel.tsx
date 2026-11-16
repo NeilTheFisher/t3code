@@ -217,12 +217,14 @@ function DiffFileCollapseToggle({
 
 function DiffFileHeaderSuffix({
   filePath,
+  workspaceRoot,
   hasStat,
   error,
   truncated,
   onRetry,
 }: {
   filePath: string;
+  workspaceRoot: string | undefined;
   hasStat: boolean;
   error: boolean;
   truncated: boolean;
@@ -231,7 +233,7 @@ function DiffFileHeaderSuffix({
   return (
     <>
       <span data-diff-copy-path className="inline-flex">
-        <DiffFilePathCopyButton filePath={filePath} />
+        <DiffFilePathCopyButton filePath={filePath} workspaceRoot={workspaceRoot} />
       </span>
       {hasStat ? (
         <DiffFileStatus error={error} truncated={truncated} retry={() => onRetry(filePath)} />
@@ -969,15 +971,6 @@ export default function DiffPanel({
       } else {
         next.add(fileKey);
       }
-      return next;
-    });
-  });
-  // Find can ask again before the unfolded file reaches the viewer, so this must never fold.
-  const unfoldDiffFile = useStableCallback((fileKey: string) => {
-    updateCollapsedDiffFiles((current) => {
-      if (!current.has(fileKey)) return current;
-      const next = new Set(current);
-      next.delete(fileKey);
       return next;
     });
   });
@@ -1907,6 +1900,7 @@ export default function DiffPanel({
                           ) : null}
                           <DiffFileHeaderSuffix
                             filePath={path}
+                            workspaceRoot={activeCwd}
                             hasStat={fileStats.has(path)}
                             error={state?.error ?? false}
                             truncated={state?.truncated ?? false}
@@ -1930,7 +1924,14 @@ export default function DiffPanel({
                           },
                         }
                       : {})}
-                    onRevealSearchMatch={unfoldDiffFile}
+                    onFileCollapsedChange={(fileKey, collapsed) =>
+                      updateCollapsedDiffFiles((current) => {
+                        const next = new Set(current);
+                        if (collapsed) next.add(fileKey);
+                        else next.delete(fileKey);
+                        return next;
+                      })
+                    }
                     renderHeaderPrefix={(fileDiff, fileKey, collapsed) => {
                       return (
                         <DiffFileCollapseToggle

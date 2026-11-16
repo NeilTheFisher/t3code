@@ -7323,16 +7323,28 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       const localTrackedBranchTargetExists =
         localTrackedBranchCandidate !== null
           ? yield* executeGit(
-              "GitVcsDriver.switchRef.localTrackedBranchTargetExists",
+              "GitVcsDriver.switchRef.candidateTracksRemote",
               input.cwd,
-              ["show-ref", "--verify", "--quiet", `refs/heads/${localTrackedBranchCandidate}`],
+              [
+                "for-each-ref",
+                "--format=%(upstream)",
+                `refs/heads/${localTrackedBranchCandidate}`,
+              ],
               {
                 timeoutMs: 5_000,
                 allowNonZeroExit: true,
               },
-            ).pipe(Effect.map((result) => result.exitCode === 0))
+            ).pipe(
+              Effect.map(
+                (result) =>
+                  result.exitCode === 0 &&
+                  result.stdout.trim() === `refs/remotes/${input.refName}`,
+              ),
+            )
           : false;
 
+      // Creating a branch that already exists is how a collision surfaces, so an
+      // untracked branch of the same name is never silently attached.
       const newTrackingBranch =
         localTrackedBranchCandidate !== null && !localTrackedBranchTargetExists
           ? localTrackedBranchCandidate
