@@ -108,6 +108,7 @@ const clientLaunchHarness = (input: {
                     ...(input.defaultThreadWorkspaceId === undefined
                       ? {}
                       : { defaultThreadWorkspaceId: input.defaultThreadWorkspaceId }),
+
                   },
                 },
               }),

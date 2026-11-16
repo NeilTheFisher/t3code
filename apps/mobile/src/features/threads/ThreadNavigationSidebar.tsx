@@ -42,7 +42,6 @@ import { useQueuedThreadKeys } from "../../state/use-thread-outbox";
 import { useWorkspaceState } from "../../state/workspace";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
 import { useThreadListV2 } from "./useThreadListV2";
-import { useSidebarRowThreadKey } from "./useSidebarRowThreadKey";
 import { useThreadJumpShortcuts } from "../keyboard/threadKeyboardShortcuts";
 import { requestThreadMessageJump } from "./threadMessageJump";
 import { useThreadListSearchMatches } from "./useThreadListSearchMatches";
@@ -126,8 +125,8 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
   const insets = useSafeAreaInsets();
   const { fabClearance, fabSize } = useAndroidControlSizing();
   const projects = useProjects();
-  const threads = useAtomValue(steadyNavigationThreadShellsAtom);
-  const selectedThreadKey = useSidebarRowThreadKey(props.selectedThreadKey);
+  const threads = useNavigationThreadShells();
+  const selectedThreadKey = props.selectedThreadKey;
   const { environments: workspaceEnvironments, state: catalogState } = useWorkspaceState();
   const { savedConnectionsById } = useSavedRemoteConnections();
   const openSwipeableRef = useRef<SwipeableMethods | null>(null);
