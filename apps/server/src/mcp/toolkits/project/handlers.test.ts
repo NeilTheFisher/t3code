@@ -209,13 +209,6 @@ const clientLaunchHarness = (input: {
       ensureScratchProject: Effect.succeed({ projectId }),
     }),
     Layer.mock(PeerForwarding.PeerForwarding)({}),
-<<<<<<< HEAD
-    Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
-      namedProjectsRoot: "/projects",
-      isScratchProject: () => Effect.succeed(false),
-    }),
-=======
->>>>>>> a76db23769 (feat(mcp): let a remote client connect, name a project, or start without one)
     DocumentText.layer.pipe(Layer.provideMerge(NodeServices.layer)),
   ).pipe(
     Layer.provideMerge(GitVcsDriver.layer),
