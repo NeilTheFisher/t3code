@@ -295,13 +295,10 @@ function DiscoveryItemRow({
   const messages = useMessages();
   const gt = useGT();
   const version = optionLabel(item.version);
-<<<<<<< HEAD
-=======
   const enabled = isProviderDiscoveryItem(item)
     ? item.status === "available" &&
       (item.auth.status === "authenticated" || isAvailableWithUnjudgedAuth(item))
     : item.status === "available" && item.implemented;
->>>>>>> ae118d9711 (fix(gerrit): repair the settings row, viewed marks, and REST auth)
   const auth = isProviderDiscoveryItem(item) ? item.auth : null;
   const authStatus = auth ? authPresentation(auth, messages) : null;
   const authAccount = auth ? optionLabel(auth.account) : null;

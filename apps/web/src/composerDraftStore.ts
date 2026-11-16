@@ -503,9 +503,8 @@ export function composerDraftHasUserContent(
     draft.reviewComments.length > 0 ||
     draft.threadContexts.length > 0 ||
     draft.environmentContexts.length > 0 ||
-    draft.replyTo !== null
-    draft.commitContexts.length > 0 ||
-    draft.threadContexts.length > 0
+    draft.replyTo !== null ||
+    draft.commitContexts.length > 0
   );
 }
 

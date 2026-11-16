@@ -745,6 +745,17 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
         ? sentMessageFromToolItem(item)
         : undefined;
     if (sentMessage !== undefined) {
+      entries.push({
+        id: item.id,
+        kind: "sent-message",
+        createdAt,
+        runId: item.runId,
+        text: sentMessage,
+        ...attemptMetadata,
+      });
+      continue;
+    }
+
     const speak =
       item.type === "dynamic_tool" && item.status === "completed"
         ? speakFromToolItem(item)
@@ -764,11 +775,14 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
     const mcpApp = item.type === "dynamic_tool" ? mcpAppFromToolItem(item) : undefined;
     if (mcpApp !== undefined) {
       entries.push({
-        id: item.id,
-        kind: "sent-message",
+        id: `mcp-app:${item.id}`,
+        kind: "mcp-app",
         createdAt,
         runId: item.runId,
-        text: sentMessage,
+        sourceThreadId: row.sourceThreadId,
+        itemId: row.sourceItemId,
+        revision: turnItemDetailRevision(item),
+        mcpApp,
         ...attemptMetadata,
       });
       continue;
@@ -793,20 +807,6 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
       ...attemptMetadata,
     });
 
-    const mcpApp = item.type === "dynamic_tool" ? mcpAppFromToolItem(item) : undefined;
-    if (mcpApp !== undefined) {
-      entries.push({
-        id: `mcp-app:${item.id}`,
-        kind: "mcp-app",
-        createdAt,
-        runId: item.runId,
-        sourceThreadId: row.sourceThreadId,
-        itemId: row.sourceItemId,
-        revision: turnItemDetailRevision(item),
-        mcpApp,
-        ...attemptMetadata,
-      });
-    }
   }
 
   const retainedMessageIds = new Set([

@@ -182,11 +182,8 @@ import {
 } from "../../claudeModelOptions.ts";
 import * as ServerConfig from "../../config.ts";
 import * as PortScanner from "../../preview/PortScanner.ts";
-<<<<<<< HEAD
 import * as ProcessRunner from "../../processRunner.ts";
 import * as ServerSettings from "../../serverSettings.ts";
-=======
->>>>>>> 4cf7a681a0 (feat: a thread keeps its own idle compaction choice)
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import { spawnAndCollect } from "@t3tools/provider-core/server/snapshotProbe";
 import { signalProcessGroup } from "@t3tools/provider-core/server/processGroup";

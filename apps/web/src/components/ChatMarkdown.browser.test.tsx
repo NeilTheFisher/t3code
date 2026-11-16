@@ -1127,6 +1127,9 @@ describe("ChatMarkdown host media", () => {
       expect(screen.container.textContent).toContain(MISSING_FILE_ACCESS_MESSAGE),
     );
     expect(screen.container.textContent).not.toContain("Retry video");
+  });
+});
+
 const ttsHighlight = vi.hoisted(() => ({
   cues: [] as string[],
   seek: vi.fn<(index: number) => void>(),
