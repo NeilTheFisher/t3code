@@ -9,6 +9,7 @@ import {
 } from "react";
 import {
   ArchiveIcon,
+  FlaskConicalIcon,
   BotIcon,
   createLucideIcon,
   CalendarClockIcon,
@@ -24,8 +25,6 @@ import {
   KeyRoundIcon,
   MicIcon,
   PaletteIcon,
-  FlaskConicalIcon,
-  Mic2Icon,
   SearchIcon,
   ServerIcon,
   Settings2Icon,
@@ -97,6 +96,7 @@ const SETTINGS_SECTION_ICONS: Readonly<
   "/settings/general": Settings2Icon,
   "/settings/diagnostics": WrenchIcon,
   "/settings/voice": MicIcon,
+  "/settings/voice-conversations": MessagesSquareIcon,
   "/settings/appearance": PaletteIcon,
   "/settings/chat": MessageSquareTextIcon,
   "/settings/diffs": FileDiffIcon,
@@ -116,7 +116,6 @@ const SETTINGS_SECTION_ICONS: Readonly<
   "/settings/maintenance": WrenchIcon,
   "/settings/labs": FlaskConicalIcon,
   "/settings/about": InfoIcon,
-  "/settings/voice-conversations": Mic2Icon,
   "/settings/archived": ArchiveIcon,
 };
 

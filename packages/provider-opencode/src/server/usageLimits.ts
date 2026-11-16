@@ -187,18 +187,29 @@ function consoleGoWindows(response: typeof GoStatusResponse.Type): ServerProvide
  * token authenticates it; a 403 means no Go subscription and a 401 means the
  * token has expired.
  */
+const CONSOLE_USAGE_TIMEOUT = "10 seconds";
+
 const readConsoleGoUsageLimits = Effect.fn("readConsoleGoUsageLimits")(function* (input: {
   readonly checkedAt: string;
   readonly workspaceId: string;
   readonly accessToken: string;
 }) {
   const client = yield* HttpClient.HttpClient;
+  // A usage read must never hold up a provider snapshot; an unreachable console
+  // reports the meters as unavailable instead.
   const response = yield* client.execute(
     HttpClientRequest.get("https://opencode.ai/console/api/go/status").pipe(
       HttpClientRequest.setHeader("accept", "application/json"),
       HttpClientRequest.setHeader("x-org-id", input.workspaceId),
       HttpClientRequest.bearerToken(input.accessToken),
       HttpClientRequest.setHeader("user-agent", "T3-Code"),
+    ),
+  ).pipe(
+    Effect.timeoutOption(CONSOLE_USAGE_TIMEOUT),
+    Effect.flatMap((result) =>
+      Option.isSome(result)
+        ? Effect.succeed(result.value)
+        : makeUnavailableUsageLimits({ checkedAt: input.checkedAt, reason: "probeFailed" }),
     ),
   );
   if (response.status === 403) {

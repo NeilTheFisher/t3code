@@ -5,6 +5,7 @@ import * as NodeNet from "node:net";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { assert, it, describe } from "@effect/vitest";
@@ -66,7 +67,14 @@ const layerServerConfig = ServerConfig.layerTest(process.cwd(), {
 });
 const layerTest = GitVcsDriver.layer.pipe(
   Layer.provideMerge(layerServerConfig),
-  Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NodeCrypto.layerDigest)),
+  Layer.provideMerge(
+    Layer.mergeAll(
+      NodeServices.layer,
+      NodeCrypto.layer,
+      NodeCrypto.layerDigest,
+      Layer.succeed(SecureRandom.SecureRandom, SecureRandom.make((size) => new Uint8Array(size))),
+    ),
+  ),
 );
 
 const makeNonRepositoryHandle = () =>
@@ -1650,7 +1658,15 @@ it.effect("coalesces concurrent ref pages into one repository snapshot", () =>
     }),
   ).pipe(
     Effect.provide(
-      layerServerConfig.pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layerDigest))),
+      layerServerConfig.pipe(
+        Layer.provideMerge(
+          Layer.mergeAll(
+            NodeServices.layer,
+            NodeCrypto.layerDigest,
+            Layer.succeed(SecureRandom.SecureRandom, SecureRandom.make((size) => new Uint8Array(size))),
+          ),
+        ),
+      ),
     ),
   ),
 );
@@ -7859,13 +7875,24 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
           commands.length = 0;
           const result = yield* driver.switchRef({ cwd, refName: "origin/remote-only" });
           assert.equal(result.refName, "remote-only");
-          // The tracking branch is created first so the checkout itself takes no
-          // shared-config lock; the checkout moves to the branch by name.
+          // The branch is created first so the checkout itself takes no
+          // shared-config lock; upstream is recorded in a second, locked command.
           assert.deepEqual(
-            commands.filter((args) => args[0] === "branch" && args[1] === "--track"),
-            [["branch", "--track", "--", "remote-only", "origin/remote-only"]],
+            commands.filter((args) => args[0] === "branch" && args[1] === "--no-track"),
+            [["branch", "--no-track", "--", "remote-only", "refs/remotes/origin/remote-only"]],
           );
-          assertCheckout(["checkout", "remote-only", "--"], 3, 0);
+          assert.deepEqual(
+            commands.filter((args) => args[0] === "branch" && args[1] === "--set-upstream-to=refs/remotes/origin/remote-only"),
+            [
+              [
+                "branch",
+                "--set-upstream-to=refs/remotes/origin/remote-only",
+                "--",
+                "remote-only",
+              ],
+            ],
+          );
+          assertCheckout(["checkout", "remote-only", "--"], 2, 1);
           assert.equal(
             yield* git(cwd, ["rev-parse", "--abbrev-ref", "@{upstream}"]),
             "origin/remote-only",
