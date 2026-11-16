@@ -17,7 +17,16 @@ const settingsSources = Object.entries(
 
 const renderedSettingIds = new Set<string>();
 for (const source of settingsSources) {
+  // `setting(id)` is the fork's wrapper that forwards to `searchableSetting`, so a
+  // row written that way is just as real as one written with the long form.
   for (const match of source.matchAll(/searchableSetting\(\s*"([^"]+)"/g)) {
+    if (match[1]) {
+      renderedSettingIds.add(match[1]);
+    }
+  }
+  // The panels spread the fork's `setting(id)`/`useTranslatedSearchableSetting()` rows,
+  // which forward to `searchableSetting`; a spread of one is a real row too.
+  for (const match of source.matchAll(/\.\.\.setting\(\s*"([^"]+)"\)/g)) {
     if (match[1]) {
       renderedSettingIds.add(match[1]);
     }

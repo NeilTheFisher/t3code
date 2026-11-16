@@ -295,10 +295,6 @@ function DiscoveryItemRow({
   const messages = useMessages();
   const gt = useGT();
   const version = optionLabel(item.version);
-  const enabled = isProviderDiscoveryItem(item)
-    ? item.status === "available" &&
-      (item.auth.status === "authenticated" || isAvailableWithUnjudgedAuth(item))
-    : item.status === "available" && item.implemented;
   const auth = isProviderDiscoveryItem(item) ? item.auth : null;
   const authStatus = auth ? authPresentation(auth, messages) : null;
   const authAccount = auth ? optionLabel(auth.account) : null;

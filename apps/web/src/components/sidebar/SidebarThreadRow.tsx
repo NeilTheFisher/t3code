@@ -1165,6 +1165,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       ) : null}
     </span>
   );
+  const accessibleTitle = isRenaming ? null : <span className="sr-only">{thread.title}</span>;
 
   // Which workspace a thread is filed in is otherwise invisible in the unfiltered list.
   const threadWorkspaceChip = props.threadWorkspace ? (
