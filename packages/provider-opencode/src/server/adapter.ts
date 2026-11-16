@@ -326,28 +326,6 @@ function openCodeTurnTokenUsage(
   };
 }
 
-// The last step's prompt plus output is the context the next request starts from.
-function openCodeContextUsage(
-  lastStep: OpenCodeStepUsage | null,
-  contextWindow: number | undefined,
-  completedAt: DateTime.Utc,
-): Pick<OrchestrationV2ProviderTurn, "tokenUsage"> {
-  if (lastStep === null) return {};
-  const { tokens } = lastStep;
-  const inputTokens = tokens.input + tokens.cache.read + tokens.cache.write;
-  return {
-    tokenUsage: {
-      usedTokens: inputTokens + tokens.output,
-      maxTokens: contextWindow ?? null,
-      inputTokens,
-      cachedInputTokens: tokens.cache.read,
-      outputTokens: tokens.output,
-      reasoningOutputTokens: tokens.reasoning,
-      updatedAt: DateTime.formatIso(completedAt),
-    },
-  };
-}
-
 interface ActiveOpenCodeTurn {
   readonly usage: OpenCodeTurnTokenUsageAccumulator;
   readonly isRoot: boolean;
@@ -1365,35 +1343,7 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
             ...(promptDropped ? { promptDropped: true } : {}),
             ...(completedAt === null
               ? {}
-              : {
-                  turnTokenUsage:
-                    turn.usage.partIds.size === 0
-                      ? {
-                          usageScope: "main_agent" as const,
-                          usageStatus: "unavailable" as const,
-                          hasSubagents: turn.usage.hasSubagents,
-                        }
-                      : {
-                          usageScope: "main_agent" as const,
-                          usageStatus:
-                            status === "completed" &&
-                            turn.usage.complete &&
-                            turn.usage.unresolvedStepsByMessageId.size === 0
-                              ? ("complete" as const)
-                              : ("partial" as const),
-                          inputTokens: turn.usage.inputTokens,
-                          cachedInputTokens: turn.usage.cachedInputTokens,
-                          cacheCreationTokens: turn.usage.cacheCreationTokens,
-                          outputTokens: turn.usage.outputTokens,
-                          reasoningTokens: turn.usage.reasoningTokens,
-                          hasSubagents: turn.usage.hasSubagents,
-                        },
-                  ...openCodeContextUsage(
-                    turn.usage.lastStep,
-                    variantCache.get(turn.modelSelection.model.trim())?.contextWindow,
-                    completedAt,
-                  ),
-                }),
+              : { turnTokenUsage: openCodeTurnTokenUsage(turn.usage, status) }),
           };
           Object.assign(turn.providerTurn, providerTurn);
           state.providerTurns.set(String(providerTurn.id), providerTurn);

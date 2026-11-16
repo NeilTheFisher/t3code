@@ -197,25 +197,26 @@ const readConsoleGoUsageLimits = Effect.fn("readConsoleGoUsageLimits")(function*
   const client = yield* HttpClient.HttpClient;
   // A usage read must never hold up a provider snapshot; an unreachable console
   // reports the meters as unavailable instead.
-  const response = yield* client.execute(
-    HttpClientRequest.get("https://opencode.ai/console/api/go/status").pipe(
-      HttpClientRequest.setHeader("accept", "application/json"),
-      HttpClientRequest.setHeader("x-org-id", input.workspaceId),
-      HttpClientRequest.bearerToken(input.accessToken),
-      HttpClientRequest.setHeader("user-agent", "T3-Code"),
-    ),
-  ).pipe(
-    Effect.timeoutOption(CONSOLE_USAGE_TIMEOUT),
-    Effect.flatMap((result) =>
-      Option.isSome(result)
-        ? Effect.succeed(result.value)
-        : makeUnavailableUsageLimits({ checkedAt: input.checkedAt, reason: "probeFailed" }),
-    ),
-  );
-  if (response.status === 403) {
+  // A usage read must never hold up a provider snapshot; an unreachable console
+  // reports the meters as unavailable instead.
+  const response = yield* client
+    .execute(
+      HttpClientRequest.get("https://opencode.ai/console/api/go/status").pipe(
+        HttpClientRequest.setHeader("accept", "application/json"),
+        HttpClientRequest.setHeader("x-org-id", input.workspaceId),
+        HttpClientRequest.bearerToken(input.accessToken),
+        HttpClientRequest.setHeader("user-agent", "T3-Code"),
+      ),
+    )
+    .pipe(Effect.timeoutOption(CONSOLE_USAGE_TIMEOUT));
+  if (Option.isNone(response)) {
+    return makeUnavailableUsageLimits({ checkedAt: input.checkedAt, reason: "probeFailed" });
+  }
+  const responseHead = response.value;
+  if (responseHead.status === 403) {
     return makeUnavailableUsageLimits({ checkedAt: input.checkedAt, reason: "unsupported" });
   }
-  const body = yield* HttpClientResponse.filterStatusOk(response).pipe(
+  const body = yield* HttpClientResponse.filterStatusOk(responseHead).pipe(
     Effect.flatMap(HttpClientResponse.schemaBodyJson(GoStatusResponse)),
   );
   // A Go subscription always carries meters; their absence means this
