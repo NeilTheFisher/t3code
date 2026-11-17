@@ -243,13 +243,14 @@ const make = Effect.fn("NodePtyAdapter.make")(function* () {
 
   if (nodePty === undefined) {
     return PtyAdapter.PtyAdapter.of({
-      spawn: () =>
+      spawn: Effect.fn("PtyAdapter.PtyAdapter.spawn")(() =>
         Effect.fail(
           new PtyAdapter.PtySpawnError({
             adapter: "node-pty",
             shell: "(unavailable)",
           }),
         ),
+      ),
     });
   }
 

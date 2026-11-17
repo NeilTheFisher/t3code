@@ -878,9 +878,8 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
           );
         }),
       ),
-      Effect.tryPromise(() => readCodexModelCache(resolvedHomePath)).pipe(
-        Effect.orElseSucceed(() => undefined),
-      ),
+      // The read swallows its own failures, so this promise cannot reject.
+      Effect.promise(() => readCodexModelCache(resolvedHomePath)),
     ],
     { concurrency: "unbounded" },
   );
