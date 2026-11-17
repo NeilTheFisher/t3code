@@ -477,37 +477,37 @@ export const make = Effect.gen(function* () {
                 });
                 pendingBackfill.delete(thread.id);
               }).pipe(
-                Effect.catchCause((cause) =>
-                  Cause.hasInterruptsOnly(cause)
-                    ? Effect.failCause(cause)
-                    : (hasProviderCliUnavailableCause(cause)
-                        ? Effect.logDebug(
-                            "thread pull request update skipped: provider CLI unavailable",
-                            { threadId: thread.id },
-                          )
-                        : Effect.logWarning("thread pull request update failed", {
-                            threadId: thread.id,
-                            cause: Cause.pretty(cause),
-                          })
-                      ).pipe(Effect.tap(() => Effect.sync(() => failBackfill([thread])))),
+                Effect.catchCauseIf(
+                  (cause) => !Cause.hasInterruptsOnly(cause),
+                  (cause) =>
+                    (hasProviderCliUnavailableCause(cause)
+                      ? Effect.logDebug(
+                          "thread pull request update skipped: provider CLI unavailable",
+                          { threadId: thread.id },
+                        )
+                      : Effect.logWarning("thread pull request update failed", {
+                          threadId: thread.id,
+                          cause: Cause.pretty(cause),
+                        })
+                    ).pipe(Effect.tap(() => Effect.sync(() => failBackfill([thread])))),
                 ),
               ),
             { discard: true },
           );
         }).pipe(
-          Effect.catchCause((cause) =>
-            Cause.hasInterruptsOnly(cause)
-              ? Effect.failCause(cause)
-              : (hasProviderCliUnavailableCause(cause)
-                  ? Effect.logDebug(
-                      "thread branch pull request lookup skipped: provider CLI unavailable",
-                      { threadIds: group.map((thread) => thread.id) },
-                    )
-                  : Effect.logWarning("thread branch pull request lookup failed", {
-                      threadIds: group.map((thread) => thread.id),
-                      cause: Cause.pretty(cause),
-                    })
-                ).pipe(Effect.tap(() => Effect.sync(() => failBackfill(group)))),
+          Effect.catchCauseIf(
+            (cause) => !Cause.hasInterruptsOnly(cause),
+            (cause) =>
+              (hasProviderCliUnavailableCause(cause)
+                ? Effect.logDebug(
+                    "thread branch pull request lookup skipped: provider CLI unavailable",
+                    { threadIds: group.map((thread) => thread.id) },
+                  )
+                : Effect.logWarning("thread branch pull request lookup failed", {
+                    threadIds: group.map((thread) => thread.id),
+                    cause: Cause.pretty(cause),
+                  })
+              ).pipe(Effect.tap(() => Effect.sync(() => failBackfill(group)))),
           ),
         ),
       // Batch concurrent branch lookups into one GitHub GraphQL document.
