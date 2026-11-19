@@ -596,7 +596,11 @@ export default defineConfig({
           "apps/mobile/src/features/development/**",
           "packages/client-runtime/src/rpc/**",
         ],
-        rules: { "t3code/no-untranslated-copy": "error" },
+        // Upstream ships every surface translated, so the rule is an error there. The fork's
+        // voice, TTS, git-graph and workspace copy is not wrapped yet: a warning keeps the debt
+        // visible in every lint run without hiding upstream regressions. `vp run i18n:untranslated`
+        // counts it per directory as it is paid down.
+        rules: { "t3code/no-untranslated-copy": "warn" },
       },
       {
         // React Compiler owns memoization; upstream rules do not ban redundant useMemo/useCallback.

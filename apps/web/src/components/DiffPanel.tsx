@@ -520,26 +520,26 @@ export default function DiffPanel({
       ? gt("{label} uncommitted", { label: selectedCheckout.label })
       : selectedSubmodule
         ? selectedSubmodule.label
-      : selectedCommitRange
-        ? selectedCommitRange.label
-        : selectedRunId === null
-          ? selectedCommitSha !== null
-            ? (selectedCommitSubject ?? gt("Commit", { $context: "a git commit" }))
-            : selectedGitScopeLabel
-          : selectedTurn?.runId === latestTurn?.runId
-            ? gt("Latest turn")
-            : selectedTurnLabel;
+        : selectedCommitRange
+          ? selectedCommitRange.label
+          : selectedRunId === null
+            ? selectedCommitSha !== null
+              ? (selectedCommitSubject ?? gt("Commit", { $context: "a git commit" }))
+              : selectedGitScopeLabel
+            : selectedTurn?.runId === latestTurn?.runId
+              ? gt("Latest turn")
+              : selectedTurnLabel;
   const reviewSectionTitle = toolCallSelection
     ? gt("Tool call")
     : selectedCheckout
       ? gt("{label} uncommitted", { label: selectedCheckout.label })
       : selectedSubmodule
         ? selectedSubmodule.label
-      : selectedCommitRange
-        ? selectedCommitRange.label
-        : selectedTurn
-          ? selectedTurnLabel
-          : selectedGitScopeLabel;
+        : selectedCommitRange
+          ? selectedCommitRange.label
+          : selectedTurn
+            ? selectedTurnLabel
+            : selectedGitScopeLabel;
   const headerCommitSha = selectedRunId === null ? selectedCommitSha : null;
   const selectedCommitUrl =
     headerCommitSha !== null

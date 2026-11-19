@@ -792,9 +792,11 @@ export function IssuesPage() {
             onAddPullRequest={() => undefined}
             onAddPullRequests={() => undefined}
             onAddDevice={() => undefined}
+            onAddGitGraph={() => undefined}
             browserAvailable={false}
             terminalAvailable={false}
             diffAvailable={false}
+            gitGraphAvailable={false}
             filesAvailable={false}
             pullRequestAvailable={false}
             pullRequestsAvailable={false}

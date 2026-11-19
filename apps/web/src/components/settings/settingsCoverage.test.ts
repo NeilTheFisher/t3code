@@ -25,8 +25,9 @@ for (const source of settingsSources) {
     }
   }
   // The panels spread the fork's `setting(id)`/`useTranslatedSearchableSetting()` rows,
-  // which forward to `searchableSetting`; a spread of one is a real row too.
-  for (const match of source.matchAll(/\.\.\.setting\(\s*"([^"]+)"\)/g)) {
+  // which forward to `searchableSetting`; a spread of one is a real row too. The same
+  // call also anchors a row by its `id`/`title` (`id={setting("app-version").id}`).
+  for (const match of source.matchAll(/\bsetting\(\s*"([^"]+)"/g)) {
     if (match[1]) {
       renderedSettingIds.add(match[1]);
     }
