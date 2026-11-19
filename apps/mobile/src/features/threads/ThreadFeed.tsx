@@ -1557,6 +1557,8 @@ const NarratedAssistantBody = memo(function NarratedAssistantBody(props: {
   readonly isNarrating: boolean;
   readonly activeBlock: number | null;
   readonly environmentId: EnvironmentId;
+  readonly citationSource?: Pick<AssistantCitation, "threadId" | "messageId">;
+  readonly onCiteAssistantText?: (citation: AssistantCitation) => void;
   readonly markdownStyles: MarkdownStyleSet;
   readonly linkHandlers: MarkdownLinkHandlers;
   readonly onUseArtifactTemplate?: ((template: CodexArtifactTemplate) => void) | undefined;
@@ -1568,6 +1570,8 @@ const NarratedAssistantBody = memo(function NarratedAssistantBody(props: {
       <AssistantMarkdownContent
         markdown={props.markdown}
         environmentId={props.environmentId}
+        citationSource={props.citationSource}
+        onCiteAssistantText={props.onCiteAssistantText}
         markdownStyles={props.markdownStyles}
         linkHandlers={props.linkHandlers}
         onUseArtifactTemplate={props.onUseArtifactTemplate}

@@ -1336,8 +1336,11 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
                   DateTime.formatIso(usageUpdatedAt),
                 )
               : undefined;
+          // A compaction can leave no step of its own, and a stale live report must not
+          // survive into the settled turn: the base drops the key the fresh value re-adds.
+          const { tokenUsage: _previousTokenUsage, ...providerTurnBase } = turn.providerTurn;
           const providerTurn: OrchestrationV2ProviderTurn = {
-            ...turn.providerTurn,
+            ...providerTurnBase,
             nativeTurnRef:
               turn.nativeUserMessageId === null
                 ? turn.providerTurn.nativeTurnRef
@@ -2720,6 +2723,7 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
           });
           // The pre-compaction step would otherwise settle the turn as its newest usage.
           turn.usage.lastStep = null;
+          turn.usage.lastStepTokens = undefined;
           if (state.providerThread.contextUsage !== null) {
             yield* updateProviderThread(state, { contextUsage: null });
           }

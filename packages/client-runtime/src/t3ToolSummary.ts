@@ -1835,6 +1835,23 @@ export function summarizeT3ToolCalls(
           );
       break;
     }
+    case "workspace-list": {
+      const count = selected.length;
+      label = done
+        ? resolve(
+            msg(
+              "{count, plural, one {Listed thread workspaces {count} time} other {Listed thread workspaces {count} times}}",
+              { count },
+            ),
+          )
+        : resolve(
+            msg(
+              "{count, plural, one {Tried to list thread workspaces {count} time} other {Tried to list thread workspaces {count} times}}",
+              { count },
+            ),
+          );
+      break;
+    }
     case "speak": {
       const count = selected.length;
       label = done

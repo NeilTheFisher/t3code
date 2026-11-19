@@ -18,8 +18,8 @@ import {
   PullRequestMergeMethod,
   type SidebarProjectGroupingMode,
 } from "@t3tools/contracts";
-import { PHONON_DEFAULT_VOICE, phononVoiceFor } from "@t3tools/client-runtime/phonon-voices";
 import { ToolCallVisibility } from "@t3tools/contracts/settings";
+import { phononVoiceFor } from "@t3tools/client-runtime/phonon-voices";
 import type { AndroidNavigationStyle } from "../lib/androidNavigationStyle";
 import type { MobileFontId, MobileMonoFontId } from "../lib/fontFamilies";
 import type { ComposerEnterBehavior } from "../lib/composerEnterBehavior";
@@ -442,10 +442,11 @@ function sanitizePreferences(parsed: Preferences): Preferences {
   if (typeof parsed.speakAutoplay === "boolean") {
     preferences.speakAutoplay = parsed.speakAutoplay;
   }
-  preferences.speakVoice =
-    typeof parsed.speakVoice === "string"
-      ? phononVoiceFor(parsed.speakVoice)
-      : PHONON_DEFAULT_VOICE;
+  // Chosen voices persist; a payload with none leaves the readers' default in place,
+  // so a fresh install never stores a voice the reader did not pick.
+  if (typeof parsed.speakVoice === "string") {
+    preferences.speakVoice = phononVoiceFor(parsed.speakVoice);
+  }
   if (typeof parsed.workingShelfEnabled === "boolean") {
     preferences.workingShelfEnabled = parsed.workingShelfEnabled;
   }
@@ -659,7 +660,8 @@ const make = Effect.fn("MobilePreferencesStore.make")(function* () {
       }
     }
 
-    return parsed === null ? { speakVoice: PHONON_DEFAULT_VOICE } : sanitizePreferences(parsed);
+    // A fresh install stores nothing; readers fall back to the default voice themselves.
+    return parsed === null ? {} : sanitizePreferences(parsed);
   });
 
   const load = lock

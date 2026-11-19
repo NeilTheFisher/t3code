@@ -1,6 +1,7 @@
-import { createElement } from "react";
+import { createElement, type ComponentType, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vite-plus/test";
+import { GTProvider, initializeGT } from "gt-react";
+import { beforeAll, describe, expect, it } from "vite-plus/test";
 import {
   ProviderDriverKind,
   ProviderInstanceId,
@@ -15,6 +16,20 @@ import {
   nextProviderEnvironmentWithFieldSecret,
   nextProviderEnvironmentWithFieldValue,
 } from "./ProviderInstanceCard";
+
+// The card reads its copy through GT; this file renders it outside the app runtime.
+beforeAll(() => {
+  initializeGT({ defaultLocale: "en", locales: ["en"] });
+});
+
+// The server provider only needs a locale; its prop type is wider than the test uses.
+const renderCard = (element: ReactElement) =>
+  renderToStaticMarkup(
+    createElement(GTProvider as ComponentType<{ locale: string; children?: ReactNode }>, {
+      locale: "en",
+      children: element,
+    }),
+  );
 
 describe("deriveProviderModelsForDisplay", () => {
   it("uses current config custom models instead of stale live custom rows", () => {
@@ -104,7 +119,7 @@ describe("deriveProviderModelsForDisplay", () => {
       skills: [],
     };
 
-    const markup = renderToStaticMarkup(
+    const markup = renderCard(
       createElement(ProviderInstanceCard, {
         instanceId,
         instance: { driver },
@@ -162,7 +177,7 @@ describe("deriveProviderModelsForDisplay", () => {
     } as const;
 
     for (const mode of ["list", "editor"] as const) {
-      const markup = renderToStaticMarkup(createElement(ProviderInstanceCard, { ...props, mode }));
+      const markup = renderCard(createElement(ProviderInstanceCard, { ...props, mode }));
       expect(markup).toContain("Unavailable");
       expect(markup).toContain("is not a symlink");
     }
@@ -207,7 +222,7 @@ describe("deriveProviderModelsForDisplay", () => {
     } as const;
 
     for (const mode of ["list", "editor"] as const) {
-      const markup = renderToStaticMarkup(createElement(ProviderInstanceCard, { ...props, mode }));
+      const markup = renderCard(createElement(ProviderInstanceCard, { ...props, mode }));
       expect(markup).not.toContain("Provider limits");
       expect(markup).not.toContain("Go · Session");
       expect(markup).not.toContain("Go · Weekly");
