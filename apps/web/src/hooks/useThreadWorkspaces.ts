@@ -55,9 +55,7 @@ const noServerSettingsAtom = Atom.make<ServerSettings | null>(null);
  * while its threads render; then the environment named by the thread keys is the
  * one that owns them.
  */
-function workspaceEnvironmentId(
-  threadKeys: readonly string[] = [],
-): EnvironmentId | null {
+function workspaceEnvironmentId(threadKeys: readonly string[] = []): EnvironmentId | null {
   const primary = appAtomRegistry.get(primaryEnvironmentIdAtom);
   if (primary !== null) return primary;
   for (const key of threadKeys) {
@@ -134,11 +132,10 @@ export function fileNewThreadInWorkspace(
       : null;
   const target = projectTarget ?? getClientSettings().sidebarActiveThreadWorkspaceId;
   if (target === null || !workspaces.some((workspace) => workspace.id === target)) return;
-  assignThreadsNow(
-    [threadKey],
-    target,
-    { label: "File thread in workspace", reportFailure: false },
-  );
+  assignThreadsNow([threadKey], target, {
+    label: "File thread in workspace",
+    reportFailure: false,
+  });
 }
 
 /**

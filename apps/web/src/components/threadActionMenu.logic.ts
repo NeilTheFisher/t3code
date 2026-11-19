@@ -370,11 +370,8 @@ export function buildThreadActionMenuItems(
     },
     { id: "project-settings", label: resolve(msg("Project settings")), icon: "settings" },
     { id: "export-markdown", label: resolve(msg("Export to markdown")), icon: "download" },
-    // Archive removes the thread from the sidebar while keeping its
-    // conversation under Settings > Archived threads — distinct from Settle
-    // (stays visible in the Settled shelf) and Delete (clears history for
-    // good), so it sits beside Delete without borrowing its destructive
-    // styling.
+    // Archive hides the thread but keeps its conversation under Settings > Archived
+    // threads, unlike Settle (Settled shelf) or Delete, so it is not destructive.
     {
       id: "archive",
       label: resolve(msg("Archive thread")),

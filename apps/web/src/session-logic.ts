@@ -806,7 +806,6 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
       entry: projectedWorkEntry(row, input.resolve ?? m),
       ...attemptMetadata,
     });
-
   }
 
   const retainedMessageIds = new Set([

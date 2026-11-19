@@ -170,7 +170,7 @@ export class ServerBrowserContexts {
     return {
       executable,
       env,
-      args: previewBrowserArgs(env, userAgent),
+      args: previewBrowserArgs(env, userAgent ?? undefined),
       ignoreDefaultArgs: ["--enable-automation"],
       headless: true,
       // Only an explicit operator opt-out disables sandboxing. Launch errors never do.

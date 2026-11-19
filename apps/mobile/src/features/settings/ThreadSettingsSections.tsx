@@ -339,7 +339,7 @@ function MachineBetaSection({
  * preferences; autoplay defaults to on and the voice to the model's default.
  */
 export function SpokenSettingsSection() {
-  const savePreferences = useAtomSet(updateMobilePreferencesAtom);
+  const savePreferences = useAtomCommand(saveMobilePreferences);
   const preferences = useAtomValue(mobilePreferencesAtom);
   const navigation = useNavigation();
   const { selectedTargets } = useSettingsEnvironmentFilter();
@@ -355,7 +355,7 @@ export function SpokenSettingsSection() {
           icon="speaker.wave.2"
           label="Autoplay spoken messages"
           value={speakAutoplay}
-          onValueChange={(value) => savePreferences({ speakAutoplay: value })}
+          onValueChange={(value) => void savePreferences({ speakAutoplay: value })}
         />
         <ListRow
           label="Voice"

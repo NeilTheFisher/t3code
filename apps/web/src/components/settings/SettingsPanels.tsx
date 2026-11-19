@@ -883,7 +883,7 @@ export function GeneralSettingsPanel() {
         <SettingsRow
           serverScoped
           settingKeys={["sidebarThreadWorkspacesEnabled"]}
-          {...searchableSetting("thread-workspaces")}
+          {...setting("thread-workspaces")}
           description={gt(
             "Group threads into named workspaces with a strip in the sidebar footer. Assign threads from their context menu or by dragging them onto a workspace.",
           )}
@@ -891,7 +891,7 @@ export function GeneralSettingsPanel() {
             settings.sidebarThreadWorkspacesEnabled !==
             DEFAULT_SERVER_SETTINGS.sidebarThreadWorkspacesEnabled ? (
               <SettingResetButton
-                label="thread workspaces"
+                ariaLabel="thread workspaces"
                 onClick={() =>
                   updateSettings({
                     sidebarThreadWorkspacesEnabled:
@@ -1363,7 +1363,7 @@ export function ChatSettingsPanel() {
             settings.composerCollapseOnScroll !==
             DEFAULT_UNIFIED_SETTINGS.composerCollapseOnScroll ? (
               <SettingResetButton
-                label="collapse composer on scroll"
+                ariaLabel="collapse composer on scroll"
                 onClick={() =>
                   updateSettings({
                     composerCollapseOnScroll: DEFAULT_UNIFIED_SETTINGS.composerCollapseOnScroll,
@@ -1491,7 +1491,7 @@ export function ChatSettingsPanel() {
           resetAction={
             settings.tts.enabled !== DEFAULT_UNIFIED_SETTINGS.tts.enabled ? (
               <SettingResetButton
-                label="text-to-speech"
+                ariaLabel="text-to-speech"
                 onClick={() =>
                   updateSettings({
                     tts: { ...settings.tts, enabled: DEFAULT_UNIFIED_SETTINGS.tts.enabled },
@@ -1517,7 +1517,7 @@ export function ChatSettingsPanel() {
           resetAction={
             settings.tts.autoplay !== DEFAULT_UNIFIED_SETTINGS.tts.autoplay ? (
               <SettingResetButton
-                label="TTS autoplay"
+                ariaLabel="TTS autoplay"
                 onClick={() =>
                   updateSettings({
                     tts: { ...settings.tts, autoplay: DEFAULT_UNIFIED_SETTINGS.tts.autoplay },
@@ -1544,7 +1544,7 @@ export function ChatSettingsPanel() {
             resetAction={
               settings.tts.voice !== DEFAULT_UNIFIED_SETTINGS.tts.voice ? (
                 <SettingResetButton
-                  label="TTS voice"
+                  ariaLabel="TTS voice"
                   onClick={() =>
                     updateSettings({
                       tts: { ...settings.tts, voice: DEFAULT_UNIFIED_SETTINGS.tts.voice },
@@ -2545,7 +2545,7 @@ export function MaintenanceSettingsPanel() {
             settings.showProviderUsageInContextPopover !==
             DEFAULT_UNIFIED_SETTINGS.showProviderUsageInContextPopover ? (
               <SettingResetButton
-                label="provider usage in chat"
+                ariaLabel="provider usage in chat"
                 onClick={() =>
                   updateSettings({
                     showProviderUsageInContextPopover:
