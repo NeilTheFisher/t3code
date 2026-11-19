@@ -287,10 +287,14 @@ function openCodeStepUsedTokens(tokens: OpenCodeStepUsage["tokens"]): number {
  * totals, so mirror the v2 adapter's input+output split; with no known window the
  * meter falls back to the used-token count.
  */
-function openCodeLiveTokenUsage(tokens: OpenCodeStepUsage["tokens"], updatedAt: string) {
+function openCodeLiveTokenUsage(
+  tokens: OpenCodeStepUsage["tokens"],
+  contextWindow: number | undefined,
+  updatedAt: string,
+) {
   return {
     usedTokens: openCodeStepUsedTokens(tokens),
-    maxTokens: null,
+    maxTokens: contextWindow ?? null,
     inputTokens: tokens.input + tokens.cache.read + tokens.cache.write,
     cachedInputTokens: tokens.cache.read,
     outputTokens: tokens.output,
@@ -1311,14 +1315,14 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
           return ordinal;
         };
 
-        const emitProviderTurn = (
+        const emitProviderTurn = Effect.fn("emitProviderTurn")(function* (
           state: OpenCodeThreadState,
           turn: ActiveOpenCodeTurn,
           status: OrchestrationV2ProviderTurn["status"],
           completedAt: DateTime.Utc | null,
           liveUsageAt: DateTime.Utc | null = null,
           promptDropped = false,
-        ) => {
+        ) {
           // The meter reads the last step's own context size while a turn runs;
           // the accumulated totals above only land when the turn ends.
           const usageUpdatedAt = liveUsageAt ?? completedAt;
@@ -1328,6 +1332,7 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
             turn.usage.partIds.size > 0
               ? openCodeLiveTokenUsage(
                   turn.usage.lastStepTokens,
+                  variantCache.get(turn.modelSelection.model.trim())?.contextWindow,
                   DateTime.formatIso(usageUpdatedAt),
                 )
               : undefined;
@@ -1347,13 +1352,13 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
           };
           Object.assign(turn.providerTurn, providerTurn);
           state.providerTurns.set(String(providerTurn.id), providerTurn);
-          return emitProviderEvent({
+          return yield* emitProviderEvent({
             type: "provider_turn.updated",
             driver: OPENCODE_PROVIDER,
             threadId: turn.threadId,
             providerTurn,
           });
-        };
+        });
 
         /**
          * Publishes the turn's live context size after a step, so the composer meter
