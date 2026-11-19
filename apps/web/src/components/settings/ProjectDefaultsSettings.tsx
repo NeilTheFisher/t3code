@@ -281,7 +281,7 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
       resetAction={
         !mixedThreadWorkspace && settings.defaultThreadWorkspaceId !== null ? (
           <SettingResetButton
-            label="default thread workspace"
+            ariaLabel="default thread workspace"
             onClick={() => updateSettings({ defaultThreadWorkspaceId: null })}
           />
         ) : null

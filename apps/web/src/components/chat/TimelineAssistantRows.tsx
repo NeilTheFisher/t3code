@@ -6,9 +6,8 @@ import { T, useGT, useMessages } from "gt-react";
 import { use, useState } from "react";
 import { type ChatMessage } from "../../types";
 import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipeline";
-import { type RunId } from "@t3tools/contracts";
+import { MessageId, type RunId } from "@t3tools/contracts";
 import { canForkProjectedAssistantItem } from "@t3tools/client-runtime/state/thread-workflows";
-import { agentWorkingDirectories } from "@t3tools/client-runtime/workspace-basename-lookup";
 import { T, useGT, useMessages } from "gt-react";
 import { memo, use, useEffect, useState } from "react";
 import { type ChatMessage, type TurnDiffSummary } from "../../types";
@@ -29,7 +28,6 @@ import { useTtsPlayer, stopPlayback } from "../../hooks/useTtsPlayer";
 import { useClientSettings } from "../../hooks/useSettings";
 import { useAudioPlayerStore } from "../../audioPlayerStore";
 import { clearSpokenQueue, enqueueSpoken } from "../../spokenPlaybackQueue";
-import { MessageId } from "@t3tools/contracts";
 import { AssistantCitationSource } from "./AssistantCitationSource";
 import {
   resolveAssistantMessageCopyState,

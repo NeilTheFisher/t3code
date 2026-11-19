@@ -80,7 +80,7 @@ describe("mobile narration voice", () => {
     Effect.gen(function* () {
       yield* Effect.promise(sqliteDatabase);
 
-      expect(yield* load()).toEqual({ speakVoice: "Delia" });
+      expect(yield* load()).toEqual({});
     }),
   );
 
@@ -89,7 +89,7 @@ describe("mobile narration voice", () => {
       yield* Effect.promise(sqliteDatabase);
       values.set(LEGACY_KEY, JSON.stringify({ speakAutoplay: false }));
 
-      expect(yield* load()).toEqual({ speakAutoplay: false, speakVoice: "Delia" });
+      expect(yield* load()).toEqual({ speakAutoplay: false });
       expect(values.has(LEGACY_KEY)).toBe(false);
     }),
   );

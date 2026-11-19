@@ -555,14 +555,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     ],
   },
   {
-    id: "screen-reader-window-title",
-    title: "Screen reader window title",
-    to: "/settings/chat",
-    searchTerms: [
-      "accessibility a11y screen reader nvda jaws voiceover orca narrator window title tab title alt tab taskbar thread status order working approval",
-    ],
-  },
-  {
     id: "guest-links",
     title: msg("Guest links"),
     to: "/settings/labs",
@@ -787,14 +779,6 @@ export const SETTINGS_SEARCH_ITEMS = [
       msg(
         "locale translation english deutsch german español spanish français french português portuguese brasil brazilian chinese 中文 japanese 日本語 korean 한국어 russian русский swedish svenska sprache idioma langue 语言 言語 언어 язык",
       ),
-    ],
-  },
-  {
-    id: "language",
-    title: msg("Language"),
-    to: "/settings/general",
-    searchTerms: [
-      "locale translation english deutsch german español spanish français french português portuguese brasil brazilian chinese 中文 japanese 日本語 korean 한국어 russian русский sprache idioma langue 语言 言語 언어 язык",
     ],
   },
   {
@@ -1543,28 +1527,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: msg("Archived threads"),
     to: "/settings/archived",
     searchTerms: [msg("restore reopen deleted history projects")],
-  },
-  {
-    id: "composer-collapse",
-    title: msg("Collapse composer on scroll"),
-    to: "/settings/chat",
-    searchTerms: ["composer rest resting scroll wheel conversation timeline shrink minimize"],
-  },
-  {
-    id: "gerrit-credentials",
-    title: msg("Gerrit HTTP credentials"),
-    to: "/settings/source-control",
-    searchTerms: ["gerrit http base url username password credentials replies reviewers"],
-    environmentOnly: true,
-    scope: "environment-defaults",
-  },
-  {
-    id: "thread-workspaces",
-    title: msg("Thread workspaces (beta)"),
-    to: "/settings/general",
-    searchTerms: [
-      "workspace group threads personal work office sidebar footer strip drag organize context",
-    ],
   },
   {
     id: "composer-collapse",

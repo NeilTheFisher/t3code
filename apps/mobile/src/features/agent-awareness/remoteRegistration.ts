@@ -707,7 +707,6 @@ const registerDevice = Effect.fn("remoteRegistration.registerDevice")(function* 
 
   const storage = yield* MobileStorage.MobileStorage;
   const preferencesStore = yield* MobilePreferencesStore;
-  logRegistrationDebug("device registration loading local state", { expectedGeneration });
   const [deviceId, storedPreferences] = yield* Effect.all([
     storage.loadOrCreateAgentAwarenessDeviceId.pipe(
       Effect.mapError(
