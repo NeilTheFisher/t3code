@@ -582,13 +582,6 @@ export function useThreadListActions(): {
         );
         return false;
       }
-      if (result.value?.status === "failed") {
-        Dialog.alert(
-          m(msg("Could not regenerate title")),
-          result.value.message ?? m(msg("The thread title could not be regenerated.")),
-        );
-        return false;
-      }
       return true;
     })();
     titleRegenerationInFlightThreadKeys.current.delete(key);

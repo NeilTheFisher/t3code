@@ -1,4 +1,4 @@
-import { useAtomSet, useAtomValue } from "@effect/atom-react";
+import { useAtomValue } from "@effect/atom-react";
 import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { PHONON_DEFAULT_VOICE, phononVoiceFor } from "@t3tools/client-runtime/phonon-voices";
 import { type EnvironmentId, MessageId } from "@t3tools/contracts";
@@ -13,7 +13,8 @@ import { EmptyState } from "../../components/ui/EmptyState";
 import { ListChoiceRow } from "../../components/ui/ListChoiceRow";
 import { cn } from "../../lib/cn";
 import { NativeScrollView } from "../../native/NativeScrollViewMarker";
-import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
+import { mobilePreferencesAtom, saveMobilePreferences } from "../../state/preferences";
+import { useAtomCommand } from "../../state/use-atom-command";
 import { PullRequestSearchSheet } from "../pull-requests/PullRequestSearchSheet";
 import { playMessageTts, stopMessageTts, useMessageTtsStatus } from "../threads/messageTtsPlayback";
 import { hasPhononHost } from "../threads/phononEngine";
@@ -37,7 +38,7 @@ export function SettingsTtsVoicesRouteScreen({
   route,
 }: StaticScreenProps<{ readonly environmentId: EnvironmentId | null }>) {
   const navigation = useNavigation();
-  const savePreferences = useAtomSet(updateMobilePreferencesAtom);
+  const savePreferences = useAtomCommand(saveMobilePreferences);
   const environmentId = route.params.environmentId;
   const voices = useTtsVoices(environmentId);
   const preferences = useAtomValue(mobilePreferencesAtom);
@@ -65,7 +66,7 @@ export function SettingsTtsVoicesRouteScreen({
     if (committedRef.current) return;
     committedRef.current = true;
     if (!loaded || draftValue === selectedValue) return;
-    savePreferences({ speakVoice: draftValue });
+    void savePreferences({ speakVoice: draftValue });
   };
 
   const closeOut = useEffectEvent(() => {

@@ -1,4 +1,5 @@
 import * as Dialog from "../../components/ui/Dialog";
+import { toServerClock } from "@t3tools/client-runtime/clock";
 import type { ThreadRowProviderInstance } from "./thread-provider-instance";
 import {
   THREAD_LIST_V2_MONO_FONT as MONO_FONT,
@@ -25,7 +26,11 @@ import {
   formatWorkingDurationLabel,
   resolveThreadWorkingStartedAt,
 } from "@t3tools/client-runtime/state/models";
-import { AuthOrchestrationOperateScope, type EnvironmentMachineKind } from "@t3tools/contracts";
+import {
+  AuthOrchestrationOperateScope,
+  type EnvironmentId,
+  type EnvironmentMachineKind,
+} from "@t3tools/contracts";
 import type { SnoozePresetSetting } from "@t3tools/contracts/settings";
 import { canSnooze } from "@t3tools/client-runtime/state/thread-settled";
 import { threadChipCopyTarget } from "@t3tools/client-runtime/thread-reference";
@@ -82,6 +87,7 @@ import {
   resolveThreadListV2ProviderDrivers,
   resolveThreadListV2SwipeActions,
   layoutThreadListV2RowMenuActions,
+  threadListV2RowAccessibilityLabel,
   type ThreadListV2Status,
 } from "./threadListV2";
 import { QueuedMessageIcon } from "./queued-message-icon";
@@ -157,6 +163,7 @@ const TABULAR_DURATION_STYLE = {
 } as const;
 
 function ThreadListV2Duration(props: {
+  readonly environmentId: EnvironmentId;
   readonly startedAt: string | null;
   readonly leadingSpace: boolean;
 }) {
@@ -1489,11 +1496,13 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
                 {statusLabel.label}
                 {status === "working" ? (
                   <ThreadListV2Duration
+                    environmentId={thread.environmentId}
                     startedAt={resolveThreadWorkingStartedAt(thread)}
                     leadingSpace={statusLabel.label !== null}
                   />
                 ) : status === "waiting" ? (
                   <ThreadListV2Duration
+                    environmentId={thread.environmentId}
                     startedAt={thread.latestRun?.completedAt ?? null}
                     leadingSpace={statusLabel.label !== null}
                   />

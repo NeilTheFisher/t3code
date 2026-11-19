@@ -6,9 +6,8 @@ import { T, useGT, useMessages } from "gt-react";
 import { use, useState } from "react";
 import { type ChatMessage } from "../../types";
 import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipeline";
-import { type RunId } from "@t3tools/contracts";
+import { MessageId, type RunId } from "@t3tools/contracts";
 import { canForkProjectedAssistantItem } from "@t3tools/client-runtime/state/thread-workflows";
-import { agentWorkingDirectories } from "@t3tools/client-runtime/workspace-basename-lookup";
 import { T, useGT, useMessages } from "gt-react";
 import { memo, use, useEffect, useState } from "react";
 import { type ChatMessage, type TurnDiffSummary } from "../../types";
@@ -29,7 +28,6 @@ import { useTtsPlayer, stopPlayback } from "../../hooks/useTtsPlayer";
 import { useClientSettings } from "../../hooks/useSettings";
 import { useAudioPlayerStore } from "../../audioPlayerStore";
 import { clearSpokenQueue, enqueueSpoken } from "../../spokenPlaybackQueue";
-import { MessageId } from "@t3tools/contracts";
 import { AssistantCitationSource } from "./AssistantCitationSource";
 import {
   resolveAssistantMessageCopyState,
@@ -273,63 +271,6 @@ function AssistantMessageMeta({
         </Tooltip>
       )}
     </div>
-  );
-}
-
-function AssistantReplyButton({ message, itemId }: { message: ChatMessage; itemId: TurnItemId }) {
-  const ctx = use(TimelineRowCtx);
-  const gt = useGT();
-  const { threadRef, onReplyToResponse } = ctx;
-  if (!threadRef || !onReplyToResponse || !message.text.trim()) return null;
-
-  const reply = () => {
-    // The meta row can sit below trailing tool rows, so the message may be virtualized away.
-    const source = [
-      ...document.querySelectorAll<HTMLElement>("[data-assistant-citation-source]"),
-    ].find(
-      (element) =>
-        element.dataset.assistantCitationSource === message.id &&
-        element.dataset.assistantCitationThread === threadRef.threadId &&
-        element.dataset.assistantCitationEnvironment === threadRef.environmentId,
-    );
-    const opening = captureAssistantMessageOpening(source ?? null, message.text);
-    if (!opening) return;
-    onReplyToResponse(
-      responseContextRecord({
-        citation: { version: 1, ...threadRef, messageId: message.id, ...opening },
-        itemId,
-        subagents: readResponseSubagents(threadRef, itemId),
-      }),
-    );
-  };
-
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            type="button"
-            size="xs"
-            variant="ghost-muted"
-            onClick={reply}
-            aria-label={gt("Reply to this response")}
-          />
-        }
-      >
-        <ReplyIcon className="size-3" />
-      </TooltipTrigger>
-      <TooltipPopup side="top">
-        <T>Reply to this response</T>
-      </TooltipPopup>
-    </Tooltip>
-  );
-}
-
-function AssistantStatusBadge({ status }: { status: string }) {
-  return (
-    <span className="rounded-full border border-border/70 px-1.5 py-0.5 font-mono text-3xs text-muted-foreground">
-      {status}
-    </span>
   );
 }
 

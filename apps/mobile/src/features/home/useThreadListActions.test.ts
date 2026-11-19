@@ -7,7 +7,6 @@ import {
   ProviderInstanceId,
   RunId,
   ThreadId,
-  type ThreadTitleRegenerationOutcome,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/reactivity";
@@ -19,7 +18,6 @@ const state = vi.hoisted(() => ({
   dropBusy: false,
   holdingRows: false,
   failedAction: null as string | null,
-  titleOutcome: null as ThreadTitleRegenerationOutcome | null,
   archivedRefreshes: [] as string[],
   onArchivedRefresh: undefined as (() => void) | undefined,
   scopes: new Map<string, Set<string>>(),
@@ -72,6 +70,10 @@ vi.mock("../../state/presentation", () => ({
 }));
 vi.mock("../../state/server", () => ({
   environmentServerConfigsAtom: "server-configs",
+  serverEnvironment: {
+    updateSettings: "update-server-settings",
+    settingsValueAtom: () => "server-settings-value",
+  },
 }));
 vi.mock("../../state/atom-registry", async () => {
   const registry = (await import("effect/reactivity")).AtomRegistry.make();
@@ -142,7 +144,7 @@ vi.mock("../../state/thread-order", () => ({
   },
 }));
 vi.mock("../../state/threads", () => ({
-  environmentThreadShells: { threadShellsAtom: "thread-shells" },
+  environmentThreadShells: { navigationThreadShellsAtom: "thread-shells" },
   steadyNavigationThreadShellsAtom: "thread-shells",
   steadyShellsHoldingAtom: "steady-shells-holding",
   threadEnvironment: Object.fromEntries(
@@ -174,7 +176,7 @@ vi.mock("../../state/threads", () => ({
         if (action === state.failedAction)
           return AsyncResult.failure(Cause.fail(new Error("Server rejected action")));
         state.afterRequest?.();
-        return AsyncResult.success(action === "regenerateTitle" ? state.titleOutcome : undefined);
+        return AsyncResult.success(undefined);
       },
     ]),
   ),
@@ -213,7 +215,6 @@ const mutationCases = [
 beforeEach(() => {
   state.connectedEnvironmentIds = [primaryEnvironmentId, otherEnvironmentId];
   state.failedAction = null;
-  state.titleOutcome = null;
   state.archivedRefreshes = [];
   state.onArchivedRefresh = undefined;
   state.pendingOrder = null;
@@ -237,13 +238,13 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-it("reports a failed title generation as unsuccessful and allows another request", async () => {
+it("reports a failed title command as unsuccessful and allows another request", async () => {
   const actions = useThreadListActions();
   const thread = makeThread();
-  state.titleOutcome = { status: "failed", message: "Model unavailable" };
+  state.failedAction = "updateMetadata";
   expect(await actions.regenerateThreadTitle(thread)).toBe(false);
 
-  state.titleOutcome = { status: "renamed" };
+  state.failedAction = null;
   expect(await actions.regenerateThreadTitle(thread)).toBe(true);
 });
 

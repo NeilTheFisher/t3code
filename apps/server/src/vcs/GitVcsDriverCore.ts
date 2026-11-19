@@ -4957,7 +4957,6 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
 
     const diffArgs = [
       ...REVIEW_DIFF_ARGS,
-      "--minimal",
       ...(input.ignoreWhitespace ? ["--ignore-all-space"] : []),
     ];
 
