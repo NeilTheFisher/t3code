@@ -6,13 +6,15 @@ import { T, useGT, useMessages } from "gt-react";
 import { use, useState } from "react";
 import { type ChatMessage } from "../../types";
 import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipeline";
-import { MessageId, type RunId } from "@t3tools/contracts";
+import { MessageId, type RunId, type TurnItemId } from "@t3tools/contracts";
 import { canForkProjectedAssistantItem } from "@t3tools/client-runtime/state/thread-workflows";
 import { T, useGT, useMessages } from "gt-react";
 import { memo, use, useEffect, useState } from "react";
 import { type ChatMessage, type TurnDiffSummary } from "../../types";
 import ChatMarkdown from "../ChatMarkdown";
-import { GitForkIcon, PlayIcon, SquareIcon, Volume2Icon } from "lucide-react";
+import { GitForkIcon, PlayIcon, ReplyIcon, SquareIcon, Volume2Icon } from "lucide-react";
+import { captureAssistantMessageOpening } from "~/lib/assistantTextSelection";
+import { responseContextRecord } from "~/lib/composerContextRecords";
 import { Button } from "../ui/button";
 import { ProposedPlanCard } from "./ProposedPlanCard";
 import { HtmlRenderFrame } from "./HtmlRenderFrame";
@@ -21,7 +23,12 @@ import { readResponseSubagents, useAssistantMessageText } from "../../state/enti
 import { checkpointFileTotals } from "@t3tools/client-runtime/state/thread-checkpoints";
 import { ChangedFilesCard } from "./ChangedFilesTree";
 import { useFileContextMenuHandler } from "../../fileContextMenu";
-import { useAssistantMessageText, useProject, useThreadShell } from "../../state/entities";
+import {
+  readResponseSubagents,
+  useAssistantMessageText,
+  useProject,
+  useThreadShell,
+} from "../../state/entities";
 import { MessageCopyButton } from "./MessageCopyButton";
 import { MessagePlayButton } from "./MessagePlayButton";
 import { useTtsPlayer, stopPlayback } from "../../hooks/useTtsPlayer";
@@ -243,9 +250,7 @@ function AssistantMessageMeta({
       )}
     >
       {projectedItem && projectedItem.item.status !== "completed" ? (
-        <span className="rounded-full border border-border/70 px-1.5 py-0.5 font-mono text-3xs text-muted-foreground">
-          {projectedItem.item.status}
-        </span>
+        <AssistantStatusBadge status={projectedItem.item.status} />
       ) : null}
       <AssistantCopyButton
         message={message}
@@ -254,6 +259,9 @@ function AssistantMessageMeta({
       />
       {projectedItem?.item.type === "assistant_message" ? (
         <AssistantForkButton projectedItem={projectedItem} />
+      ) : null}
+      {!message.streaming && projectedItem ? (
+        <AssistantReplyButton message={message} itemId={projectedItem.sourceItemId} />
       ) : null}
       {!message.streaming && (
         <SharedTooltipTrigger
