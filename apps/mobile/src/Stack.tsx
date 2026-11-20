@@ -67,6 +67,7 @@ import { GitBranchesSheet } from "./features/threads/git/GitBranchesSheet";
 import { GitCommitSheet } from "./features/threads/git/GitCommitSheet";
 import { GitConfirmSheet } from "./features/threads/git/GitConfirmSheet";
 import { GitOverviewSheet } from "./features/threads/git/GitOverviewSheet";
+import { CommitGraphScreen } from "./features/gitGraph/CommitGraphScreen";
 import { ThreadPullRequestsSheet } from "./features/threads/ThreadPullRequestsSheet";
 import { ThreadAgentsSheet } from "./features/threads/ThreadAgentsSheet";
 import { LinkedThreadSheet } from "./features/threads/LinkedThreadSheet";
@@ -208,6 +209,7 @@ const ROUTE_TITLES: Readonly<Record<string, string>> = {
   SettingsUsage: msg("Usage"),
   ComponentCatalog: msg("UI components"),
   NewTaskProject: msg("Choose project"),
+  CommitGraph: msg("History"),
   NewTaskEnvironment: msg("Environment"),
   NewTaskBranch: msg("Branch"),
   NewTaskRepositories: msg("Repositories"),
@@ -826,6 +828,10 @@ const RootStackConfig = createWorkspaceStackNavigator({
       screen: GitOverviewSheet,
       linking: `${THREAD_LINKING_PREFIX}/git`,
       options: sheetRoute({ detent: 0.55 }),
+    }),
+    CommitGraph: createNativeStackScreen({
+      screen: CommitGraphScreen,
+      options: pageRoute(),
     }),
     ThreadPullRequests: createNativeStackScreen({
       screen: ThreadPullRequestsSheet,
