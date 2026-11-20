@@ -392,6 +392,10 @@
   "24d802debbab31e0": "{rerun, plural, one {Перезапущено {rerun} проверку, отклонено: {refused}} few {Перезапущено {rerun} проверки, отклонено: {refused}} many {Перезапущено {rerun} проверок, отклонено: {refused}} other {Перезапущено {rerun} проверки, отклонено: {refused}}}",
   "8146ee71f7426683": "{count, plural, one {Проверено {count} пул-реквест} few {Проверено {count} пул-реквеста} many {Проверено {count} пул-реквестов} other {Проверено {count} пул-реквеста}}",
   "638678077ba2e050": "{count, plural, one {Не удалось проверить {count} пул-реквест} few {Не удалось проверить {count} пул-реквеста} many {Не удалось проверить {count} пул-реквестов} other {Не удалось проверить {count} пул-реквеста}}",
+  "79fbcbe76e3d995e": "{count, plural, one {Listed thread workspaces {count} time} other {Listed thread workspaces {count} times}}",
+  "2dc325cf7d4d007e": "{count, plural, one {Tried to list thread workspaces {count} time} other {Tried to list thread workspaces {count} times}}",
+  "08053966358685c3": "{count, plural, one {Spoke {count} utterance} other {Spoke {count} utterances}}",
+  "d603171a695f0c02": "{count, plural, one {Tried to speak {count} utterance} other {Tried to speak {count} utterances}}",
   "420bea546d5f8802": "Тред скопирован",
   "2efb2dd3bf170f67": "Не удалось скопировать тред",
   "6c03545936b55e0b": "Ссылка на PR скопирована",
@@ -2057,6 +2061,7 @@
   "d85877d9ef77c50c": "Изменения",
   "b816058fba61e4d6": "Ход {count}",
   "646de37e0bec85f8": "Вызов инструмента",
+  "402f5114e0af21ae": "{label} uncommitted",
   "975c7fec8175f596": "Коммит",
   "9614272348cc04cf": "Последний ход",
   "605eca74c2ded999": "Папка проекта",
@@ -2446,6 +2451,7 @@
   "4a87cae01ccde544": "У ветки этого треда пока нет пул-реквеста.",
   "32535dba0b9af642": "У этого треда нет привязанных элементов.",
   "07080dead70f4cc5": "Устройства доступны только из треда.",
+  "f5788508a4d772fb": "The graph is only available for server threads in Git repositories.",
   "a4bf49b31758ff7e": "Доступно только в десктопном приложении.",
   "e917841cb66f9af1": "Доступно, когда открыт проект.",
   "14c15fad0c2ee0c8": "Доступно для Git-репозиториев.",
@@ -2855,6 +2861,7 @@
   "65e3725b1c46b314": "Никогда",
   "4bbe9b821de91d9d": "Тред",
   "f053d7461b8ecce5": "ID треда",
+  "77f54b85598bf682": "Export to markdown",
   "70399412ec5a7026": "Архивировать тред",
   "95184480a503090c": "Удалить",
   "042d3a13ea7d3f7b": "Не удалось сгенерировать название.",
@@ -3237,7 +3244,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "на компьютере, который открыл эту страницу"]
+      "c": [
+        " ",
+        "на компьютере, который открыл эту страницу"
+      ]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3249,7 +3259,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "· этот доступ получит любой, кто это запустит"]
+      "c": [
+        " ",
+        "· этот доступ получит любой, кто это запустит"
+      ]
     }
   ],
   "c54cc9c75db9dc58": "Подтверждайте только тот вход, который вы только что начали.",
@@ -5394,7 +5407,7 @@
     },
     "… Это может занять минуту."
   ],
-  "e902f208c4e6146f": "Виртуальные устройства Android не найдены. Создайте одно в Device Manager в Android Studio, затем обновите.",
+  "a5b944dd8aaf4e87": "No Android devices found. Start an emulator in Android Studio's Device Manager, or connect a phone over USB with USB debugging enabled, then refresh.",
   "d9a71f3db685cb0e": "Обновить список устройств",
   "4ad8ced64defdf73": "Интерактивное 3D-устройство. Перетаскивайте экран для взаимодействия. Перетаскивайте вне экрана или проведите двумя пальцами, чтобы повернуть.",
   "84e4baf07ad8883d": "Включите это окружение, чтобы открывать симуляторы и эмуляторы — локально или на удалённом хосте устройств.",
@@ -10160,6 +10173,7 @@
   "beef8e501e1ac466": "Варианты откладывания",
   "81cf438219f0a618": "Перенос строк",
   "8dc3e3036cfebeaa": "Контекст поля ввода",
+  "5849258b490d9a48": "Provider usage in chat",
   "95be9d8739887c7f": "Состояние файлов диффа по умолчанию",
   "04fb467bba7698e2": "Изменения пробелов в диффе",
   "71d047b3f6ea9497": "Заранее открывать панели пул-реквестов и изменений",
@@ -10191,6 +10205,8 @@
   "53de7aafe0afc10d": "Не удалось восстановить настройки темы",
   "006bfa1846fe5dd2": "Дней бездействия до авторазбора",
   "d9b0fbd680d5f175": "Боковая панель",
+  "29476bb09da9e623": "Group threads into named workspaces with a strip in the sidebar footer. Assign threads from their context menu or by dragging them onto a workspace.",
+  "434f95b25bfe719b": "Thread workspaces",
   "d5dfd89c9a281386": "Сбросить группировку проектов к значению по умолчанию",
   "cd5452cc9e13c818": "Группировка проектов",
   "cfb01b8a2a3361fb": "Сбросить порядок проектов к значению по умолчанию",
@@ -11853,6 +11869,7 @@
   "79b768229c9ef672": "Обслуживание",
   "54b188d65247e42f": "Эксперименты",
   "af4b7734da1d5ce7": "Голос",
+  "009349bcbe0976f8": "Voice conversations",
   "4ec62c39ca3192bf": "Контроль версий и issue",
   "f2bf529f85e05494": "Общий доступ",
   "7cf24feddad00a5e": "Параметры",
@@ -12059,6 +12076,9 @@
   "ddd5990f613aebb4": "новое хранилище 1password op cli аккаунт",
   "b9b1dccabd2ed00d": "Архивные треды",
   "f505371f6f6fd624": "восстановить открыть снова удалённые история проекты",
+  "e9e7d79d36d49adb": "Collapse composer on scroll",
+  "6b35339d39658e4e": "Gerrit HTTP credentials",
+  "f5bd463a1fd6ed37": "Thread workspaces (beta)",
   "2ed592dc3ae2e382": "Укажите название хоста.",
   "19d903b8896fe379": "Введите origin шлюза, например https://gateway.example.ts.net:4700.",
   "6d5780d28245d946": "Укажите лимиты в допустимых пределах.",

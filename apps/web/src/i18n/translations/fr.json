@@ -392,6 +392,10 @@
   "24d802debbab31e0": "{rerun, plural, one {{rerun} vérification relancée, {refused} refusées} other {{rerun} vérifications relancées, {refused} refusées}}",
   "8146ee71f7426683": "{count, plural, one {{count} pull request relue} other {{count} pull requests relues}}",
   "638678077ba2e050": "{count, plural, one {Tentative de revue de {count} pull request} other {Tentative de revue de {count} pull requests}}",
+  "79fbcbe76e3d995e": "{count, plural, one {Listed thread workspaces {count} time} other {Listed thread workspaces {count} times}}",
+  "2dc325cf7d4d007e": "{count, plural, one {Tried to list thread workspaces {count} time} other {Tried to list thread workspaces {count} times}}",
+  "08053966358685c3": "{count, plural, one {Spoke {count} utterance} other {Spoke {count} utterances}}",
+  "d603171a695f0c02": "{count, plural, one {Tried to speak {count} utterance} other {Tried to speak {count} utterances}}",
   "420bea546d5f8802": "Fil copié",
   "2efb2dd3bf170f67": "Échec de la copie du fil",
   "6c03545936b55e0b": "Lien de la PR copié",
@@ -2057,6 +2061,7 @@
   "d85877d9ef77c50c": "Modifications",
   "b816058fba61e4d6": "Tour {count}",
   "646de37e0bec85f8": "Appel d’outil",
+  "402f5114e0af21ae": "{label} uncommitted",
   "975c7fec8175f596": "Commit",
   "9614272348cc04cf": "Dernier tour",
   "605eca74c2ded999": "Dossier du projet",
@@ -2446,6 +2451,7 @@
   "4a87cae01ccde544": "La branche de ce fil n’a pas encore de pull request.",
   "32535dba0b9af642": "Ce fil n’a aucun élément associé.",
   "07080dead70f4cc5": "Les appareils ne sont disponibles que depuis un fil.",
+  "f5788508a4d772fb": "The graph is only available for server threads in Git repositories.",
   "a4bf49b31758ff7e": "Disponible uniquement dans l’app desktop.",
   "e917841cb66f9af1": "Disponible lorsqu’un projet est ouvert.",
   "14c15fad0c2ee0c8": "Disponible pour les dépôts Git.",
@@ -2855,6 +2861,7 @@
   "65e3725b1c46b314": "Jamais",
   "4bbe9b821de91d9d": "Fil",
   "f053d7461b8ecce5": "ID du fil",
+  "77f54b85598bf682": "Export to markdown",
   "70399412ec5a7026": "Archiver le fil",
   "95184480a503090c": "Supprimer",
   "042d3a13ea7d3f7b": "Échec de la génération du titre.",
@@ -3237,7 +3244,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "sur l’ordinateur qui a ouvert cette page"]
+      "c": [
+        " ",
+        "sur l’ordinateur qui a ouvert cette page"
+      ]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3249,7 +3259,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "· quiconque l’exécute obtient cet accès"]
+      "c": [
+        " ",
+        "· quiconque l’exécute obtient cet accès"
+      ]
     }
   ],
   "c54cc9c75db9dc58": "N’approuvez qu’une connexion que vous venez de lancer.",
@@ -5395,7 +5408,7 @@
     },
     "… Cela peut prendre une minute."
   ],
-  "e902f208c4e6146f": "Aucun appareil virtuel Android trouvé. Créez-en un dans le Device Manager d’Android Studio, puis actualisez.",
+  "a5b944dd8aaf4e87": "No Android devices found. Start an emulator in Android Studio's Device Manager, or connect a phone over USB with USB debugging enabled, then refresh.",
   "d9a71f3db685cb0e": "Actualiser les appareils",
   "4ad8ced64defdf73": "Appareil 3D interactif. Faites glisser l’écran pour interagir. Faites glisser en dehors ou balayez avec deux doigts pour le faire tourner.",
   "84e4baf07ad8883d": "Autorisez cet environnement à ouvrir des simulateurs et des émulateurs, qu’ils tournent ici ou sur un hôte d’appareils distant.",
@@ -10157,6 +10170,7 @@
   "beef8e501e1ac466": "Options de report",
   "81cf438219f0a618": "Retour à la ligne",
   "8dc3e3036cfebeaa": "Contexte de la zone de saisie",
+  "5849258b490d9a48": "Provider usage in chat",
   "95be9d8739887c7f": "État par défaut des fichiers du diff",
   "04fb467bba7698e2": "Modifications d’espaces dans le diff",
   "71d047b3f6ea9497": "Ouvrir proactivement les panneaux des pull requests et des modifications",
@@ -10188,6 +10202,8 @@
   "53de7aafe0afc10d": "Impossible de restaurer les paramètres du thème",
   "006bfa1846fe5dd2": "Jours d’inactivité avant la clôture automatique",
   "d9b0fbd680d5f175": "Barre latérale",
+  "29476bb09da9e623": "Group threads into named workspaces with a strip in the sidebar footer. Assign threads from their context menu or by dragging them onto a workspace.",
+  "434f95b25bfe719b": "Thread workspaces",
   "d5dfd89c9a281386": "Réinitialiser le regroupement des projets à la valeur par défaut",
   "cd5452cc9e13c818": "Regroupement des projets",
   "cfb01b8a2a3361fb": "Réinitialiser l’ordre des projets à la valeur par défaut",
@@ -11852,6 +11868,7 @@
   "79b768229c9ef672": "Maintenance",
   "54b188d65247e42f": "Labs",
   "af4b7734da1d5ce7": "Voix",
+  "009349bcbe0976f8": "Voice conversations",
   "4ec62c39ca3192bf": "Versions et tickets",
   "f2bf529f85e05494": "Partage et accès",
   "7cf24feddad00a5e": "Préférences",
@@ -12058,6 +12075,9 @@
   "ddd5990f613aebb4": "nouveau coffre 1password op cli compte",
   "b9b1dccabd2ed00d": "Fils archivés",
   "f505371f6f6fd624": "restaurer rouvrir supprimés historique projets",
+  "e9e7d79d36d49adb": "Collapse composer on scroll",
+  "6b35339d39658e4e": "Gerrit HTTP credentials",
+  "f5bd463a1fd6ed37": "Thread workspaces (beta)",
   "2ed592dc3ae2e382": "Donnez un libellé à l’hôte.",
   "19d903b8896fe379": "Saisissez l’origine de la passerelle, comme https://gateway.example.ts.net:4700.",
   "6d5780d28245d946": "Gardez les limites dans les plages indiquées.",
