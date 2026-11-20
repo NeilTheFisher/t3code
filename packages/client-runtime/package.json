@@ -71,6 +71,10 @@
       "types": "./src/diffFileOrder.ts",
       "default": "./src/diffFileOrder.ts"
     },
+    "./gitGraph/graphLayout": {
+      "types": "./src/gitGraph/graphLayout.ts",
+      "default": "./src/gitGraph/graphLayout.ts"
+    },
     "./handoff": {
       "types": "./src/handoff.ts",
       "default": "./src/handoff.ts"
