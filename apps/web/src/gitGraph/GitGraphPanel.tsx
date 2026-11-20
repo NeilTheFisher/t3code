@@ -49,6 +49,7 @@ import { PullRequestGlyph } from "../components/pullRequest/pullRequestIcons";
 import { Button } from "../components/ui/button";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { commitDragText } from "./commitDrag";
+import { graphCacheKey, isFreshGraph, readCachedGraph, rememberGraph } from "./graphCache";
 import { graphWorktrees, type WorktreeThreadLink } from "./graphWorktrees";
 import { layoutGraph, type GraphRow } from "./graphLayout";
 import { Link } from "@tanstack/react-router";
@@ -768,15 +769,41 @@ export function GitGraphPanel(props: {
   const removeWorktree = useAtomCommand(vcsEnvironment.removeWorktree, { reportFailure: false });
   const canCheckout = useEnvironmentScope(props.environmentId, AuthSourceControlWriteScope);
   const loadGraphEvent = useEffectEvent(loadGraph);
+  const cacheKey =
+    props.cwd === null
+      ? null
+      : graphCacheKey({
+          environmentId: props.environmentId,
+          cwd: props.cwd,
+          includeRemotes: showRemotes,
+          limit,
+        });
+  const handledReloadToken = useRef(reloadToken);
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- The graph is read from the repository over RPC.
   useEffect(() => {
     const cwd = props.cwd;
-    if (cwd === null) {
+    if (cwd === null || cacheKey === null) {
       // oxlint-disable-next-line react/set-state-in-effect -- Clearing the selection resets the graph and its loading flag.
       setLoading(false);
       setGraph(null);
+      setWorkingTree(null);
       return;
+    }
+    const manual = handledReloadToken.current !== reloadToken;
+    handledReloadToken.current = reloadToken;
+    // Another right-panel tab unmounts this one, so a cached read paints at once and,
+    // while it is fresh, spares the repository a second identical read.
+    const cached = readCachedGraph(cacheKey);
+    if (cached !== undefined) {
+      setGraph(cached.result);
+      setWorkingTree(cached.result.workingTree ?? null);
+      setLoading(false);
+      setLoadError(null);
+      if (!manual && isFreshGraph(cached)) {
+        setLoadingMore(false);
+        return;
+      }
     }
     let cancelled = false;
     let retryTimer: number | null = null;
@@ -792,6 +819,7 @@ export function GitGraphPanel(props: {
       }).then((result) => {
         if (cancelled) return;
         if (result._tag === "Success") {
+          rememberGraph(cacheKey, result.value);
           setGraph(result.value);
           setWorkingTree(result.value.workingTree ?? null);
           setLoading(false);
@@ -802,8 +830,10 @@ export function GitGraphPanel(props: {
           retryTimer = window.setTimeout(() => load(attempt + 1), 350 * attempt);
           return;
         }
-        setGraph(null);
-        setLoadError("Could not read this repository's history.");
+        if (cached === undefined) {
+          setGraph(null);
+          setLoadError("Could not read this repository's history.");
+        }
         setLoading(false);
         setLoadingMore(false);
       });
@@ -817,9 +847,10 @@ export function GitGraphPanel(props: {
     props.cwd,
     props.environmentId,
     limit,
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- A reload request bumps the token without changing the query inputs.
+    // A reload request bumps the token without changing the query inputs.
     reloadToken,
     showRemotes,
+    cacheKey,
   ]);
 
   // Threads in this environment, so a checkout can name the thread that lives in
