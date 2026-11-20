@@ -32,6 +32,7 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
+import { layoutGraph, type GraphRow } from "@t3tools/client-runtime/gitGraph/graphLayout";
 import * as DateTime from "effect/DateTime";
 import { readLocalApi } from "~/localApi";
 import { cn } from "~/lib/utils";
@@ -51,7 +52,6 @@ import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { commitDragText } from "./commitDrag";
 import { graphCacheKey, isFreshGraph, readCachedGraph, rememberGraph } from "./graphCache";
 import { graphWorktrees, type WorktreeThreadLink } from "./graphWorktrees";
-import { layoutGraph, type GraphRow } from "./graphLayout";
 import { Link } from "@tanstack/react-router";
 import {
   partitionCommitRuns,

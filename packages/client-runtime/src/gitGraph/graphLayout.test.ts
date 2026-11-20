@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { layoutGraph } from "./graphLayout";
+import { layoutGraph } from "./graphLayout.ts";
 
 describe("graph layout", () => {
   it("keeps a linear history in one lane", () => {
