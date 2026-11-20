@@ -4,6 +4,7 @@ import {
   ProviderInstanceId,
   ProviderThreadId,
   RunId,
+  type OrchestrationV2ThreadIdleCompaction,
   type ServerProvider,
   type ServerSettings,
 } from "@t3tools/contracts";
@@ -43,6 +44,8 @@ function sendInput(
     readonly promptOutsideWindow?: boolean;
     readonly text?: string;
     readonly threadIdle?: boolean;
+    readonly threadIdleCompaction?: OrchestrationV2ThreadIdleCompaction | null;
+    readonly idleCompactionLocked?: boolean;
   } = {},
 ) {
   const source = overrides.source ?? claude;
