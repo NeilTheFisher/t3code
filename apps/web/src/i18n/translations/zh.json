@@ -332,6 +332,10 @@
   "24d802debbab31e0": "{rerun, plural, other {已重新运行 {rerun} 项检查，{refused} 项被拒绝}}",
   "8146ee71f7426683": "{count, plural, other {已审查 {count} 个 PR}}",
   "638678077ba2e050": "{count, plural, other {尝试审查 {count} 个 PR}}",
+  "79fbcbe76e3d995e": "{count, plural, one {Listed thread workspaces {count} time} other {Listed thread workspaces {count} times}}",
+  "2dc325cf7d4d007e": "{count, plural, one {Tried to list thread workspaces {count} time} other {Tried to list thread workspaces {count} times}}",
+  "08053966358685c3": "{count, plural, one {Spoke {count} utterance} other {Spoke {count} utterances}}",
+  "d603171a695f0c02": "{count, plural, one {Tried to speak {count} utterance} other {Tried to speak {count} utterances}}",
   "420bea546d5f8802": "已复制会话",
   "2efb2dd3bf170f67": "无法复制会话",
   "6c03545936b55e0b": "已复制 PR 链接",
@@ -1917,6 +1921,7 @@
   "d85877d9ef77c50c": "改动",
   "b816058fba61e4d6": "第 {count} 轮",
   "646de37e0bec85f8": "工具调用",
+  "402f5114e0af21ae": "{label} uncommitted",
   "975c7fec8175f596": "提交",
   "9614272348cc04cf": "最近一轮",
   "e6ae3a0fbf3eb49e": "此选择没有可用的差异文件内容。",
@@ -2303,6 +2308,7 @@
   "4a87cae01ccde544": "此会话的分支尚无 pull request。",
   "32535dba0b9af642": "此会话没有已关联项。",
   "07080dead70f4cc5": "设备仅在会话中可用。",
+  "f5788508a4d772fb": "The graph is only available for server threads in Git repositories.",
   "a4bf49b31758ff7e": "仅桌面应用可用。",
   "e917841cb66f9af1": "打开项目后可用。",
   "14c15fad0c2ee0c8": "仅适用于 Git 仓库。",
@@ -2322,6 +2328,7 @@
   "1354df9fb7278843": "查看 iOS 模拟器或 Android 模拟器。",
   "4bcfa3b976a421cf": "侧聊",
   "fdcd9643e2e63b15": "在会话继续运行的同时追问一个旁支问题。",
+  "41f779f104d843cd": "Graph",
   "314cfeebf191ba0d": "待批准",
   "4e5b7363441a3831": "待输入",
   "97af4e74a5f95e5e": "运行中",
@@ -2700,6 +2707,7 @@
   "65e3725b1c46b314": "从不",
   "4bbe9b821de91d9d": "会话",
   "f053d7461b8ecce5": "会话 ID",
+  "77f54b85598bf682": "Export to markdown",
   "70399412ec5a7026": "归档会话",
   "95184480a503090c": "删除",
   "042d3a13ea7d3f7b": "标题生成失败。",
@@ -3075,7 +3083,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "位于打开此页面的计算机上"]
+      "c": [
+        " ",
+        "位于打开此页面的计算机上"
+      ]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3087,7 +3098,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "· 运行它的任何人都会获得此访问权限"]
+      "c": [
+        " ",
+        "· 运行它的任何人都会获得此访问权限"
+      ]
     }
   ],
   "c54cc9c75db9dc58": "请只批准你刚刚发起的登录。",
@@ -4026,6 +4040,16 @@
     }
   ],
   "e58a1d884fa1d8f2": "会话详情",
+  "43c5fbd02c6f330a": "收起",
+  "de45b075b016cb14": [
+    "再显示 ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " 个"
+  ],
   "02d9667ff2c8e0b8": "issue {key}：{title}",
   "4276743ee60a3c62": "{count, plural, other {{count} 条评论}}",
   "42f634397f3960aa": "在会话详情中显示",
@@ -4066,16 +4090,6 @@
   ],
   "159ddd0d146a0f22": "关注中：检查完成、有人评论或分支出现冲突时，智能体会被唤醒。点击停止关注。",
   "1cbc8b5db51b4c77": "合并",
-  "43c5fbd02c6f330a": "收起",
-  "de45b075b016cb14": [
-    "再显示 ",
-    {
-      "i": 1,
-      "k": "_gt_value_1",
-      "v": "v"
-    },
-    " 个"
-  ],
   "a3d040c4ef4fc6e9": "用量消耗偏快",
   "b16fdf56b16d99c9": "用量消耗适中",
   "90f977e97ae8b6c6": "用量消耗偏慢",
@@ -4090,6 +4104,7 @@
   "66be4fb43249bbd2": "{used} / {max} token",
   "ee3ae58c8b38a425": "剩余 {left}%",
   "ebb26f93fb83a71b": "{label}：剩余 {left}%",
+  "1b16346722b65812": "窗口剩余 {timeLeft}%",
   "728c6cc1431e76c8": "{duration} 后重置 · {time}",
   "e16b0b9b490c8bc7": "{label}：{value}",
   "ba67d0a9ff5dabf0": "复制管理员请求时剪贴板 API 不可用。",
@@ -5139,7 +5154,7 @@
     },
     "… 这可能需要一分钟。"
   ],
-  "e902f208c4e6146f": "未找到 Android 虚拟设备。请在 Android Studio 的 Device Manager 中创建一个，然后刷新。",
+  "a5b944dd8aaf4e87": "No Android devices found. Start an emulator in Android Studio's Device Manager, or connect a phone over USB with USB debugging enabled, then refresh.",
   "d9a71f3db685cb0e": "刷新设备",
   "4ad8ced64defdf73": "可交互的 3D 设备。拖动屏幕进行操作，拖动屏幕外区域或用两指滑动可旋转。",
   "84e4baf07ad8883d": "启用后，此环境即可打开模拟器，无论它们运行在本机还是远程设备主机上。",
@@ -9746,6 +9761,7 @@
   "beef8e501e1ac466": "暂缓选项",
   "81cf438219f0a618": "自动换行",
   "8dc3e3036cfebeaa": "输入框上下文",
+  "5849258b490d9a48": "Provider usage in chat",
   "95be9d8739887c7f": "差异文件默认状态",
   "04fb467bba7698e2": "差异空白字符改动",
   "71d047b3f6ea9497": "自动打开 PR 与改动面板",
@@ -9776,6 +9792,8 @@
   "53de7aafe0afc10d": "无法恢复主题设置",
   "006bfa1846fe5dd2": "自动收尾前的闲置天数",
   "d9b0fbd680d5f175": "侧边栏",
+  "29476bb09da9e623": "Group threads into named workspaces with a strip in the sidebar footer. Assign threads from their context menu or by dragging them onto a workspace.",
+  "434f95b25bfe719b": "Thread workspaces",
   "d5dfd89c9a281386": "重置项目分组为默认值",
   "cd5452cc9e13c818": "项目分组",
   "cfb01b8a2a3361fb": "重置项目排序为默认值",
@@ -11438,6 +11456,7 @@
   "54b188d65247e42f": "实验功能",
   "f41ea186c275b56e": "关于",
   "af4b7734da1d5ce7": "语音",
+  "009349bcbe0976f8": "Voice conversations",
   "4ec62c39ca3192bf": "版本控制与 issue",
   "f2bf529f85e05494": "共享与访问",
   "7cf24feddad00a5e": "偏好设置",
@@ -11634,6 +11653,9 @@
   "ddd5990f613aebb4": "新建 1password 保管库 op cli 账户",
   "b9b1dccabd2ed00d": "已归档会话",
   "f505371f6f6fd624": "恢复 重新打开 已删除 历史 项目",
+  "e9e7d79d36d49adb": "Collapse composer on scroll",
+  "6b35339d39658e4e": "Gerrit HTTP credentials",
+  "f5bd463a1fd6ed37": "Thread workspaces (beta)",
   "2ed592dc3ae2e382": "请填写主机名称。",
   "19d903b8896fe379": "请输入网关源地址，例如 https://gateway.example.ts.net:4700。",
   "6d5780d28245d946": "请将限制设在显示的范围内。",
@@ -11883,7 +11905,6 @@
   "0bd938825ffcf992": "+{percent}%（按共享池总额度计算）",
   "09c0e00d7fb55402": "正在使用重置额度…",
   "4df3ff1be768a7ab": "{name}：剩余 {remaining}%",
-  "1b16346722b65812": "窗口剩余 {timeLeft}%",
   "7aaaff1c6484f25c": "分段",
   "8bcab2ef61de6518": "上限 $0",
   "a16b48709357a5a7": "管理用量",
