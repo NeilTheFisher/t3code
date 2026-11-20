@@ -35,6 +35,7 @@ import { useSelectedThreadGitActions } from "../../../state/use-selected-thread-
 import { useSelectedThreadGitState } from "../../../state/use-selected-thread-git-state";
 import { useSelectedThreadWorktree } from "../../../state/use-selected-thread-worktree";
 import { vcsEnvironment } from "../../../state/vcs";
+import { repositoryLabelFromCwd } from "../../gitGraph/commitGraphPresentation";
 import { menuItemIconName, statusSummary } from "./gitSheetComponents";
 import {
   LinkedPullRequestRow,
@@ -323,6 +324,30 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
             }
           }}
         />
+        {selectedThreadCwd !== null ? (
+          <ListRow
+            icon="clock"
+            label={gt("History", { $context: "screen title, a repository's commit history" })}
+            description={gt("Browse this repository's commits")}
+            disabled={!isRepo}
+            onPress={() => {
+              const params = {
+                environmentId: String(environmentId),
+                cwd: selectedThreadCwd,
+                repository:
+                  selectedThreadProject?.title ?? repositoryLabelFromCwd(selectedThreadCwd),
+                branch: gitStatus.data?.refName ?? selectedThread?.branch ?? null,
+              };
+              if (presentation === "sheet") {
+                navigation.dispatch(StackActions.replace("CommitGraph", params));
+              } else {
+                presentRoute(() =>
+                  navigation.dispatch(CommonActions.navigate("CommitGraph", params)),
+                );
+              }
+            }}
+          />
+        ) : null}
         <ListRow
           icon="point.topleft.down.curvedto.point.bottomright.up"
           label={gt("Branches & worktrees")}
