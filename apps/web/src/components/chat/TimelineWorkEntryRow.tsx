@@ -693,7 +693,8 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
           )}
         </WorkLogDetails>
       ) : null}
-      {expanded && workEntry.fileChanges && workEntry.fileChanges.length > 0 ? (
+      {/* A file change reads where the tool call sits, not only after the row is expanded. */}
+      {workEntry.fileChanges && workEntry.fileChanges.length > 0 ? (
         <WorkLogDetails kind="panel">
           <InlineFileChangeDiffs
             changes={workEntry.fileChanges}
