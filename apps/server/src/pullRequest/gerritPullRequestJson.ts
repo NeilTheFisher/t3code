@@ -148,6 +148,40 @@ export interface GerritChangeActivity {
   readonly comments: ReadonlyArray<GerritCommentEntry>;
 }
 
+/** One patch set, as the change's history offers it and a diff scope names it. */
+export interface GerritPatchSet {
+  readonly number: number;
+  readonly revision: string;
+  readonly createdAt: string;
+  readonly author: GerritActor | null;
+  readonly insertions: number | null;
+  readonly deletions: number | null;
+}
+
+/** Every visible patch set, oldest first; `--patch-sets` fills `patchSets`. */
+export function gerritPatchSetsFromRecord(
+  record: GerritQueryChange,
+): ReadonlyArray<GerritPatchSet> {
+  const current = currentPatchSet(record);
+  const patchSets = record.patchSets ?? (current === null ? [] : [current]);
+  return patchSets.flatMap((patchSet) => {
+    const number = patchSet.number;
+    const revision = patchSet.revision;
+    const createdAt = gerritEpochToIso(patchSet.createdOn);
+    if (number === undefined || revision === undefined || createdAt === null) return [];
+    return [
+      {
+        number,
+        revision,
+        createdAt,
+        author: actor(patchSet.author ?? patchSet.uploader),
+        insertions: patchSet.sizeInsertions ?? null,
+        deletions: patchSet.sizeDeletions ?? null,
+      },
+    ];
+  });
+}
+
 /**
  * Gerrit statuses to the contract's three. Anything unknown is read as open rather than failing
  * the whole payload: a new status Gerrit introduces must not break a listing.
