@@ -1760,11 +1760,11 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
      * Publishes the turn's live context size after a step, so the composer meter
      * moves as the turn runs instead of only when it ends.
      */
-    const emitLiveTurnUsage = Effect.fnUntraced(function* (state: ThreadState, turn: ActiveTurn) {
+    const emitLiveTurnUsage = Effect.fnUntraced(function* (turn: ActiveTurn) {
       const tokens = turn.lastStep;
       if (tokens === undefined) return;
       const window = windowOf(turn.input.runtimePolicy.cwd, turn.input.modelSelection.model);
-      yield* emitProviderTurn(state, turn, {
+      yield* emitProviderTurn(turn, {
         ...turn.providerTurn,
         status: "running",
         completedAt: null,
@@ -3112,7 +3112,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
             ...(before === undefined ? {} : { beforeTokenCount: before }),
             ...(afterTokens === undefined ? {} : { afterTokenCount: usedTokensOf(afterTokens) }),
           });
-          if (afterTokens !== undefined) yield* emitLiveTurnUsage(state, turn);
+          if (afterTokens !== undefined) yield* emitLiveTurnUsage(turn);
           return;
         }
         case "session.compaction.failed":
@@ -3132,7 +3132,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
           turn.usage.cacheWrite += tokens.cache.write;
           turn.usage.output += tokens.output + tokens.reasoning;
           turn.usage.reasoning += tokens.reasoning;
-          yield* emitLiveTurnUsage(state, turn);
+          yield* emitLiveTurnUsage(turn);
           return;
         }
         case "session.retry.scheduled":

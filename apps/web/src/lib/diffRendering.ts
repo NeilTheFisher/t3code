@@ -392,34 +392,7 @@ export function getRenderablePatchSections(
     files.push(...patch.files.map(inFolder));
     sourceFiles.push(...patch.sourceFiles.map(inFolder));
   }
-  return files.length === 0 ? null : { kind: "files", files, sourceFiles };
-}
-
- * Synthesize a renderable diff from before/after text (e.g. Claude Edit
- * old_string/new_string, which carry no provider patch). Line numbers are
- * relative to the snippet, not the source file.
- */
-export function getRenderablePatchFromContents(
-  oldContents: string,
-  newContents: string,
-  name: string,
-  cacheScope = "inline-edit",
-): RenderablePatch | null {
-  if (oldContents === newContents) return null;
-  try {
-    const cacheKey = buildPatchCacheKey(
-      `${name}\x00${oldContents}\x00\x00${newContents}`,
-      cacheScope,
-    );
-    const fileDiff = parseDiffFromFile(
-      { name, contents: oldContents, cacheKey: `${cacheKey}:old` },
-      { name, contents: newContents, cacheKey: `${cacheKey}:new` },
-    );
-    if (fileDiff.hunks.length === 0) return null;
-    return { kind: "files", files: [fileDiff], binaryFiles: [], sourceFiles: [fileDiff] };
-  } catch {
-    return null;
-  }
+  return files.length === 0 ? null : { kind: "files", files, binaryFiles: [], sourceFiles };
 }
 
 /**
@@ -428,8 +401,6 @@ export function getRenderablePatchFromContents(
  * escaped. A viewed mark, a review comment and a file's contents are all asked for by this path,
  * and the host knows the file only under the name it really has.
  */
-/** Uses the parser-decoded filename, including Git's quoted and escaped names. */
-
 export function resolveFileDiffPath(fileDiff: FileDiffMetadata): string {
   return fileDiff.name ?? fileDiff.prevName ?? "";
 }

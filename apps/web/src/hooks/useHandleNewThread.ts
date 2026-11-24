@@ -453,7 +453,12 @@ export function createNewThreadHandler(router: AnyRouter) {
   ) => {
     const created = await startNewThread(projectRef, options);
     if (created !== null) {
-      const project = readProject(projectRef);
+      const project =
+        readProjects().find(
+          (candidate) =>
+            candidate.environmentId === projectRef.environmentId &&
+            candidate.id === projectRef.projectId,
+        ) ?? null;
       const environmentSettings =
         appAtomRegistry.get(environmentServerConfigsAtom).get(projectRef.environmentId)?.settings ??
         DEFAULT_SERVER_SETTINGS;

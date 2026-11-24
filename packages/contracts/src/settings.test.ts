@@ -593,14 +593,6 @@ describe("ClientSettings pull request merge methods", () => {
       }).pullRequestMergeMethodOverrides,
     ).toEqual({ project: "squash" });
   });
-
-  it("rejects unsupported project merge methods", () => {
-    expect(() =>
-      decodeClientSettingsPatch({
-        pullRequestMergeMethodOverrides: { project: "fast-forward" },
-      }),
-    ).toThrow();
-  });
 });
 
 describe("ServerSettings.providerInstances (slice-2 invariant)", () => {

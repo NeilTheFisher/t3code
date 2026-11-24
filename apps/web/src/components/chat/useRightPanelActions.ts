@@ -64,6 +64,8 @@ interface RightPanelActionsInput {
   readonly supportsPullRequests: boolean;
   readonly pullRequestsSurfaceAvailable: boolean;
   readonly gitCwd: string | null;
+  /** The selected checkout is a Git repository, so the graph surface can open. */
+  readonly isGitRepo: boolean;
   readonly activeProjectCwd: string | null;
   readonly onDiffPanelOpen: (() => void) | undefined;
 }
@@ -95,6 +97,7 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
     supportsPullRequests,
     pullRequestsSurfaceAvailable,
     gitCwd,
+    isGitRepo,
     activeProjectCwd,
     onDiffPanelOpen,
   } = input;
@@ -316,7 +319,6 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
     useRightPanelStore.getState().open(activeThreadRef, "diff");
     onDiffPanelOpen?.();
   });
-  const onOpenTurnDiffStable = useStableCallback(onOpenTurnDiff);
   const onOpenCommitRangeDiff = (range: { from: string; to: string; label: string }) => {
     if (!activeThreadRef) return;
     useDiffPanelStore.getState().selectCommitRange(activeThreadRef, range);
@@ -376,7 +378,6 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
     moveRightPanelSurfacesStable,
     onOpenToolDiffStable,
     onOpenCommitRangeDiffStable,
-    onOpenTurnDiffStable,
     onOpenWorkingTreeDiffStable,
     onOpenCheckoutUncommittedStable,
     onToggleDiffStable,

@@ -87,7 +87,9 @@ const layer = Layer.mergeAll(
     ProviderEventLoggers.NoOpProviderEventLoggers,
   ),
   Layer.succeed(OpenCodeRuntime.OpenCodeRuntime, openCode2Runtime),
-).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NodeCrypto.layerDigest)));
+).pipe(
+  Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NodeCrypto.layerDigest)),
+);
 
 const create = (
   config: Partial<OpenCodeSettings>,
@@ -354,7 +356,12 @@ it.live("discovers models through a home-relative OpenCode wrapper", () =>
         OpenCodeRuntime.layer.pipe(Layer.provide(OpenCodeServerLedger.layerTest)),
       ).pipe(
         Layer.provideMerge(
-          Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NodeCrypto.layerDigest, FetchHttpClient.layer),
+          Layer.mergeAll(
+            NodeServices.layer,
+            NodeCrypto.layer,
+            NodeCrypto.layerDigest,
+            FetchHttpClient.layer,
+          ),
         ),
       ),
     ),
@@ -1624,7 +1631,9 @@ const layerUpdate = Layer.mergeAll(
     ProviderEventLoggers.NoOpProviderEventLoggers,
   ),
   Layer.succeed(OpenCodeRuntime.OpenCodeRuntime, changingRuntime),
-).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NodeCrypto.layerDigest)));
+).pipe(
+  Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NodeCrypto.layerDigest)),
+);
 
 const openCode1Provider = (id: string, models: ReadonlyArray<string>) => ({
   id,

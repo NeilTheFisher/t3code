@@ -508,26 +508,6 @@ function parseUpstreamRefByFirstSeparator(
   };
 }
 
-function parseTrackingBranchByUpstreamRef(stdout: string, upstreamRef: string): string | null {
-  for (const line of stdout.split("\n")) {
-    const trimmedLine = trimAsciiWhitespace(line);
-    if (trimmedLine.length === 0) {
-      continue;
-    }
-    const [branchNameRaw, upstreamBranchRaw = ""] = trimmedLine.split("\t");
-    const branchName = branchNameRaw ?? "";
-    const candidateUpstreamRef = upstreamBranchRaw;
-    if (branchName.length === 0 || candidateUpstreamRef.length === 0) {
-      continue;
-    }
-    if (candidateUpstreamRef === upstreamRef) {
-      return branchName;
-    }
-  }
-
-  return null;
-}
-
 function deriveLocalBranchNameFromRemoteRef(branchName: string): string | null {
   const separatorIndex = branchName.indexOf("/");
   if (separatorIndex <= 0 || separatorIndex === branchName.length - 1) {
@@ -5757,12 +5737,6 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       };
     }
 
-    const dirtyRef = sourceKind === "branch-range" ? null : "HEAD";
-    const review =
-      sourceKind === "working-tree"
-        ? { baseRef: input.baseRef ?? null, mergeBase: null }
-        : yield* resolveReviewMergeBase(cwd, repository.currentBranch, input.baseRef);
-
     const readStats = Effect.fn("GitVcsDriver.getReviewDiffPreview.stat")(function* (
       ref: string,
       env?: NodeJS.ProcessEnv,
@@ -7975,12 +7949,8 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         { concurrency: "unbounded" },
       );
 
-      // A remote ref maps to the local branch of the same name and nothing else: a
-      // differently named branch that tracks it is a different branch.
-      const localTrackingBranch = null;
-
       const localTrackedBranchCandidate =
-        remoteExists && !localInputExists && !localTrackingBranch
+        remoteExists && !localInputExists
           ? yield* executeGit("GitVcsDriver.switchRef.remoteNames", input.cwd, ["remote"], {
               timeoutMs: 5_000,
               allowNonZeroExit: true,
@@ -7999,11 +7969,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           ? yield* executeGit(
               "GitVcsDriver.switchRef.candidateTracksRemote",
               input.cwd,
-              [
-                "for-each-ref",
-                "--format=%(upstream)",
-                `refs/heads/${localTrackedBranchCandidate}`,
-              ],
+              ["for-each-ref", "--format=%(upstream)", `refs/heads/${localTrackedBranchCandidate}`],
               {
                 timeoutMs: 5_000,
                 allowNonZeroExit: true,
@@ -8011,11 +7977,17 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
             ).pipe(
               Effect.map(
                 (result) =>
-                  result.exitCode === 0 &&
-                  result.stdout.trim() === `refs/remotes/${input.refName}`,
+                  result.exitCode === 0 && result.stdout.trim() === `refs/remotes/${input.refName}`,
               ),
             )
           : false;
+
+      // A remote ref maps to the local branch of the same name and nothing else: a
+      // differently named branch that tracks it is a different branch.
+      const localTrackingBranch =
+        localTrackedBranchTargetExists && localTrackedBranchCandidate !== null
+          ? localTrackedBranchCandidate
+          : null;
 
       // Creating a branch that already exists is how a collision surfaces, so an
       // untracked branch of the same name is never silently attached.

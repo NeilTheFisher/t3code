@@ -112,6 +112,19 @@ function checkThreadOperationPermission(
   return false;
 }
 
+/**
+ * The live row of a thread that a list passes to an action. A list holds its rows while an
+ * environment synchronizes (`steadyNavigationThreadShellsAtom`), so its row can be older than
+ * the client's data: an undo plan or a guard read from it would use replaced state.
+ */
+function liveThread(thread: EnvironmentThreadShell): EnvironmentThreadShell {
+  return (
+    appAtomRegistry
+      .get(environmentThreadShells.threadShellsAtom)
+      .find((row) => row.id === thread.id && row.environmentId === thread.environmentId) ?? thread
+  );
+}
+
 function useThreadActionExecutor(
   onCompleted?: (action: ThreadListAction, thread: EnvironmentThreadShell) => void,
 ) {
@@ -163,9 +176,6 @@ function useThreadActionExecutor(
         return false;
       }
       if (action === "unsettle") ThreadUndo.invalidate("settle", key);
-      if (action === "archive" || action === "delete") {
-        for (const kind of ["settle", "snooze", "pin"]) ThreadUndo.invalidate(kind, key);
-      }
       onStarted?.();
       const result = await withThreadDismissal(
         key,
@@ -202,6 +212,7 @@ function useThreadActionExecutor(
       if (action === "archive" || action === "unarchive" || action === "delete") {
         refreshArchivedThreadsForEnvironment(thread.environmentId);
       }
+      if (action === "delete") clearComposerDraft(key);
       onCompleted?.(action, thread);
       return true;
     })();
@@ -682,7 +693,8 @@ export function useThreadListActions(): {
   const moveThread = async (thread: EnvironmentThreadShell, direction: ThreadMoveDestination) => {
     if (!checkThreadOperationPermission(thread, m(msg("Could not move thread")))) return false;
     if (getPendingThreadOrder() !== null || appAtomRegistry.get(threadDropBusyAtom)) return false;
-    const shells = appAtomRegistry.get(environmentThreadShells.navigationThreadShellsAtom);
+    if (appAtomRegistry.get(steadyShellsHoldingAtom)) return false;
+    const shells = appAtomRegistry.get(steadyNavigationThreadShellsAtom);
     const current = shells.find(
       (row) => row.id === thread.id && row.environmentId === thread.environmentId,
     );

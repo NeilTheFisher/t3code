@@ -48,12 +48,7 @@ import {
   type ReactNode,
   useCallback,
 } from "react";
-import {
-  Alert,
-  Pressable,
-  ScrollView,
-  View,
-} from "react-native";
+import { Alert, Pressable, ScrollView, View } from "react-native";
 import { READABLE_WIDTH_STYLE, ROW_MIN_HEIGHT } from "../../components/ui/listMetrics";
 import { RefreshControl } from "../../components/ui/RefreshControl";
 import Animated, {

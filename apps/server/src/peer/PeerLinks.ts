@@ -584,10 +584,7 @@ const make = Effect.gen(function* () {
       urls: origins,
       access: input.access,
       linkedAt: now,
-      expiresAt: cappedLinkExpiry(
-        now,
-        DateTime.add(now, { seconds: issued.expires_in }),
-      ),
+      expiresAt: cappedLinkExpiry(now, DateTime.add(now, { seconds: issued.expires_in })),
       lastReachedAt: now,
       lastError: null,
     };

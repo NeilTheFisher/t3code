@@ -867,8 +867,10 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
         });
         return opened;
       },
-      open: (ref, kind) =>
-        set((state) =>
+      open: (ref, kind) => {
+        // A side chat names its own thread, so it never opens as a singleton surface.
+        if (kind === "side-chat") return;
+        return set((state) =>
           userAction(state, scopedThreadKey(ref), (current) => {
             if (kind === "preview") {
               const existing = current.surfaces.find((surface) => surface.kind === "preview");
@@ -880,7 +882,8 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             }
             return upsertSurface(current, singletonSurface(kind));
           }),
-        ),
+        );
+      },
       openDevice: (ref, target, automatic = false) =>
         set((state) =>
           (automatic ? automaticUpdate : userAction)(state, scopedThreadKey(ref), (current) => {
@@ -1389,8 +1392,10 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             isOpen: !current.isOpen,
           })),
         ),
-      toggle: (ref, kind) =>
-        set((state) =>
+      toggle: (ref, kind) => {
+        // A side chat names its own thread, so it never toggles as a singleton surface.
+        if (kind === "side-chat") return;
+        return set((state) =>
           userAction(state, scopedThreadKey(ref), (current) => {
             const active = current.surfaces.find(
               (surface) => surface.id === current.activeSurfaceId,
@@ -1408,7 +1413,8 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             }
             return upsertSurface(current, singletonSurface(kind));
           }),
-        ),
+        );
+      },
       setThreadPanelOpen: (ref, presentation, open) =>
         set((state) => ({
           threadPanelVisibilityByThreadKey: updateThreadPanelVisibilityMap(

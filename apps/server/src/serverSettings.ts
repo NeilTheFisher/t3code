@@ -860,14 +860,16 @@ const make = Effect.gen(function* () {
     for (const field of GERRIT_SECRET_FIELDS) {
       const value = gerrit[field];
       if (value.length === 0 || value === SECRET_REDACTED) continue;
-      const stored = yield* secretStore.set(GERRIT_SECRET_NAMES[field], textEncoder.encode(value)).pipe(
-        Effect.as(true),
-        Effect.catch(() =>
-          Effect.logWarning("failed to move a Gerrit secret into the secret store", {
-            field,
-          }).pipe(Effect.as(false)),
-        ),
-      );
+      const stored = yield* secretStore
+        .set(GERRIT_SECRET_NAMES[field], textEncoder.encode(value))
+        .pipe(
+          Effect.as(true),
+          Effect.catch(() =>
+            Effect.logWarning("failed to move a Gerrit secret into the secret store", {
+              field,
+            }).pipe(Effect.as(false)),
+          ),
+        );
       if (!stored) continue;
       gerrit[field] = SECRET_REDACTED;
       moved = true;
@@ -1053,12 +1055,13 @@ const make = Effect.gen(function* () {
       }));
       const gerrit = { ...materialized.gerrit };
       if (gerrit.token === SECRET_REDACTED) {
-        const secret = yield* secretStore.get(GERRIT_SECRET_NAMES.token).pipe(
-          Effect.mapError(
-            (cause) =>
-              new ServerSettingsError({ settingsPath, operation: "read-secret", cause }),
-          ),
-        );
+        const secret = yield* secretStore
+          .get(GERRIT_SECRET_NAMES.token)
+          .pipe(
+            Effect.mapError(
+              (cause) => new ServerSettingsError({ settingsPath, operation: "read-secret", cause }),
+            ),
+          );
         gerrit.token = Option.isSome(secret) ? textDecoder.decode(secret.value) : "";
       }
       return { ...materialized, gerrit };

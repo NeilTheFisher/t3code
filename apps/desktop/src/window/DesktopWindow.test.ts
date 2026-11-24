@@ -79,7 +79,8 @@ function makeFakeBrowserWindow() {
   const webContents = {
     id: 1,
     session: {
-      setPermissionRequestHandler: vi.fn(),
+      setPermissionCheckHandler,
+      setPermissionRequestHandler,
       webRequest: {
         onBeforeSendHeaders: vi.fn(),
       },
@@ -110,10 +111,6 @@ function makeFakeBrowserWindow() {
     replaceMisspelling: vi.fn(),
     send: vi.fn(),
     setBackgroundThrottling: vi.fn(),
-    session: {
-      setPermissionCheckHandler,
-      setPermissionRequestHandler,
-    },
     setIgnoreMenuShortcuts: vi.fn(),
     setWindowOpenHandler: vi.fn(),
     toggleDevTools: vi.fn(),

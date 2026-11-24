@@ -69,6 +69,8 @@ const NON_CONTROL_SEARCH_IDS = new Set<string>([
   "telemetry-export",
   // Upstream-only project/settings panels the fork has not ported yet.
   "project-defaults",
+  // Anchored by `<SettingsSection id="project-repositories">` in that panel.
+  "project-repositories",
   "project-overview",
   "default-model",
   "default-diff-file-state",

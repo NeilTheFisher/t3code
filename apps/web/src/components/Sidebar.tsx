@@ -3704,7 +3704,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                           }
                           searchQuery={threadSearchQuery}
                           searchMatchQuery={threadSearch.query}
-                          onDragStart={(event) => startSearchRowDrag(event, threadKey, thread.title)}
+                          onDragStart={(event) =>
+                            startSearchRowDrag(event, threadKey, thread.title)
+                          }
                           onHighlight={() => setActiveSearchResultIndex(index)}
                           onSelect={() => selectThreadSearchResult(thread)}
                           onContextMenu={handleSearchResultContextMenu}
@@ -3713,6 +3715,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                       </Fragment>
                     );
                   })}
+                </ul>
+              </DndContext>
             ) : (
               <p
                 role="status"
@@ -3867,6 +3871,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                           key={threadKey}
                           sortableId={threadKey}
                           contextDrag={isContextDrag}
+                          onMarkUnread={markThreadUnread}
                           sortableDisabled={
                             renamingThreadKey === threadKey ||
                             !draggableThreadKeys.has(threadKey) ||

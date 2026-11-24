@@ -661,7 +661,8 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
       },
     );
 
-    return yield* commandCoordinator
+    // Installers cannot be safely killed mid-install, so the update outlives a disconnecting caller.
+    const updateFiber = yield* commandCoordinator
       .withCommandLock({
         targetKey,
         lockKey: update.lockKey,

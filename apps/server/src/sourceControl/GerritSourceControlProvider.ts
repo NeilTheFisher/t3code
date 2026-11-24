@@ -138,18 +138,18 @@ export const make = Effect.gen(function* () {
     },
     operation: string,
   ) {
-      const host = hostFromContext(input.context);
-      const search = referenceSearch(input.reference);
-      if (host === null || search === null) {
-        return yield* failure({
-          operation,
-          cwd: input.cwd,
-          reference: input.reference,
-          detail: "Gerrit change could not be identified.",
-        });
-      }
-      return { host, search };
-    });
+    const host = hostFromContext(input.context);
+    const search = referenceSearch(input.reference);
+    if (host === null || search === null) {
+      return yield* failure({
+        operation,
+        cwd: input.cwd,
+        reference: input.reference,
+        detail: "Gerrit change could not be identified.",
+      });
+    }
+    return { host, search };
+  });
 
   /** The branch tip's commit hash and message, which is how a local branch names its change. */
   const branchCommit = (cwd: string, branch: string) =>
@@ -232,7 +232,8 @@ export const make = Effect.gen(function* () {
           }
           const head = yield* searchForBranch(input.cwd, "HEAD");
           return head !== null && head !== requested ? collect(yield* changesFor(head)) : [];
-        }),
+        },
+      ),
 
       getChangeRequest: Effect.fn("GerritSourceControlProvider.getChangeRequest")(
         function* (input) {
@@ -252,7 +253,8 @@ export const make = Effect.gen(function* () {
             });
           }
           return toChangeRequest(change, change.headRef);
-        }),
+        },
+      ),
 
       checkoutChangeRequest: Effect.fn("GerritSourceControlProvider.checkoutChangeRequest")(
         function* (input) {
@@ -309,7 +311,8 @@ export const make = Effect.gen(function* () {
                 }),
               ),
             );
-        }),
+        },
+      ),
 
       // Gerrit has no create-repository, clone-URL, default-branch or create-change surface in
       // this build; every one of them fails rather than offering a control that cannot work.
