@@ -362,6 +362,62 @@ describe("reading activity", () => {
   );
 });
 
+describe("patch set history", () => {
+  it.effect("exposes every patch set as a commit, oldest first", () =>
+    Effect.gen(function* () {
+      const provider = yield* makeProvider({
+        queryChanges: () =>
+          Effect.succeed(
+            page(
+              changeRecord({
+                patchSets: [
+                  {
+                    number: 1,
+                    revision: "rev1",
+                    ref: "refs/changes/34/1234/1",
+                    createdOn: 1791317326,
+                    uploader: { username: "nfisher", name: "Neil Fisher" },
+                    sizeInsertions: 12,
+                    sizeDeletions: 2,
+                  },
+                  {
+                    number: 2,
+                    revision: "rev2",
+                    ref: "refs/changes/34/1234/2",
+                    createdOn: 1791320504,
+                    uploader: { username: "nfisher", name: "Neil Fisher" },
+                    sizeInsertions: 14,
+                    sizeDeletions: 3,
+                  },
+                ],
+              }),
+            ),
+          ),
+      });
+      const activity = yield* provider.getChangeRequestActivity(changeRef);
+
+      expect(activity.commits).toEqual([
+        {
+          oid: "rev1",
+          messageHeadline: "Patch set 1",
+          committedDate: "2026-10-06T20:08:46Z",
+          additions: 12,
+          deletions: 2,
+          authors: [{ login: "nfisher", name: "Neil Fisher", avatarUrl: null }],
+        },
+        {
+          oid: "rev2",
+          messageHeadline: "Patch set 2",
+          committedDate: "2026-10-06T21:01:44Z",
+          additions: 14,
+          deletions: 3,
+          authors: [{ login: "nfisher", name: "Neil Fisher", avatarUrl: null }],
+        },
+      ]);
+    }),
+  );
+});
+
 describe("diff", () => {
   it.effect("fetches the change ref and returns the patch", () => {
     const run = vi.fn<VcsProcess.VcsProcess["Service"]["run"]>((request) =>
@@ -381,6 +437,67 @@ describe("diff", () => {
       );
       expect(diff.patch).toContain("diff --git a/a.js b/a.js");
       expect(diff.nextCursor).toBeNull();
+    });
+  });
+
+  it.effect("reads a selected patch set against its own parent", () => {
+    const queries: Array<string> = [];
+    const run = vi.fn<VcsProcess.VcsProcess["Service"]["run"]>((request) =>
+      Effect.succeed(output(request.args[0] === "diff" ? "diff --git a/a.js b/a.js\n" : "")),
+    );
+    return Effect.gen(function* () {
+      const provider = yield* makeProvider({
+        queryChanges: (input) => {
+          queries.push(input.search);
+          return Effect.succeed(
+            page(
+              changeRecord({
+                patchSets: [
+                  {
+                    number: 1,
+                    revision: "rev1",
+                    ref: "refs/changes/34/1234/1",
+                    parents: ["parent1"],
+                  },
+                  {
+                    number: 2,
+                    revision: "rev2",
+                    ref: "refs/changes/34/1234/2",
+                    parents: ["parent2"],
+                  },
+                ],
+              }),
+            ),
+          );
+        },
+        run,
+      });
+      yield* provider.getDiff({ ...changeRef, commit: "rev1" });
+
+      expect(run).toHaveBeenCalledWith(
+        expect.objectContaining({
+          args: ["fetch", "origin", "refs/changes/34/1234/1:refs/t3-gerrit/1234/1"],
+        }),
+      );
+      expect(run).toHaveBeenCalledWith(
+        expect.objectContaining({
+          args: ["diff", "parent1", "refs/t3-gerrit/1234/1", "--no-color"],
+        }),
+      );
+    });
+  });
+
+  it.effect("refuses a patch set the change does not have", () => {
+    const run = vi.fn<VcsProcess.VcsProcess["Service"]["run"]>(() => Effect.succeed(output("")));
+    return Effect.gen(function* () {
+      const provider = yield* makeProvider({
+        queryChanges: () => Effect.succeed(page(changeRecord())),
+        run,
+      });
+      const error = yield* provider.getDiff({ ...changeRef, commit: "rev-gone" }).pipe(Effect.flip);
+
+      assert.include(error.detail, "rev-gone");
+      expect(run).not.toHaveBeenCalledWith(expect.objectContaining({ args: expect.anything() }));
     });
   });
 });
