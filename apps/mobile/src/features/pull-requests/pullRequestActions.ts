@@ -318,5 +318,4 @@ export function changeRequestHostLabel(provider: string | null | undefined): str
 export const openOnProviderLabel = (
   provider: SourceControlProviderKind,
   resolve: MessageResolver = m,
-) =>
-  resolve(msg("Open on {provider}", { provider: changeRequestHostLabel(provider) }));
+) => resolve(msg("Open on {provider}", { provider: changeRequestHostLabel(provider) }));

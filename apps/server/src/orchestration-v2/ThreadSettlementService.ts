@@ -732,10 +732,9 @@ export const make = Effect.gen(function* () {
             (cause) => !Cause.hasInterruptsOnly(cause),
             (cause) =>
               (hasProviderCliUnavailableCause(cause)
-                ? Effect.logDebug(
-                    "automatic thread settlement skipped: provider CLI unavailable",
-                    { threadIds: group.map((thread) => thread.id) },
-                  )
+                ? Effect.logDebug("automatic thread settlement skipped: provider CLI unavailable", {
+                    threadIds: group.map((thread) => thread.id),
+                  })
                 : Effect.logWarning("automatic thread settlement skipped", {
                     threadIds: group.map((thread) => thread.id),
                     cause: Cause.pretty(cause),

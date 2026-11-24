@@ -895,7 +895,10 @@ it.layer(layerTest)("checkOpenCodeProviderStatus", (it) => {
 
       NodeAssert.equal(snapshot.status, "error");
       NodeAssert.equal(snapshot.installed, false);
-      NodeAssert.equal(snapshot.message, "OpenCode CLI (`opencode`) is not installed or not on PATH.");
+      NodeAssert.equal(
+        snapshot.message,
+        "OpenCode CLI (`opencode`) is not installed or not on PATH.",
+      );
     }),
   );
 
@@ -1141,7 +1144,7 @@ it.layer(layerTest)("checkOpenCodeProviderStatus", (it) => {
               { id: "low", label: "Low" },
               { id: "medium", label: "Medium", isDefault: true },
               { id: "high", label: "High" },
-              { id: "xhigh", label: "Xhigh" },
+              { id: "xhigh", label: "Extra High" },
             ],
             currentValue: "medium",
           },

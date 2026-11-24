@@ -92,7 +92,7 @@ const layerThreadToolkit = McpHttpServer.layerThreadToolkit.pipe(
   Layer.provide(Layer.mock(PeerForwarding.PeerForwarding)({})),
   Layer.provide(Layer.mock(PeerLinkRequests.PeerLinkRequests)({})),
   Layer.provide(Layer.mock(PeerLinks.PeerLinks)({})),
-        Layer.provide(ServerSettings.layerTest()),
+  Layer.provide(ServerSettings.layerTest()),
   Layer.provide(
     Layer.mock(ServerSettings.ServerSettingsService)({
       getSettings: Effect.succeed(DEFAULT_SERVER_SETTINGS),
@@ -1337,7 +1337,7 @@ it.effect.each(["t3_thread_interrupt", "t3_workflow_stop"])(
           Layer.provide(Layer.mock(PeerForwarding.PeerForwarding)({})),
           Layer.provide(Layer.mock(PeerLinkRequests.PeerLinkRequests)({})),
           Layer.provide(Layer.mock(PeerLinks.PeerLinks)({})),
-        Layer.provide(ServerSettings.layerTest()),
+          Layer.provide(ServerSettings.layerTest()),
         ),
       ),
     ),
@@ -1703,7 +1703,7 @@ it.effect(
           Layer.provide(Layer.mock(PeerForwarding.PeerForwarding)({})),
           Layer.provide(Layer.mock(PeerLinkRequests.PeerLinkRequests)({})),
           Layer.provide(Layer.mock(PeerLinks.PeerLinks)({})),
-        Layer.provide(ServerSettings.layerTest()),
+          Layer.provide(ServerSettings.layerTest()),
           Layer.provide(Layer.mock(RemoteDelegation.RemoteDelegation)({})),
         ),
       ),

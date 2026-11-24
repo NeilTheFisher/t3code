@@ -125,9 +125,7 @@ export function ThreadListFilters(props: {
           onSelect={(id) => {
             if (id === "all") props.onWorkspaceChange?.(null);
             else {
-              const workspace = workspaces.find(
-                (candidate) => JSON.stringify(candidate.id) === id,
-              );
+              const workspace = workspaces.find((candidate) => JSON.stringify(candidate.id) === id);
               if (workspace) props.onWorkspaceChange?.(workspace.id);
             }
           }}

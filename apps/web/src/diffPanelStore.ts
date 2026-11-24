@@ -21,7 +21,6 @@ export type DiffPanelSelection =
   | { kind: "commit-range"; from: string; to: string; label: string }
   | { kind: "submodule"; path: string; from: string; to: string | null; label: string }
   | { kind: "checkout-uncommitted"; cwd: string; label: string }
-
   | {
       kind: "turn";
       turnId: RunId;

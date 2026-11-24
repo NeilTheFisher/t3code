@@ -238,36 +238,36 @@ export const make = Effect.gen(function* () {
     cwd: string,
     host: string,
   ): Effect.fn.Return<GerritConnection | null> {
-      const key = `${cwd}\u0000${host}`;
-      const cached = (yield* Ref.get(connections)).get(key);
-      if (cached !== undefined) return cached;
-      const output = yield* process
-        .run({
-          operation: "GerritCli.connection",
-          command: "git",
-          args: ["remote", "-v"],
-          cwd,
-          allowNonZeroExit: true,
-          timeoutMs: 5_000,
-          maxOutputBytes: 32_000,
-        })
-        .pipe(Effect.orElseSucceed(() => null));
-      const remotes =
-        output === null || Number(output.exitCode) !== 0
-          ? []
-          : output.stdout
-              .split("\n")
-              .map((line) => line.split(/\s+/))
-              .filter((parts) => parts[2] === "(fetch)")
-              .flatMap((parts) => (parts[1] === undefined ? [] : [parts[1]]))
-              .flatMap((url) => {
-                const parsed = parseGerritRemote(url);
-                return parsed === null ? [] : [parsed];
-              });
-      const resolved = remotes.find((remote) => remote.host === host) ?? remotes[0] ?? null;
-      yield* Ref.update(connections, (current) => new Map(current).set(key, resolved));
-      return resolved;
-    });
+    const key = `${cwd}\u0000${host}`;
+    const cached = (yield* Ref.get(connections)).get(key);
+    if (cached !== undefined) return cached;
+    const output = yield* process
+      .run({
+        operation: "GerritCli.connection",
+        command: "git",
+        args: ["remote", "-v"],
+        cwd,
+        allowNonZeroExit: true,
+        timeoutMs: 5_000,
+        maxOutputBytes: 32_000,
+      })
+      .pipe(Effect.orElseSucceed(() => null));
+    const remotes =
+      output === null || Number(output.exitCode) !== 0
+        ? []
+        : output.stdout
+            .split("\n")
+            .map((line) => line.split(/\s+/))
+            .filter((parts) => parts[2] === "(fetch)")
+            .flatMap((parts) => (parts[1] === undefined ? [] : [parts[1]]))
+            .flatMap((url) => {
+              const parsed = parseGerritRemote(url);
+              return parsed === null ? [] : [parsed];
+            });
+    const resolved = remotes.find((remote) => remote.host === host) ?? remotes[0] ?? null;
+    yield* Ref.update(connections, (current) => new Map(current).set(key, resolved));
+    return resolved;
+  });
 
   /**
    * The account `ssh` authenticates as for a host, which is the remote's own user when it names
@@ -278,24 +278,24 @@ export const make = Effect.gen(function* () {
     cwd: string,
     host: string,
   ): Effect.fn.Return<string | null> {
-      const output = yield* process
-        .run({
-          operation: "GerritCli.sshUser",
-          command: "ssh",
-          args: ["-G", host],
-          cwd,
-          allowNonZeroExit: true,
-          timeoutMs: 5_000,
-          maxOutputBytes: 32_000,
-        })
-        .pipe(Effect.orElseSucceed(() => null));
-      if (output === null || Number(output.exitCode) !== 0) return null;
-      for (const line of output.stdout.split("\n")) {
-        const match = /^user\s+(.+)$/u.exec(line.trim());
-        if (match?.[1] !== undefined) return match[1].trim();
-      }
-      return null;
-    });
+    const output = yield* process
+      .run({
+        operation: "GerritCli.sshUser",
+        command: "ssh",
+        args: ["-G", host],
+        cwd,
+        allowNonZeroExit: true,
+        timeoutMs: 5_000,
+        maxOutputBytes: 32_000,
+      })
+      .pipe(Effect.orElseSucceed(() => null));
+    if (output === null || Number(output.exitCode) !== 0) return null;
+    for (const line of output.stdout.split("\n")) {
+      const match = /^user\s+(.+)$/u.exec(line.trim());
+      if (match?.[1] !== undefined) return match[1].trim();
+    }
+    return null;
+  });
 
   const sshArgs = (
     connection: GerritConnection | null,
@@ -341,9 +341,8 @@ export const make = Effect.gen(function* () {
     });
   };
 
-  const queryChanges: GerritCli["Service"]["queryChanges"] = Effect.fn(
-    "GerritCli.queryChanges",
-  )(function* (input) {
+  const queryChanges: GerritCli["Service"]["queryChanges"] = Effect.fn("GerritCli.queryChanges")(
+    function* (input) {
       const base: GerritErrorContext = {
         operation: "query",
         command: "ssh",
@@ -364,7 +363,8 @@ export const make = Effect.gen(function* () {
         return yield* new GerritCliDecodeError({ ...base, cause: decoded.failure });
       }
       return decoded.success;
-    });
+    },
+  );
 
   const review: GerritCli["Service"]["review"] = (input) =>
     runSsh({
@@ -389,7 +389,8 @@ export const make = Effect.gen(function* () {
       if (connection === null) return localUser;
       if (connection.user !== null) return connection.user;
       return (yield* effectiveSshUser(cwd, connection.host)) ?? localUser;
-    });
+    },
+  );
 
   return GerritCli.of({ viewer, queryChanges, review, reviewJson });
 });

@@ -7,7 +7,7 @@ import { runMigrations } from "../Migrations.ts";
 
 const layer = it.layer(NodeSqliteClient.layer({ filename: ":memory:" }));
 
-layer("102_ThreadItemCounts", (it) => {
+layer("113_ThreadItemCounts", (it) => {
   it.effect("matches a recount of items without a run or with an existing run", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;

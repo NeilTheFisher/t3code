@@ -1,15 +1,21 @@
 import { EnvironmentId, RunId, ThreadId, TurnItemId } from "@t3tools/contracts";
 import type { ScopedThreadRef } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
-import { scopedThreadKey } from "@t3tools/client-runtime/environment";
-import { beforeEach, describe, expect, it } from "vite-plus/test";
+import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
   isGitDiffSelection,
   resolveToolCallDiffTarget,
+  selectThreadDiffPanelSelection,
   useDiffPanelSessionStore,
   useDiffPanelStore,
 } from "./diffPanelStore";
+
+const THREAD_REF = {
+  environmentId: EnvironmentId.make("environment-1"),
+  threadId: ThreadId.make("thread-1"),
+} as unknown as ScopedThreadRef;
 
 const REF = {
   environmentId: "env-1",

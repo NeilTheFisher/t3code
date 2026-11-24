@@ -838,47 +838,53 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
 
   // Optional discovery must finish before the outer timeout can discard the account result.
   const deadlineMs = spawnedAtMs + input.probeTimeoutMs - CODEX_DISCOVERY_MARGIN_MS;
-  const [skillsResponse, models, { config, nativeUsage, rateLimits }, modelCache] = yield* Effect.all(
-    [
-      withCodexDiscoveryDeadline(client.request("skills/list", { cwds: [input.cwd] }), deadlineMs),
-      accountResponse.account?.type === "chatgpt"
-        ? requestCodexChatGptModels({
-            client,
-            codexHome: initialize.codexHome,
-            spawnedAtMs,
-            deadlineMs,
-          })
-        : withCodexDiscoveryDeadline(requestAllCodexModels(client), deadlineMs),
-      // The shared catalog must exclude config from the server's launch project.
-      withCodexDiscoveryDeadline(
-        client.request("config/read", { includeLayers: false }),
-        deadlineMs,
-        CODEX_CONFIG_PROBE_TIMEOUT_MS,
-      ).pipe(
-        Effect.catch(() => Effect.logDebug("Codex config read failed.").pipe(Effect.as(undefined))),
-        Effect.flatMap((config) => {
-          // Only a confirmed native route may probe or publish the login's quota.
-          const nativeUsage =
-            !input.skipNativeUsage &&
-            config !== undefined &&
-            codexRoutesSpendNativeQuota(accountResponse, config.config);
-          const readUsage: Effect.Effect<CodexRateLimitsProbe | undefined> = nativeUsage
-            ? readCodexRateLimits(client, deadlineMs)
-            : Effect.undefined;
-          return readUsage.pipe(
-            Effect.map((rateLimits) => ({
-              config: config?.config,
-              nativeUsage,
-              rateLimits,
-            })),
-          );
-        }),
-      ),
-      // The read swallows its own failures, so this promise cannot reject.
-      Effect.promise(() => readCodexModelCache(resolvedHomePath)),
-    ],
-    { concurrency: "unbounded" },
-  );
+  const [skillsResponse, models, { config, nativeUsage, rateLimits }, modelCache] =
+    yield* Effect.all(
+      [
+        withCodexDiscoveryDeadline(
+          client.request("skills/list", { cwds: [input.cwd] }),
+          deadlineMs,
+        ),
+        accountResponse.account?.type === "chatgpt"
+          ? requestCodexChatGptModels({
+              client,
+              codexHome: initialize.codexHome,
+              spawnedAtMs,
+              deadlineMs,
+            })
+          : withCodexDiscoveryDeadline(requestAllCodexModels(client), deadlineMs),
+        // The shared catalog must exclude config from the server's launch project.
+        withCodexDiscoveryDeadline(
+          client.request("config/read", { includeLayers: false }),
+          deadlineMs,
+          CODEX_CONFIG_PROBE_TIMEOUT_MS,
+        ).pipe(
+          Effect.catch(() =>
+            Effect.logDebug("Codex config read failed.").pipe(Effect.as(undefined)),
+          ),
+          Effect.flatMap((config) => {
+            // Only a confirmed native route may probe or publish the login's quota.
+            const nativeUsage =
+              !input.skipNativeUsage &&
+              config !== undefined &&
+              codexRoutesSpendNativeQuota(accountResponse, config.config);
+            const readUsage: Effect.Effect<CodexRateLimitsProbe | undefined> = nativeUsage
+              ? readCodexRateLimits(client, deadlineMs)
+              : Effect.undefined;
+            return readUsage.pipe(
+              Effect.map((rateLimits) => ({
+                config: config?.config,
+                nativeUsage,
+                rateLimits,
+              })),
+            );
+          }),
+        ),
+        // The read swallows its own failures, so this promise cannot reject.
+        Effect.promise(() => readCodexModelCache(resolvedHomePath)),
+      ],
+      { concurrency: "unbounded" },
+    );
 
   const cyberAccess = Option.getOrUndefined(decodeCodexCyberAccessConfig(config));
   return {

@@ -32,6 +32,7 @@ import {
 import * as Schema from "effect/Schema";
 import { type MouseEvent, useEffect, useRef, useState } from "react";
 import { useCodeViewFileReveal } from "./diffs/useCodeViewFileReveal";
+import { useCodeViewScrollRestore } from "./diffs/useCodeViewScrollRestore";
 import { useFilesystemReadAccess } from "~/state/filesystem";
 import { useOpenInPreferredEditor } from "../editorPreferences";
 import { useFileContextMenuHandler } from "../fileContextMenu";
@@ -80,7 +81,7 @@ import { formatRelativeTimeLabel, formatShortTimestamp } from "../timestampForma
 import { DiffFilePathCopyButton } from "./DiffFilePathCopyButton";
 import { DiffPanelLoadingState, DiffPanelShell, type DiffPanelMode } from "./DiffPanelShell";
 import { DiffStatLabel } from "./chat/DiffStatLabel";
-import { AnnotatableCodeView } from "./diffs/AnnotatableCodeView";
+import { AnnotatableCodeView, type AnnotatableCodeViewHandle } from "./diffs/AnnotatableCodeView";
 import { DiffFileTree } from "./diffs/DiffFileTree";
 import { FileExplorerPane } from "./files/FileExplorerPane";
 import { diffFileTreeEntries } from "./diffs/diffFileTree.logic";
@@ -295,9 +296,6 @@ export default function DiffPanel({
       : null,
   );
   const activeCwd = activeThread?.worktreePath ?? activeProject?.workspaceRoot;
-  const activeRepositoryRoot = activeThread?.worktreePath
-    ? undefined
-    : activeProject?.repositoryIdentity?.rootPath;
   const serverConfig = useAtomValue(
     serverEnvironment.configValueAtom(activeThread?.environmentId ?? null),
   );
@@ -398,15 +396,6 @@ export default function DiffPanel({
   const diffHistory = useDiffPanelStore((state) =>
     routeThreadRef ? (state.historyByThreadKey[scopedThreadKey(routeThreadRef)] ?? null) : null,
   );
-  const isGitRepo = gitStatusQuery.data?.isRepo ?? true;
-  const turnDiffSummaries = useThreadCheckpointSummaries(routeThreadRef);
-  const orderedTurnDiffSummaries = turnDiffSummaries.toSorted((left, right) => {
-    if (left.checkpointTurnCount !== right.checkpointTurnCount) {
-      return right.checkpointTurnCount - left.checkpointTurnCount;
-    }
-    return right.completedAt.localeCompare(left.completedAt);
-  });
-
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- rewrites the persisted diff store selection to the latest turn when the selected turn disappears
   useEffect(() => {
     if (!routeThreadRef || storedDiffSelection.kind !== "turn") return;
@@ -478,7 +467,8 @@ export default function DiffPanel({
   const branchDiffPreviewInput =
     canReadFiles && isGitSelection && activeThread && gitCwd
       ? {
-          cwd: selectedCheckout?.cwd ?? gitCwd,          ...(selectedBaseRef ? { baseRef: selectedBaseRef } : {}),
+          cwd: selectedCheckout?.cwd ?? gitCwd,
+          ...(selectedBaseRef ? { baseRef: selectedBaseRef } : {}),
           ...(selectedCommitSha !== null ? { commitSha: selectedCommitSha } : {}),
           ...(selectedCommitRange
             ? { commitRange: { from: selectedCommitRange.from, to: selectedCommitRange.to } }
@@ -576,7 +566,6 @@ export default function DiffPanel({
       label: `${pointer.path} ${pointer.from.slice(0, 8)}..${pointer.to.slice(0, 8)}`,
     });
   };
-  const comparisonHeadRef = selectedGitSource?.headRef ?? gitStatusQuery.data?.refName ?? "HEAD";
   const comparisonBaseRef =
     selectedGitSource?.baseRef ??
     selectedBaseRef ??
@@ -885,12 +874,27 @@ export default function DiffPanel({
   const diffLineStat = sourceLineStat ?? getDiffLineStat(renderableFiles);
   const fileTreeEntries = diffFileTreeEntries(renderableFiles.filter(isFileShown));
   const codeViewReveal = useCodeViewFileReveal();
+  // Lazy files that sat above the saved position load again only when asked for.
+  const codeViewScroll = useCodeViewScrollRestore(
+    collapseScopeKey,
+    !isRefreshingDiff && remainingFileCount === 0,
+    remainingFileCount > 0 ? loadNextFiles : null,
+  );
+  const attachCodeView = useStableCallback((handle: AnnotatableCodeViewHandle | null) => {
+    codeViewScroll.attach(handle);
+    codeViewReveal.attach(handle);
+  });
+  const flushCodeView = useStableCallback(() => {
+    codeViewScroll.flush();
+    codeViewReveal.flush();
+  });
   const revealDiffFile = (filePath: string) => {
     const index = renderableFileEntries.findIndex(
       (candidate) => resolveFileDiffPath(candidate.fileDiff) === filePath,
     );
     const file = renderableFileEntries[index];
     if (!file) return false;
+    codeViewScroll.discard();
     updateCollapsedDiffFiles((current) => {
       const next = new Set(current);
       next.delete(file.fileKey);
@@ -937,10 +941,11 @@ export default function DiffPanel({
   const openDiffFile = (filePath: string) => {
     const repositoryFile = repositoryFileTarget(filePath);
     openDiffFilePrimaryAction({
-      threadRef: routeThreadRef,
-      filePath,
-      activeCwd,
-      repositoryRoot: activeRepositoryRoot,
+      // The file viewer reads below the thread's folder; a repository outside it opens in the editor.
+      threadRef: repositoryFile?.insideThreadFolder === false ? null : routeThreadRef,
+      filePath: repositoryFile?.insideThreadFolder === false ? repositoryFile.path : filePath,
+      activeCwd: repositoryFile?.insideThreadFolder === false ? repositoryFile.cwd : activeCwd,
+      repositoryRoot: repositoryFile ? undefined : activeRepositoryRoot,
       openInEditor: (targetPath) => {
         void (async () => {
           const result = await openInPreferredEditor(targetPath);
@@ -1853,12 +1858,18 @@ export default function DiffPanel({
                     event.preventDefault();
                     const repositoryFile = repositoryFileTarget(filePath);
                     onFileContextMenu(
-                      {
-                        environmentId: activeThread?.environmentId ?? null,
-                        filePath,
-                        workspaceRoot: activeCwd,
-                        repositoryRoot: activeRepositoryRoot,
-                      },
+                      repositoryFile?.cwd === undefined
+                        ? {
+                            environmentId: activeThread?.environmentId ?? null,
+                            filePath,
+                            workspaceRoot: activeCwd,
+                            repositoryRoot: repositoryFile ? undefined : activeRepositoryRoot,
+                          }
+                        : {
+                            environmentId: activeThread?.environmentId ?? null,
+                            filePath: repositoryFile.path,
+                            workspaceRoot: repositoryFile.cwd,
+                          },
                       event,
                     );
                   }}
@@ -1867,7 +1878,8 @@ export default function DiffPanel({
                     key={collapseScopeKey ?? reviewSectionId}
                     environmentId={activeThread?.environmentId}
                     projectId={activeThread?.projectId}
-                    viewerRef={codeViewReveal.attach}
+                    viewerRef={attachCodeView}
+                    onScroll={codeViewScroll.onScroll}
                     codeViewKey={codeViewMountKey}
                     className="h-full min-h-0 overflow-auto"
                     files={codeViewFiles}
@@ -1956,7 +1968,7 @@ export default function DiffPanel({
                       preferredHighlighter: PREFERRED_HIGHLIGHTER,
                       themeType: resolvedTheme as DiffThemeType,
                       stickyHeaders: true,
-                      onPostRender: codeViewReveal.flush,
+                      onPostRender: flushCodeView,
                       ...(currentLoadDiffFiles ? { loadDiffFiles } : {}),
                     }}
                   />

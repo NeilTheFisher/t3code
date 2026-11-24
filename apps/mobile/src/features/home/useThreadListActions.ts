@@ -799,7 +799,10 @@ export function useThreadListActions(): {
       });
       if (result._tag === "Failure") {
         const error = Cause.squash(result.cause);
-        Dialog.alert("Could not move thread", error instanceof Error ? error.message : "Try again.");
+        Dialog.alert(
+          "Could not move thread",
+          error instanceof Error ? error.message : "Try again.",
+        );
         return false;
       }
       return true;

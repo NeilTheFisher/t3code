@@ -3990,8 +3990,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               {!isComposerCollapsedMobile &&
                 !isComposerApprovalState &&
                 pendingUserInputs.length === 0 &&
-                editingQueuedAttachments !== null &&
-                editingQueuedAttachments.length > 0 && (
+                activeEditingQueuedAttachments !== null &&
+                activeEditingQueuedAttachments.length > 0 && (
                   <ComposerQueuedAttachmentRow
                     attachments={activeEditingQueuedAttachments}
                     onRemove={onRemoveEditingQueuedAttachment}

@@ -970,7 +970,7 @@ describe("orchestration v2 legacy v1 cutover", () => {
             const legacyMessages = yield* sql<Record<string, unknown>>`
               SELECT * FROM projection_thread_messages ORDER BY message_id
             `;
-              const recordedMigration41 = yield* sql<{ readonly name: string }>`
+            const recordedMigration41 = yield* sql<{ readonly name: string }>`
               SELECT name FROM effect_sql_migrations WHERE migration_id = 43
             `;
             const authSessionColumns = yield* sql<{ readonly name: string }>`
@@ -999,13 +999,13 @@ describe("orchestration v2 legacy v1 cutover", () => {
           ),
         );
 
-          const divergenceLog = boot1Logs.find((log) =>
-            String(log.message).includes("migration history diverges"),
-          );
-          assert.deepStrictEqual(divergenceLog?.annotations.divergent, [
-            "43:ThreadSummaryTimeline (this build: AuthSessionClientConnection)",
-          ]);
-          assert.equal(firstBoot.migration41Name, "ThreadSummaryTimeline");
+        const divergenceLog = boot1Logs.find((log) =>
+          String(log.message).includes("migration history diverges"),
+        );
+        assert.deepStrictEqual(divergenceLog?.annotations.divergent, [
+          "43:ThreadSummaryTimeline (this build: AuthSessionClientConnection)",
+        ]);
+        assert.equal(firstBoot.migration41Name, "ThreadSummaryTimeline");
 
         assert.notInclude(firstBoot.authSessionColumnNames, "client_surface");
         assert.notInclude(firstBoot.authSessionColumnNames, "client_app_version");
