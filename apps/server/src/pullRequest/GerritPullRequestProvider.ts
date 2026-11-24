@@ -27,6 +27,7 @@ import {
   gerritActivityFromRecord,
   gerritChangeFromRecord,
   gerritDetailFromRecord,
+  gerritPatchSetsFromRecord,
   gerritStateQuery,
   type GerritActor,
   type GerritChange,
@@ -408,28 +409,44 @@ export const make = Effect.gen(function* () {
       }),
     );
 
-  /** The change's current patch set, which every write and the diff address. */
+  /**
+   * The patch set a write addresses: the change's current one, or the one a diff scope selected.
+   * Every patch set is a commit, so a diff scope names it by that commit's revision.
+   */
   const loadPatchSet = Effect.fn("GerritPullRequestProvider.loadPatchSet")(function* (
-    input: { cwd: string; host: string; number: number; repository: string },
+    input: {
+      cwd: string;
+      host: string;
+      number: number;
+      repository: string;
+      commit?: string | undefined;
+    },
     operation: string,
   ) {
-      const record = yield* readOne(
-        {
-          cwd: input.cwd,
-          host: input.host,
-          search: changeQuery(input.number, input.repository),
-          limit: 1,
-        },
-        operation,
-      );
-      const patchSet = currentPatchSet(record);
-      const ref = patchSet?.ref;
-      const number = patchSet?.number;
-      if (ref === undefined || number === undefined) {
-        return yield* failure(operation, "Gerrit did not report a patch set for the change.");
-      }
-      return { ref, number, parent: patchSet?.parents?.[0] ?? null };
-    });
+    const record = yield* readOne(
+      {
+        cwd: input.cwd,
+        host: input.host,
+        search: changeQuery(input.number, input.repository),
+        limit: 1,
+        ...(input.commit === undefined ? {} : { patchSets: true }),
+      },
+      operation,
+    );
+    const patchSet =
+      input.commit === undefined
+        ? currentPatchSet(record)
+        : ((record.patchSets ?? []).find((entry) => entry.revision === input.commit) ?? null);
+    if (input.commit !== undefined && patchSet === null) {
+      return yield* failure(operation, `Gerrit has no patch set ${input.commit} for this change.`);
+    }
+    const ref = patchSet?.ref;
+    const number = patchSet?.number;
+    if (ref === undefined || number === undefined) {
+      return yield* failure(operation, "Gerrit did not report a patch set for the change.");
+    }
+    return { ref, number, parent: patchSet?.parents?.[0] ?? null };
+  });
 
   const git = (cwd: string, operation: string, args: ReadonlyArray<string>) =>
     process
@@ -486,27 +503,27 @@ export const make = Effect.gen(function* () {
     threadId: string,
     operation: string,
   ) {
-      const target = yield* restTarget(input.cwd, input.host, operation);
-      const comments = yield* rest
-        .listComments({ ...target, change: input.number })
-        .pipe(Effect.mapError(failRest(operation)));
-      const root = comments.find((comment) => comment.id === threadId);
-      if (root === undefined) {
-        return yield* failure(operation, "Gerrit has no such comment thread.");
+    const target = yield* restTarget(input.cwd, input.host, operation);
+    const comments = yield* rest
+      .listComments({ ...target, change: input.number })
+      .pipe(Effect.mapError(failRest(operation)));
+    const root = comments.find((comment) => comment.id === threadId);
+    if (root === undefined) {
+      return yield* failure(operation, "Gerrit has no such comment thread.");
+    }
+    const members = [root];
+    for (let index = 0; index < members.length; index += 1) {
+      const parent = members[index];
+      if (parent !== undefined) {
+        members.push(...comments.filter((comment) => comment.inReplyTo === parent.id));
       }
-      const members = [root];
-      for (let index = 0; index < members.length; index += 1) {
-        const parent = members[index];
-        if (parent !== undefined) {
-          members.push(...comments.filter((comment) => comment.inReplyTo === parent.id));
-        }
-      }
-      // The newest member carries the thread's current resolution, which a reply inherits.
-      const latest = members.reduce((newest, comment) =>
-        (comment.createdAt ?? "") > (newest.createdAt ?? "") ? comment : newest,
-      );
-      return { root, latest };
-    });
+    }
+    // The newest member carries the thread's current resolution, which a reply inherits.
+    const latest = members.reduce((newest, comment) =>
+      (comment.createdAt ?? "") > (newest.createdAt ?? "") ? comment : newest,
+    );
+    return { root, latest };
+  });
 
   const provider: PullRequestProviderApi = {
     kind: SourceControlProviderKind.make("gerrit"),
@@ -609,7 +626,8 @@ export const make = Effect.gen(function* () {
         }),
       ),
 
-    getChangeRequestActivity: Effect.fn("GerritPullRequestProvider.getChangeRequestActivity")(function* (input) {
+    getChangeRequestActivity: Effect.fn("GerritPullRequestProvider.getChangeRequestActivity")(
+      function* (input) {
         const record = yield* readOne(
           {
             cwd: input.cwd,
@@ -674,40 +692,51 @@ export const make = Effect.gen(function* () {
         const comments = [...messages, ...inline].toSorted((left, right) =>
           left.createdAt.localeCompare(right.createdAt),
         ) satisfies ProviderChangeRequestActivity["comments"];
+        // Each patch set is a commit, so the Code tab's diff scope can show one at a time.
+        const commits = gerritPatchSetsFromRecord(record).map((patchSet) => ({
+          oid: patchSet.revision,
+          messageHeadline: `Patch set ${patchSet.number}`,
+          committedDate: patchSet.createdAt,
+          ...(patchSet.insertions === null ? {} : { additions: patchSet.insertions }),
+          ...(patchSet.deletions === null ? {} : { deletions: patchSet.deletions }),
+          ...(patchSet.author === null ? {} : { authors: [toActor(patchSet.author)] }),
+        }));
         return {
           comments,
           commentCount: comments.length,
           commentsTruncated: false,
           reviewThreads: gerritReviewThreads(restComments),
-          commits: [],
+          commits,
         };
-      }),
+      },
+    ),
 
     getViewerPermissions: () => Effect.succeed(VIEWER_PERMISSIONS),
 
     getDiff: Effect.fn("GerritPullRequestProvider.getDiff")(function* (input) {
-        const patchSet = yield* loadPatchSet(input, "getDiff");
-        const remote = yield* resolveRemote(input.cwd, input.host, "getDiff");
-        const revision = `refs/t3-gerrit/${input.number}/${patchSet.number}`;
-        yield* fetchRef(input.cwd, remote, patchSet.ref, revision);
-        const output = yield* git(
-          input.cwd,
-          "getDiff",
-          patchSet.parent === null
-            ? ["diff-tree", "-p", "--root", "--no-commit-id", revision]
-            : ["diff", patchSet.parent, revision, "--no-color"],
-        );
-        if (Number(output.exitCode) !== 0) {
-          return yield* failure("getDiff", "Git could not diff the Gerrit change.");
-        }
-        return {
-          patch: output.stdout,
-          truncated: output.stdoutTruncated,
-          nextCursor: null,
-        };
-      }),
+      const patchSet = yield* loadPatchSet(input, "getDiff");
+      const remote = yield* resolveRemote(input.cwd, input.host, "getDiff");
+      const revision = `refs/t3-gerrit/${input.number}/${patchSet.number}`;
+      yield* fetchRef(input.cwd, remote, patchSet.ref, revision);
+      const output = yield* git(
+        input.cwd,
+        "getDiff",
+        patchSet.parent === null
+          ? ["diff-tree", "-p", "--root", "--no-commit-id", revision]
+          : ["diff", patchSet.parent, revision, "--no-color"],
+      );
+      if (Number(output.exitCode) !== 0) {
+        return yield* failure("getDiff", "Git could not diff the Gerrit change.");
+      }
+      return {
+        patch: output.stdout,
+        truncated: output.stdoutTruncated,
+        nextCursor: null,
+      };
+    }),
 
-    getDiffFileContents: Effect.fn("GerritPullRequestProvider.getDiffFileContents")(function* (input) {
+    getDiffFileContents: Effect.fn("GerritPullRequestProvider.getDiffFileContents")(
+      function* (input) {
         const patchSet = yield* loadPatchSet(input, "getDiffFileContents");
         const remote = yield* resolveRemote(input.cwd, input.host, "getDiffFileContents");
         const revision = `refs/t3-gerrit/${input.number}/${patchSet.number}`;
@@ -734,64 +763,66 @@ export const make = Effect.gen(function* () {
           { concurrency: 2 },
         );
         return { oldContents, newContents };
-      }),
+      },
+    ),
 
     getFilesViewed: Effect.fn("GerritPullRequestProvider.getFilesViewed")(function* (input) {
-        const target = yield* restTarget(input.cwd, input.host, "getFilesViewed");
-        const files = yield* rest
-          .listReviewedFiles({ ...target, change: input.number })
-          .pipe(Effect.mapError(failRest("getFilesViewed")));
-        return {
-          files: files.map((file) => ({ path: file.path, state: "viewed" as const })),
-          truncated: false,
-        };
-      }),
+      const target = yield* restTarget(input.cwd, input.host, "getFilesViewed");
+      const files = yield* rest
+        .listReviewedFiles({ ...target, change: input.number })
+        .pipe(Effect.mapError(failRest("getFilesViewed")));
+      return {
+        files: files.map((file) => ({ path: file.path, state: "viewed" as const })),
+        truncated: false,
+      };
+    }),
 
     setFilesViewed: Effect.fn("GerritPullRequestProvider.setFilesViewed")(function* (input) {
-        const target = yield* restTarget(input.cwd, input.host, "setFilesViewed");
-        for (const file of input.files) {
-          yield* rest
-            .setFileReviewed({
-              ...target,
-              change: input.number,
-              path: file.path,
-              reviewed: file.viewed,
-            })
-            .pipe(Effect.mapError(failRest("setFilesViewed")));
-        }
-      }),
+      const target = yield* restTarget(input.cwd, input.host, "setFilesViewed");
+      for (const file of input.files) {
+        yield* rest
+          .setFileReviewed({
+            ...target,
+            change: input.number,
+            path: file.path,
+            reviewed: file.viewed,
+          })
+          .pipe(Effect.mapError(failRest("setFilesViewed")));
+      }
+    }),
 
     runAction: Effect.fn("GerritPullRequestProvider.runAction")(function* (input) {
-        // Gerrit's WIP flag moves over REST; the SSH verbs below cannot carry it. Gerrit itself
-        // refuses the call for anyone but the owner, a project owner or a site admin.
-        if (input.action === "ready" || input.action === "draft") {
-          const target = yield* restTarget(input.cwd, input.host, "runAction");
-          yield* rest
-            .setReady({
-              ...target,
-              change: input.number,
-              ready: input.action === "ready",
-            })
-            .pipe(Effect.mapError(failRest("runAction")));
-          return;
-        }
-        const verb = actionVerb[input.action];
-        if (verb === undefined) {
-          return yield* failure("runAction", `Gerrit cannot ${input.action} a change.`);
-        }
-        const patchSet = yield* loadPatchSet(input, "runAction");
-        yield* cli
-          .review({
-            cwd: input.cwd,
-            host: input.host,
+      // Gerrit's WIP flag moves over REST; the SSH verbs below cannot carry it. Gerrit itself
+      // refuses the call for anyone but the owner, a project owner or a site admin.
+      if (input.action === "ready" || input.action === "draft") {
+        const target = yield* restTarget(input.cwd, input.host, "runAction");
+        yield* rest
+          .setReady({
+            ...target,
             change: input.number,
-            patchSet: patchSet.number,
-            action: verb,
+            ready: input.action === "ready",
           })
-          .pipe(Effect.mapError(fail("runAction")));
-      }),
+          .pipe(Effect.mapError(failRest("runAction")));
+        return;
+      }
+      const verb = actionVerb[input.action];
+      if (verb === undefined) {
+        return yield* failure("runAction", `Gerrit cannot ${input.action} a change.`);
+      }
+      const patchSet = yield* loadPatchSet(input, "runAction");
+      yield* cli
+        .review({
+          cwd: input.cwd,
+          host: input.host,
+          change: input.number,
+          patchSet: patchSet.number,
+          action: verb,
+        })
+        .pipe(Effect.mapError(fail("runAction")));
+    }),
 
-    updateChangeRequest: Effect.fn("GerritPullRequestProvider.updateChangeRequest")(function* (input) {
+    updateChangeRequest: Effect.fn("GerritPullRequestProvider.updateChangeRequest")(
+      function* (input) {
         const record = yield* readOne(
           {
             cwd: input.cwd,
@@ -817,68 +848,70 @@ export const make = Effect.gen(function* () {
             message: rewriteCommitMessage(detail.body, input.title, body),
           })
           .pipe(Effect.mapError(failRest("updateChangeRequest")));
-      }),
+      },
+    ),
 
     comment: Effect.fn("GerritPullRequestProvider.comment")(function* (input) {
-        const patchSet = yield* loadPatchSet(input, "comment");
-        yield* cli
-          .review({
-            cwd: input.cwd,
-            host: input.host,
-            change: input.number,
-            patchSet: patchSet.number,
-            message: input.body,
-          })
-          .pipe(Effect.mapError(fail("comment")));
-      }),
+      const patchSet = yield* loadPatchSet(input, "comment");
+      yield* cli
+        .review({
+          cwd: input.cwd,
+          host: input.host,
+          change: input.number,
+          patchSet: patchSet.number,
+          message: input.body,
+        })
+        .pipe(Effect.mapError(fail("comment")));
+    }),
 
     submitReview: Effect.fn("GerritPullRequestProvider.submitReview")(function* (input) {
-        const patchSet = yield* loadPatchSet(input, "submitReview");
-        yield* cli
-          .reviewJson({
-            cwd: input.cwd,
-            host: input.host,
-            change: input.number,
-            patchSet: patchSet.number,
-            review: {
-              message: input.body,
-              labels: { [CODE_REVIEW_LABEL]: VERDICT_SCORE[input.verdict] },
-              comments: gerritInlineComments(input.comments),
-            },
-          })
-          .pipe(Effect.mapError(fail("submitReview")));
-      }),
+      const patchSet = yield* loadPatchSet(input, "submitReview");
+      yield* cli
+        .reviewJson({
+          cwd: input.cwd,
+          host: input.host,
+          change: input.number,
+          patchSet: patchSet.number,
+          review: {
+            message: input.body,
+            labels: { [CODE_REVIEW_LABEL]: VERDICT_SCORE[input.verdict] },
+            comments: gerritInlineComments(input.comments),
+          },
+        })
+        .pipe(Effect.mapError(fail("submitReview")));
+    }),
 
     // Gerrit has no reactions and cannot rewrite a remark; those fail rather than being offered.
     // Replies, resolution and reviewers use Gerrit's REST API for the comment ids and account
     // search the SSH command line cannot carry.
     replyToThread: Effect.fn("GerritPullRequestProvider.replyToThread")(function* (input) {
-        const target = yield* restTarget(input.cwd, input.host, "replyToThread");
-        const { root, latest } = yield* threadContext(input, input.threadId, "replyToThread");
-        yield* rest
-          .postReview({
-            ...target,
-            change: input.number,
-            review: {
-              comments: {
-                [root.path]: [
-                  {
-                    // Anchor on the root's own side and line; a file-level root has no line, and
-                    // an explicit `line: 1` would move the reply onto the first line instead.
-                    ...(root.line === null ? {} : { line: root.line }),
-                    ...(root.side === null ? {} : { side: root.side }),
-                    message: input.body,
-                    in_reply_to: latest.id,
-                    unresolved: latest.unresolved,
-                  },
-                ],
-              },
+      const target = yield* restTarget(input.cwd, input.host, "replyToThread");
+      const { root, latest } = yield* threadContext(input, input.threadId, "replyToThread");
+      yield* rest
+        .postReview({
+          ...target,
+          change: input.number,
+          review: {
+            comments: {
+              [root.path]: [
+                {
+                  // Anchor on the root's own side and line; a file-level root has no line, and
+                  // an explicit `line: 1` would move the reply onto the first line instead.
+                  ...(root.line === null ? {} : { line: root.line }),
+                  ...(root.side === null ? {} : { side: root.side }),
+                  message: input.body,
+                  in_reply_to: latest.id,
+                  unresolved: latest.unresolved,
+                },
+              ],
             },
-          })
-          .pipe(Effect.mapError(failRest("replyToThread")));
-      }),
+          },
+        })
+        .pipe(Effect.mapError(failRest("replyToThread")));
+    }),
 
-    setThreadResolution: Effect.fn("GerritPullRequestProvider.setThreadResolution")(function* (input) {
+    setThreadResolution: Effect.fn("GerritPullRequestProvider.setThreadResolution")(
+      function* (input) {
         const target = yield* restTarget(input.cwd, input.host, "setThreadResolution");
         const { root, latest } = yield* threadContext(input, input.threadId, "setThreadResolution");
         yield* rest
@@ -901,9 +934,11 @@ export const make = Effect.gen(function* () {
             },
           })
           .pipe(Effect.mapError(failRest("setThreadResolution")));
-      }),
+      },
+    ),
 
-    listReviewerCandidates: Effect.fn("GerritPullRequestProvider.listReviewerCandidates")(function* (input) {
+    listReviewerCandidates: Effect.fn("GerritPullRequestProvider.listReviewerCandidates")(
+      function* (input) {
         const target = yield* restTarget(input.cwd, input.host, "listReviewerCandidates");
         const [accounts, reviewers] = yield* Effect.all(
           [
@@ -930,9 +965,11 @@ export const make = Effect.gen(function* () {
           }),
           truncated: accounts.length >= 50,
         };
-      }),
+      },
+    ),
 
-    setReviewerRequest: Effect.fn("GerritPullRequestProvider.setReviewerRequest")(function* (input) {
+    setReviewerRequest: Effect.fn("GerritPullRequestProvider.setReviewerRequest")(
+      function* (input) {
         const target = yield* restTarget(input.cwd, input.host, "setReviewerRequest");
         for (const reviewer of input.reviewers) {
           yield* rest
@@ -944,11 +981,11 @@ export const make = Effect.gen(function* () {
             })
             .pipe(Effect.mapError(failRest("setReviewerRequest")));
         }
-      }),
+      },
+    ),
 
     setReaction: unsupported("setReaction"),
   };
 
   return provider;
 });
-
