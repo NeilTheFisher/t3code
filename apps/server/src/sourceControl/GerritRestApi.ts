@@ -202,62 +202,62 @@ export const make = Effect.gen(function* () {
       readonly body?: unknown;
     },
   ): Effect.fn.Return<string, GerritRestApiError> {
-      const token = yield* currentToken;
-      if (token === null) {
-        return yield* new GerritRestApiError({
-          operation: input.operation,
-          detail:
-            "No Gerrit HTTP token is set. Add one in Settings → Source Control to reply, resolve, pick reviewers or mark a change ready.",
-        });
-      }
-      const baseUrl = Option.getOrElse(config.baseUrl, () => `https://${target.host}`).replace(
-        /\/+$/u,
-        "",
-      );
-      const url = `${baseUrl}${input.path}`;
-      const base =
-        input.method === "GET"
-          ? HttpClientRequest.get(url)
-          : input.method === "POST"
-            ? HttpClientRequest.post(url)
-            : input.method === "DELETE"
-              ? HttpClientRequest.make("DELETE")(url)
-              : HttpClientRequest.put(url);
-      const withBody =
-        input.body === undefined ? base : base.pipe(HttpClientRequest.bodyJsonUnsafe(input.body));
-      const response = yield* httpClient
-        .execute(withBody.pipe(HttpClientRequest.basicAuth(target.username, token)))
-        .pipe(
-          Effect.mapError(
-            (cause) =>
-              new GerritRestApiError({
-                operation: input.operation,
-                detail: "Could not reach Gerrit.",
-                cause,
-              }),
-          ),
-        );
-      if (response.status < 200 || response.status >= 300) {
-        return yield* new GerritRestApiError({
-          operation: input.operation,
-          detail: `Gerrit returned HTTP ${response.status}.`,
-        });
-      }
-      const collected = yield* collectUint8StreamText({
-        stream: response.stream,
-        maxBytes: MAX_RESPONSE_BYTES,
-      }).pipe(
+    const token = yield* currentToken;
+    if (token === null) {
+      return yield* new GerritRestApiError({
+        operation: input.operation,
+        detail:
+          "No Gerrit HTTP token is set. Add one in Settings → Source Control to reply, resolve, pick reviewers or mark a change ready.",
+      });
+    }
+    const baseUrl = Option.getOrElse(config.baseUrl, () => `https://${target.host}`).replace(
+      /\/+$/u,
+      "",
+    );
+    const url = `${baseUrl}${input.path}`;
+    const base =
+      input.method === "GET"
+        ? HttpClientRequest.get(url)
+        : input.method === "POST"
+          ? HttpClientRequest.post(url)
+          : input.method === "DELETE"
+            ? HttpClientRequest.make("DELETE")(url)
+            : HttpClientRequest.put(url);
+    const withBody =
+      input.body === undefined ? base : base.pipe(HttpClientRequest.bodyJsonUnsafe(input.body));
+    const response = yield* httpClient
+      .execute(withBody.pipe(HttpClientRequest.basicAuth(target.username, token)))
+      .pipe(
         Effect.mapError(
           (cause) =>
             new GerritRestApiError({
               operation: input.operation,
-              detail: "Could not read Gerrit's response.",
+              detail: "Could not reach Gerrit.",
               cause,
             }),
         ),
       );
-      return stripGerritJsonPrefix(collected.text);
-    });
+    if (response.status < 200 || response.status >= 300) {
+      return yield* new GerritRestApiError({
+        operation: input.operation,
+        detail: `Gerrit returned HTTP ${response.status}.`,
+      });
+    }
+    const collected = yield* collectUint8StreamText({
+      stream: response.stream,
+      maxBytes: MAX_RESPONSE_BYTES,
+    }).pipe(
+      Effect.mapError(
+        (cause) =>
+          new GerritRestApiError({
+            operation: input.operation,
+            detail: "Could not read Gerrit's response.",
+            cause,
+          }),
+      ),
+    );
+    return stripGerritJsonPrefix(collected.text);
+  });
 
   const listComments: GerritRestApi["Service"]["listComments"] = (input) =>
     requestText(input, {
@@ -403,24 +403,24 @@ export const make = Effect.gen(function* () {
   const updateMessage: GerritRestApi["Service"]["updateMessage"] = Effect.fn(
     "GerritRestApi.updateMessage",
   )(function* (input) {
-      const change = `/a/changes/${input.change}`;
-      yield* requestText(input, {
-        operation: "updateMessage",
-        method: "PUT",
-        path: `${change}/edit`,
-      });
-      yield* requestText(input, {
-        operation: "updateMessage",
-        method: "PUT",
-        path: `${change}/edit:message`,
-        body: { message: input.message },
-      });
-      yield* requestText(input, {
-        operation: "updateMessage",
-        method: "POST",
-        path: `${change}/edit:publish`,
-      });
+    const change = `/a/changes/${input.change}`;
+    yield* requestText(input, {
+      operation: "updateMessage",
+      method: "PUT",
+      path: `${change}/edit`,
     });
+    yield* requestText(input, {
+      operation: "updateMessage",
+      method: "PUT",
+      path: `${change}/edit:message`,
+      body: { message: input.message },
+    });
+    yield* requestText(input, {
+      operation: "updateMessage",
+      method: "POST",
+      path: `${change}/edit:publish`,
+    });
+  });
 
   return GerritRestApi.of({
     listComments,

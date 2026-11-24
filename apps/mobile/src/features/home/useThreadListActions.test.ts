@@ -7,6 +7,7 @@ import {
   ProviderInstanceId,
   RunId,
   ThreadId,
+  type ThreadTitleRegenerationOutcome,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/reactivity";
@@ -18,6 +19,7 @@ const state = vi.hoisted(() => ({
   dropBusy: false,
   holdingRows: false,
   failedAction: null as string | null,
+  titleOutcome: null as ThreadTitleRegenerationOutcome | null,
   archivedRefreshes: [] as string[],
   onArchivedRefresh: undefined as (() => void) | undefined,
   scopes: new Map<string, Set<string>>(),

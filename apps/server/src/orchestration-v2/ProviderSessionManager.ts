@@ -3348,7 +3348,8 @@ export const layerWithOptions = (
                             input.initialProviderItemIdentityVersion,
                         }),
                   }),
-                )                .pipe(
+                )
+                .pipe(
                   Effect.provideService(Scope.Scope, sessionScope),
                   // Bound scope close after cleanup; a wedged finalizer must not hold the open lock or interrupter.
                   Effect.onError(() =>

@@ -423,7 +423,6 @@ function recordingMockSpawnerLayer(
   return { layer, commands };
 }
 
-
 function layerFailingSpawner(description: string) {
   return Layer.succeed(
     ChildProcessSpawner.ChildProcessSpawner,
@@ -439,7 +438,6 @@ function layerFailingSpawner(description: string) {
     ),
   );
 }
-
 
 const codexModelCapabilities = createModelCapabilities({
   optionDescriptors: [

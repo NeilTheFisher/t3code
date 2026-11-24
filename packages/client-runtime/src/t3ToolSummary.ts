@@ -1825,10 +1825,9 @@ export function summarizeT3ToolCalls(
       const count = selected.length;
       label = done
         ? resolve(
-            msg(
-              "{count, plural, one {Spoke {count} utterance} other {Spoke {count} utterances}}",
-              { count },
-            ),
+            msg("{count, plural, one {Spoke {count} utterance} other {Spoke {count} utterances}}", {
+              count,
+            }),
           )
         : resolve(
             msg(

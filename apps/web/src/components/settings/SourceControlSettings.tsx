@@ -54,7 +54,7 @@ import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 import { sourceControlInstallHintText } from "@t3tools/client-runtime/contract-labels";
 import { isSourceControlProviderOffered } from "@t3tools/client-runtime/operations/projects";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
-import { sourceControlIcon, getSourceControlPresentationForKind } from "~/sourceControlPresentation";
+import { getSourceControlPresentationForKind } from "~/sourceControlPresentation";
 import { SharedTooltipTrigger } from "../ui/shared-tooltip";
 
 const EMPTY_DISCOVERY_RESULT: SourceControlDiscoveryResult = {

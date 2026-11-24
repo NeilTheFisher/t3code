@@ -264,7 +264,6 @@ it.effect("registers every migration file", () =>
       const match = /^(\d+)_(\w+)\.ts$/.exec(name);
       return match ? [[Number(match[1]), match[2]] as const] : [];
     });
-    assert.deepStrictEqual(
     // The fork keeps two ids (36, 37) as already-applied no-ops with no file, so
     // only ids that do have a migration file can be compared against the files.
     const fileIds = new Set(files.map(([id]) => id));

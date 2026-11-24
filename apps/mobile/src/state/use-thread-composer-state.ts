@@ -895,7 +895,8 @@ export function useThreadComposerState(input: {
     const metadata = makeQueuedMessageMetadata();
     // A fresh session drops the context a compaction would summarize. Only a send the notice
     // announced compacts, since the notice's minute clock can trail the exact deadline.
-    const compactBeforeSend = compactTokens !== null && !freshContext && followUpDispatchMode === null;
+    const compactBeforeSend =
+      compactTokens !== null && !freshContext && followUpDispatchMode === null;
     const messageId = MessageId.make(metadata.messageId);
     onWillEnqueue?.();
     clearThreadComposerError(threadKey);

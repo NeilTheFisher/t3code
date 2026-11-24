@@ -14,7 +14,6 @@ import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
-import * as Scope from "effect/Scope";
 import * as Schema from "effect/Schema";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
@@ -41,7 +40,6 @@ const CURSOR_DRIVER = ProviderDriverKind.make("cursor");
 const NATIVE_CLI_DRIVER = ProviderDriverKind.make("nativeCli");
 const OPENCODE_DRIVER = ProviderDriverKind.make("opencode");
 const CODEX_INSTANCE_ID = ProviderInstanceId.make("codex");
-const CURSOR_INSTANCE_ID = ProviderInstanceId.make("cursor");
 const NATIVE_CLI_INSTANCE_ID = ProviderInstanceId.make("nativeCli");
 const OPENCODE_INSTANCE_ID = ProviderInstanceId.make("opencode");
 const encoder = new TextEncoder();
@@ -98,12 +96,6 @@ const baseNativeCliProvider: ServerProvider = {
   ...baseProvider,
   instanceId: NATIVE_CLI_INSTANCE_ID,
   driver: NATIVE_CLI_DRIVER,
-};
-
-const baseCursorProvider: ServerProvider = {
-  ...baseProvider,
-  instanceId: CURSOR_INSTANCE_ID,
-  driver: CURSOR_DRIVER,
 };
 
 const baseOpenCodeProvider: ServerProvider = {
@@ -900,8 +892,6 @@ describe("providerMaintenanceRunner", () => {
       ),
     );
   });
-
-
 
   it.effect("prevents concurrent updates for the same provider", () => {
     const startedLatch: { resolve: () => void } = { resolve: () => {} };
@@ -1750,5 +1740,4 @@ it.effect("refuses incompatible latest versions and unapproved or unpinnable tar
       ),
     );
   });
-
 });

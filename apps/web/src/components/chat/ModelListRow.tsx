@@ -10,6 +10,7 @@ import { Kbd } from "../ui/kbd";
 import { cn } from "~/lib/utils";
 import { modelPickerModelKey } from "./modelPickerKeys";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { SharedTooltipTrigger } from "../ui/shared-tooltip";
 import { formatModelContextWindowTokens, getModelCapabilityLabels } from "../modelMetadata";
 import type { ServerProviderModel } from "@t3tools/contracts";

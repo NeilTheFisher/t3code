@@ -259,5 +259,7 @@ it("puts owner and name back together for an identity recorded before displayNam
 
 it("names nothing for a project with no remote to name it by", () => {
   expect(sourceControlRepositorySelector(null)).toBeNull();
-  expect(sourceControlRepositorySelector({ provider: SourceControlProviderKind.make("github") })).toBeNull();
+  expect(
+    sourceControlRepositorySelector({ provider: SourceControlProviderKind.make("github") }),
+  ).toBeNull();
 });

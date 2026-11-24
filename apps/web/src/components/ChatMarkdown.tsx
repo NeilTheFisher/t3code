@@ -94,8 +94,6 @@ import { parseThreadLinkHref } from "@t3tools/shared/threadLinks";
 import { AssistantCitationEmbed } from "./chat/AssistantCitationChip";
 import { MarkdownThreadLink } from "./chat/MarkdownThreadLink";
 import { artifactTemplateFromHastProperties } from "@t3tools/shared/codexArtifactTemplates";
-import { mathKind } from "@t3tools/shared/markdownMath";
-import remarkMath from "remark-math";
 import { TtsParagraphHighlight } from "./chat/TtsParagraphHighlight";
 import {
   decodeMarkdownLinkEscapes,

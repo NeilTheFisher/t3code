@@ -25,13 +25,7 @@ import { appAtomRegistry } from "../../state/atom-registry";
 import { environmentServerConfigsAtom, serverEnvironment } from "../../state/server";
 import { connectedEnvironmentIdsAtom } from "../../state/presentation";
 import { readEnvironmentScope, readEnvironmentScopeDenied } from "../../state/session";
-import { clearComposerDraft } from "../../state/use-composer-drafts";
-import {
-  environmentThreadShells,
-  steadyNavigationThreadShellsAtom,
-  steadyShellsHoldingAtom,
-  threadEnvironment,
-} from "../../state/threads";
+import { environmentThreadShells, threadEnvironment } from "../../state/threads";
 import { queuedThreadKeysAtom } from "../../state/use-thread-outbox";
 import { useAtomCommand } from "../../state/use-atom-command";
 import {
@@ -110,6 +104,19 @@ function checkThreadOperationPermission(
   }
   Dialog.alert(title, m(msg("This connection cannot change threads.")));
   return false;
+}
+
+/**
+ * The live row of a thread that a list passes to an action. A list holds its rows while an
+ * environment synchronizes (`steadyNavigationThreadShellsAtom`), so its row can be older than
+ * the client's data: an undo plan or a guard read from it would use replaced state.
+ */
+function liveThread(thread: EnvironmentThreadShell): EnvironmentThreadShell {
+  return (
+    appAtomRegistry
+      .get(environmentThreadShells.threadShellsAtom)
+      .find((row) => row.id === thread.id && row.environmentId === thread.environmentId) ?? thread
+  );
 }
 
 function useThreadActionExecutor(

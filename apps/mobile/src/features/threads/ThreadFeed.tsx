@@ -183,6 +183,7 @@ import { MARKDOWN_IMAGE_MAX_WIDTH, resolveMarkdownImageDisplaySize } from "./mar
 import { FilePreviewModal, type FilePreviewSource } from "../../components/ui/FilePreviewModal";
 import { inlineFilePreviewKind, isPdfFile } from "../../lib/filePreview";
 import { ThreadInlineFilePreview } from "./ThreadInlineFilePreview";
+
 import { flattenThemeColor, themeColorWithContrast } from "../../lib/mobileTheme";
 import { PresentationSource } from "../../components/ui/NativePresentation";
 import { NativeScrollViewMarker } from "../../native/NativeScrollViewMarker";
@@ -3210,19 +3211,6 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   const [retainedMediaRowId, setRetainedMediaRowId] = useState<string | null>(null);
   const focused = useIsFocused();
   if (!focused && retainedMediaRowId !== null) setRetainedMediaRowId(null);
-  const onOpenTurnDiff = useCallback(
-    (checkpoint: ThreadCheckpointSummary) => {
-      setReviewSelectedSectionId(
-        scopedThreadKey(props.environmentId, props.threadId),
-        getReviewSectionIdForCheckpoint(checkpoint),
-      );
-      navigation.navigate("ThreadReview", {
-        environmentId: props.environmentId,
-        threadId: props.threadId,
-      });
-    },
-    [navigation, props.environmentId, props.threadId],
-  );
   // State-only: re-renders the feed when the narration head crosses a block, not on every tick.
   const narration = useThreadTtsNarration(props.threadId);
   const narratingMessageId = narration?.messageId ?? null;

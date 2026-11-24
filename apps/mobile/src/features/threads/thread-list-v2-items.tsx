@@ -215,10 +215,7 @@ function buildWorkspaceMenuActions(menu: ThreadWorkspaceMenu | null): MenuAction
         ...menu.workspaces.map((workspace) => ({
           id: `move-to-workspace:${workspace.id}`,
           title: workspace.name,
-          state:
-            menu.assignedWorkspaceId === workspace.id
-              ? ("on" as const)
-              : ("off" as const),
+          state: menu.assignedWorkspaceId === workspace.id ? ("on" as const) : ("off" as const),
         })),
       ],
     },

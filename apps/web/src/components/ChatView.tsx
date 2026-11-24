@@ -80,7 +80,6 @@ import {
   type AssistantCitation,
   type ResponseContextRecord,
   type ChatFileAttachment,
-  isProviderNativeSubagentThread,
   type EnvironmentId,
   type MessageId,
   type ModelSelection,
@@ -146,7 +145,6 @@ import {
   use,
   useEffect,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
 } from "react";
@@ -2579,7 +2577,6 @@ export default function ChatView(props: ChatViewProps) {
     duplicateBrowserSurfaceStable,
     moveRightPanelSurfaceStable,
     onOpenToolDiffStable,
-    onOpenTurnDiffStable,
     onOpenCommitRangeDiffStable,
     onOpenWorkingTreeDiffStable,
     onOpenCheckoutUncommittedStable,
@@ -2611,6 +2608,7 @@ export default function ChatView(props: ChatViewProps) {
     supportsPullRequests,
     pullRequestsSurfaceAvailable: linkedItemsSurfaceAvailable,
     gitCwd,
+    isGitRepo,
     activeProjectCwd,
     onDiffPanelOpen,
     closeRightPanelSurface,
@@ -3524,7 +3522,6 @@ export default function ChatView(props: ChatViewProps) {
       workspaceMutationId={workspaceMutationId}
       workspaceRevision={workspaceRevision.revision}
       onCloseSurface={closeRightPanelSurface}
-      sideChatParentPanel={sideChatParentPanel}
       onOpenCommitRangeDiff={onOpenCommitRangeDiffStable}
       onOpenWorkingTreeDiff={onOpenWorkingTreeDiffStable}
       onOpenCheckoutUncommitted={onOpenCheckoutUncommittedStable}
@@ -3532,7 +3529,6 @@ export default function ChatView(props: ChatViewProps) {
       onStartThreadInWorktree={startThreadInWorktreeStable}
       getShortcutContext={getShortcutContextStable}
       onSendAnnotation={sendPreviewAnnotationStable}
-      onCloseSurface={closeRightPanelSurface}
       sideChatParentPanel={sideChatParentPanel}
       terminal={{
         launchContext: activeTerminalLaunchContext ?? null,

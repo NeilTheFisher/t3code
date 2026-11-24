@@ -941,7 +941,9 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
     }
     case "external-file": {
       const absolutePath = input.resource.path;
-      const info = yield* ProjectFaviconResolver.optionOnNotFound(fileSystem.stat(absolutePath)).pipe(
+      const info = yield* ProjectFaviconResolver.optionOnNotFound(
+        fileSystem.stat(absolutePath),
+      ).pipe(
         Effect.tapError((cause) =>
           Effect.logError("Failed to inspect external file.", {
             path: absolutePath,
@@ -1142,7 +1144,9 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
 
   if (claims.kind === "external-file") {
     const fileSystem = yield* FileSystem.FileSystem;
-    const info = yield* ProjectFaviconResolver.optionOnNotFound(fileSystem.stat(claims.absolutePath)).pipe(
+    const info = yield* ProjectFaviconResolver.optionOnNotFound(
+      fileSystem.stat(claims.absolutePath),
+    ).pipe(
       Effect.tapError((cause) =>
         Effect.logError("Failed to inspect external file asset.", {
           path: claims.absolutePath,

@@ -183,8 +183,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
     if (selectedWorkspaceId === null) return launchingThreads;
     return launchingThreads.filter((thread) => {
       const settings = workspaceSettingsByEnvironment.get(thread.environmentId);
-      const assigned =
-        settings === undefined ? null : threadWorkspaceIdForThread(thread, settings);
+      const assigned = settings === undefined ? null : threadWorkspaceIdForThread(thread, settings);
       return selectedWorkspaceId === UNSORTED_WORKSPACE_FILTER
         ? assigned === null
         : assigned === selectedWorkspaceId;
@@ -644,46 +643,46 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
   if (Platform.OS === "ios") {
     return (
       <HomeWorkspaceRoot onFileThreadInWorkspace={fileThreadInWorkspace}>
-      <>
-        {header}
-        <View className="flex-1">
-          <SwipeableScrollGateProvider enabled={swipeEnabled}>
-            <GestureDetector gesture={sidebarScrollGesture}>
-              <AnimatedLegendList
-                renderScrollComponent={NativeScrollView}
-                itemLayoutAnimation={THREAD_LIST_ROW_LAYOUT}
-                data={listItems}
-                drawDistance={500}
-                estimatedItemSize={64}
-                extraData={listExtraData}
-                getItemType={(item) => item.type}
-                itemsAreEqual={sidebarItemsAreEqual}
-                keyExtractor={(item) => item.key}
-                renderItem={renderListItem}
-                automaticallyAdjustsScrollIndicatorInsets
-                // The column lays the list under its bar, glass or solid; UIKit insets it past both.
-                contentInsetAdjustmentBehavior="automatic"
-                contentContainerStyle={[
-                  styles.threadListContent,
-                  {
-                    paddingBottom: Math.max(insets.bottom, 16) + 16,
-                    paddingTop: 6,
-                  },
-                ]}
-                keyboardDismissMode="on-drag"
-                keyboardShouldPersistTaps="handled"
-                {...scrollGateHandlers}
-                recycleItems
-                scrollEventThrottle={16}
-                showsVerticalScrollIndicator={false}
-                style={styles.threadList}
-                ListEmptyComponent={listEmpty}
-              />
-            </GestureDetector>
-          </SwipeableScrollGateProvider>
-          <ThreadUndoNotice visible={props.visible} />
-        </View>
-      </>
+        <>
+          {header}
+          <View className="flex-1">
+            <SwipeableScrollGateProvider enabled={swipeEnabled}>
+              <GestureDetector gesture={sidebarScrollGesture}>
+                <AnimatedLegendList
+                  renderScrollComponent={NativeScrollView}
+                  itemLayoutAnimation={THREAD_LIST_ROW_LAYOUT}
+                  data={listItems}
+                  drawDistance={500}
+                  estimatedItemSize={64}
+                  extraData={listExtraData}
+                  getItemType={(item) => item.type}
+                  itemsAreEqual={sidebarItemsAreEqual}
+                  keyExtractor={(item) => item.key}
+                  renderItem={renderListItem}
+                  automaticallyAdjustsScrollIndicatorInsets
+                  // The column lays the list under its bar, glass or solid; UIKit insets it past both.
+                  contentInsetAdjustmentBehavior="automatic"
+                  contentContainerStyle={[
+                    styles.threadListContent,
+                    {
+                      paddingBottom: Math.max(insets.bottom, 16) + 16,
+                      paddingTop: 6,
+                    },
+                  ]}
+                  keyboardDismissMode="on-drag"
+                  keyboardShouldPersistTaps="handled"
+                  {...scrollGateHandlers}
+                  recycleItems
+                  scrollEventThrottle={16}
+                  showsVerticalScrollIndicator={false}
+                  style={styles.threadList}
+                  ListEmptyComponent={listEmpty}
+                />
+              </GestureDetector>
+            </SwipeableScrollGateProvider>
+            <ThreadUndoNotice visible={props.visible} />
+          </View>
+        </>
       </HomeWorkspaceRoot>
     );
   }
@@ -691,56 +690,56 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
   // Android: the bar floats below the list.
   return (
     <HomeWorkspaceRoot onFileThreadInWorkspace={fileThreadInWorkspace}>
-    <View testID="thread-navigation-sidebar" className="flex-1 bg-header">
-      <View
-        className="flex-1"
-        style={{
-          marginHorizontal: 4,
-          paddingBottom: insets.bottom,
-          backgroundColor: drawerColor,
-          borderTopLeftRadius: 28,
-          borderTopRightRadius: 28,
-          overflow: "hidden",
-        }}
-      >
-        {listItems.length === 0 ? (
-          <View className="flex-1 items-center justify-center">{listEmpty}</View>
-        ) : (
-          <SwipeableScrollGateProvider enabled={swipeEnabled}>
-            <GestureDetector gesture={sidebarScrollGesture}>
-              {/* oxlint-disable-next-line t3code/require-registered-list-scroll -- The Android sidebar has no native header to register with. */}
-              <AnimatedLegendList
-                itemLayoutAnimation={THREAD_LIST_ROW_LAYOUT}
-                data={listItems}
-                drawDistance={500}
-                estimatedItemSize={64}
-                extraData={listExtraData}
-                getItemType={(item) => item.type}
-                itemsAreEqual={sidebarItemsAreEqual}
-                keyExtractor={(item) => item.key}
-                renderItem={renderListItem}
-                contentContainerStyle={{
-                  paddingBottom: floatingTabsEnabled
-                    ? FLOATING_TABS.bottom + FLOATING_TABS.edge + fabSize
-                    : Math.max(insets.bottom, 16) + fabClearance - insets.bottom,
-                  paddingTop: 6,
-                }}
-                keyboardDismissMode="on-drag"
-                keyboardShouldPersistTaps="handled"
-                {...scrollGateHandlers}
-                recycleItems
-                scrollEventThrottle={16}
-                showsVerticalScrollIndicator={false}
-                style={styles.threadList}
-                ListEmptyComponent={listEmpty}
-              />
-            </GestureDetector>
-          </SwipeableScrollGateProvider>
-        )}
+      <View testID="thread-navigation-sidebar" className="flex-1 bg-header">
+        <View
+          className="flex-1"
+          style={{
+            marginHorizontal: 4,
+            paddingBottom: insets.bottom,
+            backgroundColor: drawerColor,
+            borderTopLeftRadius: 28,
+            borderTopRightRadius: 28,
+            overflow: "hidden",
+          }}
+        >
+          {listItems.length === 0 ? (
+            <View className="flex-1 items-center justify-center">{listEmpty}</View>
+          ) : (
+            <SwipeableScrollGateProvider enabled={swipeEnabled}>
+              <GestureDetector gesture={sidebarScrollGesture}>
+                {/* oxlint-disable-next-line t3code/require-registered-list-scroll -- The Android sidebar has no native header to register with. */}
+                <AnimatedLegendList
+                  itemLayoutAnimation={THREAD_LIST_ROW_LAYOUT}
+                  data={listItems}
+                  drawDistance={500}
+                  estimatedItemSize={64}
+                  extraData={listExtraData}
+                  getItemType={(item) => item.type}
+                  itemsAreEqual={sidebarItemsAreEqual}
+                  keyExtractor={(item) => item.key}
+                  renderItem={renderListItem}
+                  contentContainerStyle={{
+                    paddingBottom: floatingTabsEnabled
+                      ? FLOATING_TABS.bottom + FLOATING_TABS.edge + fabSize
+                      : Math.max(insets.bottom, 16) + fabClearance - insets.bottom,
+                    paddingTop: 6,
+                  }}
+                  keyboardDismissMode="on-drag"
+                  keyboardShouldPersistTaps="handled"
+                  {...scrollGateHandlers}
+                  recycleItems
+                  scrollEventThrottle={16}
+                  showsVerticalScrollIndicator={false}
+                  style={styles.threadList}
+                  ListEmptyComponent={listEmpty}
+                />
+              </GestureDetector>
+            </SwipeableScrollGateProvider>
+          )}
+        </View>
+        {header}
+        <ThreadUndoNotice visible={props.visible} />
       </View>
-      {header}
-      <ThreadUndoNotice visible={props.visible} />
-    </View>
     </HomeWorkspaceRoot>
   );
 }

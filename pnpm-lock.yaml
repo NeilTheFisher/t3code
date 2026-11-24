@@ -1249,6 +1249,9 @@ importers:
       pele:
         specifier: 'catalog:'
         version: 1.8.0
+      phonon-webgpu:
+        specifier: github:blixt/phonon#36e7e5eff820733be38e9df19ccf58ae891bd45c
+        version: https://codeload.github.com/blixt/phonon/tar.gz/36e7e5eff820733be38e9df19ccf58ae891bd45c
       property-information:
         specifier: ^7.2.0
         version: 7.2.0

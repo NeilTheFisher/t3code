@@ -20,7 +20,6 @@ import * as Schedule from "effect/Schedule";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
-import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 
 import { createModelCapabilities, DEFAULT_VARIANT_CHOICE_ID } from "@t3tools/shared/model";
 import {
@@ -288,12 +287,6 @@ function openCodeCapabilitiesForModel(input: {
   const outputModalities = Object.entries(input.model.capabilities?.output ?? {})
     .filter(([, supported]) => supported)
     .map(([modality]) => modality as "text" | "audio" | "image" | "video" | "pdf");
-  const defaultVariant = inferDefaultVariant(input.providerID, variantValues);
-  const variantOptions = variantValues.map((value) =>
-    defaultVariant === value
-      ? { id: value, label: titleCaseSlug(value), isDefault: true as const }
-      : { id: value, label: titleCaseSlug(value) },
-  );
   const primaryAgents = input.agents.filter(
     (agent) => !agent.hidden && (agent.mode === "primary" || agent.mode === "all"),
   );
