@@ -40,6 +40,7 @@ import { useEnvironmentScope } from "~/state/session";
 import { useThreadShells } from "~/state/entities";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { vcsEnvironment } from "~/state/vcs";
+import { useEnvironmentQuery } from "~/state/query";
 
 import {
   COMPOSER_COMMIT_DRAG_TYPE,
@@ -50,7 +51,7 @@ import { PullRequestGlyph } from "../components/pullRequest/pullRequestIcons";
 import { Button } from "../components/ui/button";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { commitDragText } from "./commitDrag";
-import { graphCacheKey, isFreshGraph, readCachedGraph, rememberGraph } from "./graphCache";
+import { graphCacheKey, graphLiveSignature, readCachedGraph, rememberGraph } from "./graphCache";
 import { graphWorktrees, type WorktreeThreadLink } from "./graphWorktrees";
 import { Link } from "@tanstack/react-router";
 import {
@@ -750,7 +751,6 @@ export function GitGraphPanel(props: {
   const [workingTree, setWorkingTree] = useState<VcsGraphWorkingTree | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [reloadToken, setReloadToken] = useState(0);
   const [limit, setLimit] = useState(120);
   const [loadingMore, setLoadingMore] = useState(false);
   const [view, setView] = useState<PanelView>("graph");
@@ -769,41 +769,58 @@ export function GitGraphPanel(props: {
   const removeWorktree = useAtomCommand(vcsEnvironment.removeWorktree, { reportFailure: false });
   const canCheckout = useEnvironmentScope(props.environmentId, AuthSourceControlWriteScope);
   const loadGraphEvent = useEffectEvent(loadGraph);
-  const cacheKey =
+  // The repository's own status stream is the live signal: a commit, checkout,
+  // pull or fetch moves it, so the history re-reads instead of waiting for a tab
+  // switch. Working-tree edits keep the same signature and are ignored.
+  const statusQuery = useEnvironmentQuery(
     props.cwd === null
       ? null
-      : graphCacheKey({
+      : vcsEnvironment.status({
           environmentId: props.environmentId,
-          cwd: props.cwd,
-          includeRemotes: showRemotes,
-          limit,
-        });
-  const handledReloadToken = useRef(reloadToken);
+          input: { cwd: props.cwd },
+        }),
+  );
+  const lastLiveSignature = useRef<string | null>(null);
+  // Set by the read effect, so a live change or an action re-runs the read without
+  // a token input the read effect would only exist to observe.
+  const reloadGraphRef = useRef<(() => void) | null>(null);
+
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- The VCS status stream is the external source that moves the graph.
+  useEffect(() => {
+    if (statusQuery.data === null) return;
+    const next = graphLiveSignature(statusQuery.data);
+    const previous = lastLiveSignature.current;
+    lastLiveSignature.current = next;
+    if (previous === null || previous === next) return;
+    // A rebase moves HEAD many times; one read covers whatever landed meanwhile.
+    const timer = window.setTimeout(() => reloadGraphRef.current?.(), 400);
+    return () => window.clearTimeout(timer);
+  }, [statusQuery.data]);
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- The graph is read from the repository over RPC.
   useEffect(() => {
     const cwd = props.cwd;
-    if (cwd === null || cacheKey === null) {
+    if (cwd === null) {
       // oxlint-disable-next-line react/set-state-in-effect -- Clearing the selection resets the graph and its loading flag.
       setLoading(false);
       setGraph(null);
       setWorkingTree(null);
       return;
     }
-    const manual = handledReloadToken.current !== reloadToken;
-    handledReloadToken.current = reloadToken;
-    // Another right-panel tab unmounts this one, so a cached read paints at once and,
-    // while it is fresh, spares the repository a second identical read.
+    const cacheKey = graphCacheKey({
+      environmentId: props.environmentId,
+      cwd,
+      includeRemotes: showRemotes,
+      limit,
+    });
+    // Another right-panel tab unmounts this one, so a cached read paints at once
+    // and the read below replaces it.
     const cached = readCachedGraph(cacheKey);
     if (cached !== undefined) {
       setGraph(cached.result);
       setWorkingTree(cached.result.workingTree ?? null);
       setLoading(false);
       setLoadError(null);
-      if (!manual && isFreshGraph(cached)) {
-        setLoadingMore(false);
-        return;
-      }
     }
     let cancelled = false;
     let retryTimer: number | null = null;
@@ -838,20 +855,14 @@ export function GitGraphPanel(props: {
         setLoadingMore(false);
       });
     };
+    reloadGraphRef.current = () => load(1);
     load(1);
     return () => {
       cancelled = true;
+      reloadGraphRef.current = null;
       if (retryTimer !== null) window.clearTimeout(retryTimer);
     };
-  }, [
-    props.cwd,
-    props.environmentId,
-    limit,
-    // A reload request bumps the token without changing the query inputs.
-    reloadToken,
-    showRemotes,
-    cacheKey,
-  ]);
+  }, [props.cwd, props.environmentId, limit, showRemotes]);
 
   // Threads in this environment, so a checkout can name the thread that lives in
   // it (and a checkout without one can offer to start it).
@@ -983,10 +994,8 @@ export function GitGraphPanel(props: {
       input: { cwd, refName },
     });
     if (result._tag === "Success") {
-      // The graph's HEAD mark and branch labels are read, not subscribed, so a
-      // successful checkout only becomes visible after an explicit reload.
       showNotice(`Checked out ${result.value.refName ?? refName}`);
-      setReloadToken((token) => token + 1);
+      reloadGraphRef.current?.();
       return;
     }
     if (isAtomCommandInterrupted(result)) return;
@@ -1036,14 +1045,13 @@ export function GitGraphPanel(props: {
     }
     setConfirmPath(null);
     showNotice(`Removed ${target.branch}`);
-    setReloadToken((token) => token + 1);
+    reloadGraphRef.current?.();
   };
 
-  // The graph is read, not subscribed: a refresh re-reads it at the current limit
-  // and keeps what is on screen until the new read lands.
+  // A refresh re-reads at the current limit and keeps what is on screen until it lands.
   const reloadGraph = () => {
     setLoadError(null);
-    setReloadToken((token) => token + 1);
+    reloadGraphRef.current?.();
   };
 
   // Jumps to the commit a checkout has checked out, which is the fastest way to
@@ -1239,11 +1247,7 @@ export function GitGraphPanel(props: {
           title="Could not load the graph"
           body={loadError}
           action={
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setReloadToken((value) => value + 1)}
-            >
+            <Button size="sm" variant="outline" onClick={reloadGraph}>
               Retry
             </Button>
           }
