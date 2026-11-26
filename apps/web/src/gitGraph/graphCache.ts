@@ -1,16 +1,14 @@
-import type { VcsLogGraphResult } from "@t3tools/contracts";
+import type { VcsLogGraphResult, VcsStatusResult } from "@t3tools/contracts";
 
 export interface CachedGraph {
   readonly result: VcsLogGraphResult;
-  readonly readAt: number;
 }
 
 /**
  * A panel is unmounted whenever another right-panel tab is selected, so a graph
- * read survives that by living here. Within this window a remount paints the
- * cached read and does not re-read at all.
+ * read survives that by living here. A remount paints the cached read at once and
+ * re-reads behind it, so a stale paint never outlives the next visit either.
  */
-const FRESH_MS = 60_000;
 const MAX_ENTRIES = 12;
 const entries = new Map<string, CachedGraph>();
 
@@ -45,12 +43,28 @@ export function readCachedGraph(key: string): CachedGraph | undefined {
   return entry;
 }
 
-export function isFreshGraph(entry: CachedGraph, now = Date.now()): boolean {
-  return now - entry.readAt < FRESH_MS;
+export function rememberGraph(key: string, result: VcsLogGraphResult): void {
+  store(key, { result });
 }
 
-export function rememberGraph(key: string, result: VcsLogGraphResult, now = Date.now()): void {
-  store(key, { result, readAt: now });
+/**
+ * What the graph must re-read for: a moved ref or a commit landing on it. Edits
+ * inside the working tree change the status but not this signature, so typing in
+ * a file does not re-read the history.
+ */
+export function graphLiveSignature(
+  status: Pick<
+    VcsStatusResult,
+    "isRepo" | "refName" | "aheadCount" | "behindCount" | "hasWorkingTreeChanges"
+  >,
+): string {
+  return [
+    status.isRepo ? "repo" : "none",
+    status.refName ?? "",
+    String(status.aheadCount),
+    String(status.behindCount),
+    status.hasWorkingTreeChanges ? "dirty" : "clean",
+  ].join("\u0000");
 }
 
 export function forgetCachedGraph(key: string): void {

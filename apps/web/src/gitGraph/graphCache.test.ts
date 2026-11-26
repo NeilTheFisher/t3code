@@ -6,7 +6,7 @@ import {
   clearGraphCache,
   forgetCachedGraph,
   graphCacheKey,
-  isFreshGraph,
+  graphLiveSignature,
   readCachedGraph,
   rememberGraph,
 } from "./graphCache";
@@ -33,7 +33,7 @@ describe("git graph cache", () => {
   });
 
   it("returns what was remembered under the same query key", () => {
-    rememberGraph(key(), result("first"), 1_000);
+    rememberGraph(key(), result("first"));
 
     expect(readCachedGraph(key())?.result).toEqual(result("first"));
   });
@@ -51,13 +51,24 @@ describe("git graph cache", () => {
     ).toBeUndefined();
   });
 
-  it("treats a read younger than a minute as fresh and an older one as stale", () => {
-    rememberGraph(key(), result("first"), 1_000);
+  it("re-reads for a new commit, a checkout or a dirty tree", () => {
+    const status = {
+      isRepo: true,
+      refName: "main",
+      aheadCount: 0,
+      behindCount: 0,
+      hasWorkingTreeChanges: false,
+    };
+    const signature = graphLiveSignature(status);
 
-    const entry = readCachedGraph(key())!;
-    expect(isFreshGraph(entry, 1_000)).toBe(true);
-    expect(isFreshGraph(entry, 1_000 + 59_000)).toBe(true);
-    expect(isFreshGraph(entry, 1_000 + 60_000)).toBe(false);
+    expect(graphLiveSignature({ ...status })).toBe(signature);
+    // Saving a file changes the file list, not what the history reads for.
+    expect(graphLiveSignature({ ...status, hasWorkingTreeChanges: false })).toBe(signature);
+    expect(graphLiveSignature({ ...status, aheadCount: 1 })).not.toBe(signature);
+    expect(graphLiveSignature({ ...status, behindCount: 2 })).not.toBe(signature);
+    expect(graphLiveSignature({ ...status, refName: "release" })).not.toBe(signature);
+    expect(graphLiveSignature({ ...status, hasWorkingTreeChanges: true })).not.toBe(signature);
+    expect(graphLiveSignature({ ...status, isRepo: false })).not.toBe(signature);
   });
 
   it("drops the least recently read query past its bound", () => {
