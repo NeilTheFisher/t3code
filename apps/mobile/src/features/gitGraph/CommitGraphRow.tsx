@@ -2,7 +2,8 @@ import type { GraphRow } from "@t3tools/client-runtime/gitGraph/graphLayout";
 import type { VcsGraphCommit } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import { useGT, useMessages } from "gt-react-native";
-import { Platform, View, type ColorValue } from "react-native";
+import { useState } from "react";
+import { Platform, View, type ColorValue, type LayoutChangeEvent } from "react-native";
 import { Circle, Line, Path, Svg } from "react-native-svg";
 import { useResolveClassNames } from "uniwind";
 
@@ -24,24 +25,21 @@ const LANE_COLORS = ["#4a7fd4", "#2f9e6e", "#c08a2e", "#c85a54", "#8f6bd1"] as c
 function LaneGraph(props: {
   readonly row: GraphRow;
   readonly laneCount: number;
+  readonly height: number;
   readonly tip: boolean;
+  readonly selected: boolean;
   readonly background: ColorValue;
 }) {
-  const { row, laneCount, tip, background } = props;
+  const { row, laneCount, height, tip, selected, background } = props;
   const lanes = Math.max(1, laneCount);
   const spacing = Math.min(LANE_WIDTH, (MAX_GRAPH_WIDTH - LANE_INSET * 2) / lanes);
   const width = LANE_INSET * 2 + lanes * spacing;
-  const mid = COMMIT_ROW_HEIGHT / 2;
+  const mid = height / 2;
   const x = (lane: number) => LANE_INSET + lane * spacing;
   const color = (lane: number) => LANE_COLORS[lane % LANE_COLORS.length]!;
 
   return (
-    <Svg
-      width={width}
-      height={COMMIT_ROW_HEIGHT}
-      viewBox={`0 0 ${width} ${COMMIT_ROW_HEIGHT}`}
-      accessible={false}
-    >
+    <Svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} accessible={false}>
       {row.hasIncoming ? (
         <Line
           x1={x(row.lane)}
@@ -60,7 +58,7 @@ function LaneGraph(props: {
           x1={x(lane)}
           y1={0}
           x2={x(lane)}
-          y2={COMMIT_ROW_HEIGHT}
+          y2={height}
           stroke={color(lane)}
           strokeWidth={1.75}
           strokeLinecap="round"
@@ -75,8 +73,8 @@ function LaneGraph(props: {
             key={`parent-${parent.sha}`}
             d={
               fromX === toX
-                ? `M ${fromX} ${mid} V ${COMMIT_ROW_HEIGHT}`
-                : `M ${fromX} ${mid} C ${fromX} ${mid + 9}, ${toX} ${COMMIT_ROW_HEIGHT - 9}, ${toX} ${COMMIT_ROW_HEIGHT}`
+                ? `M ${fromX} ${mid} V ${height}`
+                : `M ${fromX} ${mid} C ${fromX} ${mid + 9}, ${toX} ${height - 9}, ${toX} ${height}`
             }
             fill="none"
             stroke={color(parent.lane)}
@@ -91,7 +89,7 @@ function LaneGraph(props: {
         cx={x(row.lane)}
         cy={mid}
         r={tip ? 4.5 : 3.5}
-        fill={tip ? color(row.lane) : background}
+        fill={tip || selected ? color(row.lane) : background}
         stroke={color(row.lane)}
         strokeWidth={2}
       />
@@ -136,8 +134,11 @@ export function CommitGraphRow(props: {
   const gt = useGT();
   const m = useMessages();
   const { commit, row, selected } = props;
+  const [graphHeight, setGraphHeight] = useState(COMMIT_ROW_HEIGHT);
   const screen = useResolveClassNames("bg-screen");
   const ripple = useResolveClassNames("bg-subtle-strong");
+  const onContentLayout = (event: LayoutChangeEvent) =>
+    setGraphHeight(event.nativeEvent.layout.height);
   const authoredAt = DateTime.toDateUtc(commit.authoredAt).toISOString();
   const age = relativeTime(authoredAt, props.nowMs, m);
   const { badges, hidden } = commitRefBadges(commit.refs, props.currentBranch);
@@ -164,11 +165,16 @@ export function CommitGraphRow(props: {
           <LaneGraph
             row={row}
             laneCount={props.laneCount}
+            height={graphHeight}
             tip={commit.refs.length > 0}
+            selected={selected}
             background={screen.backgroundColor ?? "transparent"}
           />
         </View>
-        <View className="min-w-0 flex-1 justify-center gap-1 border-b border-border-subtle px-3 py-2">
+        <View
+          className="min-w-0 flex-1 justify-center gap-1 border-b border-border-subtle px-3 py-2"
+          onLayout={onContentLayout}
+        >
           {badges.length > 0 ? (
             <View className="flex-row items-center gap-1 overflow-hidden">
               {badges.map((badge) => (
