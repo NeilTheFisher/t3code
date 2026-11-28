@@ -573,7 +573,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodePlatformCrypto.layer))(
         expect(yield* use(used)).toBe(issuedAt + 50 * day);
         expect(yield* listedExpiry(used)).toBe(issuedAt + 50 * day);
         expect(yield* use(outside)).toBeNull();
-        expect(yield* listedExpiry(outside)).toBe(issuedAt + 30 * day);
+        expect(yield* listedExpiry(outside)).toBe(issuedAt + 365 * day);
         expect(yield* serverAuth.revokeSession(revoked.sessionId)).toBe(true);
         expect(yield* use(revoked)).toBe("refused");
 
@@ -581,7 +581,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodePlatformCrypto.layer))(
         yield* TestClock.adjust("20 days");
         expect(yield* use(used)).toBe(issuedAt + 70 * day);
         expect(yield* use(idle)).toBe("refused");
-        expect(yield* use(outside)).toBe("refused");
+        expect(yield* use(outside)).toBeNull();
+        expect(yield* listedExpiry(outside)).toBe(issuedAt + 365 * day);
         expect(yield* use(revoked)).toBe("refused");
         expect(yield* listedExpiry(idle)).toBeUndefined();
         expect(yield* listedExpiry(revoked)).toBeUndefined();
@@ -589,6 +590,11 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodePlatformCrypto.layer))(
         // Renewed links still end 30 days after their last use.
         yield* TestClock.adjust("30 days");
         expect(yield* use(used)).toBe("refused");
+
+        // An MCP client that is not a peer link keeps its year, then expires.
+        yield* TestClock.adjust("300 days");
+        expect(yield* use(outside)).toBe("refused");
+        expect(yield* listedExpiry(outside)).toBeUndefined();
       }).pipe(Effect.provide(layerEnvironmentAuth({ mode: "web", host: "192.168.1.50" }))),
     );
 
