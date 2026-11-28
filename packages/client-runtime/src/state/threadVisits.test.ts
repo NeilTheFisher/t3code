@@ -34,6 +34,11 @@ function setup(threadName: string, initial: Omit<Shell, "environmentId" | "id"> 
   // Visits the server accepted; offline ones fail without reaching it.
   const visits: Array<VisitThreadInput> = [];
   const localVisits: Array<string> = [];
+  const notifiedVisits: Array<{
+    environmentId: EnvironmentId;
+    threadId: ThreadId;
+    visitedAt: string;
+  }> = [];
   let online = true;
   let pendingResult: Effect.Effect<void, string> | undefined;
   const attempts: Array<VisitThreadInput> = [];
@@ -55,12 +60,19 @@ function setup(threadName: string, initial: Omit<Shell, "environmentId" | "id"> 
         }),
     },
     markLocalVisit: (_ref, visitedAt) => localVisits.push(visitedAt),
+    onVisit: (ref, visitedAt) =>
+      notifiedVisits.push({
+        environmentId: ref.environmentId,
+        threadId: ref.threadId,
+        visitedAt,
+      }),
   });
   const registry = AtomRegistry.make();
   return {
     ref,
     visits,
     localVisits,
+    onVisits: notifiedVisits,
     attempts,
     deferNextVisit: () => {
       const deferred = Deferred.makeUnsafe<void, string>();
@@ -105,6 +117,27 @@ it("records the open once, then throttles streaming visits", () => {
   expect(t.visits.slice(1)).toEqual([{ threadId: t.ref.threadId, visitedAt: at(12) }]);
 });
 
+it("reports each dispatched visit with the watermark it used", () => {
+  using t = setup("thread-on-visit", { updatedAt: at(10), lastVisitedAt: at(0), latestRun: null });
+  t.mount();
+  expect(t.onVisits).toEqual([{ environmentId, threadId: t.ref.threadId, visitedAt: at(10) }]);
+
+  t.update({ updatedAt: at(20), latestRun: { completedAt: at(20) } });
+  expect(t.onVisits.map((visit) => visit.visitedAt)).toEqual([at(10), at(20)]);
+});
+
+it("does not report a visit the client never dispatches", () => {
+  using t = setup("thread-on-visit-seen", {
+    updatedAt: at(10),
+    lastVisitedAt: at(10),
+    latestRun: { completedAt: at(9) },
+  });
+  claimThreadOpen(environmentId, t.ref.threadId, Date.UTC(2026, 0, 1));
+  t.mount();
+  t.update({ lastVisitedAt: at(9) });
+  expect(t.onVisits).toEqual([]);
+});
+
 it("sends an unseen completion without waiting for the throttle", () => {
   using t = setup("thread-completion", {
     updatedAt: at(10),
@@ -115,7 +148,6 @@ it("sends an unseen completion without waiting for the throttle", () => {
   t.update({ updatedAt: at(20), latestRun: { completedAt: at(20) } });
   expect(t.visits.slice(1)).toEqual([{ threadId: t.ref.threadId, visitedAt: at(20) }]);
 });
-
 it("does not resend the open a palette pick already sent", () => {
   using t = setup("thread-palette", { updatedAt: at(10), lastVisitedAt: at(0), latestRun: null });
   claimThreadOpen(environmentId, t.ref.threadId, Date.UTC(2026, 0, 1));

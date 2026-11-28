@@ -14,6 +14,8 @@ import { useAtomMount, useAtomValue } from "@effect/atom-react";
 import { mobilePreferencesAtom } from "../../state/preferences";
 import { parseThreadKey, threadKey } from "@t3tools/client-runtime/state/entities";
 import { createThreadVisitTracker } from "@t3tools/client-runtime/state/thread-visits";
+import { androidAgentAlertGroup } from "@t3tools/shared/androidAgentAlert";
+import { dismissAndroidThreadNotification } from "../agent-awareness/androidNotifications";
 import { useChildThreadInputs, useThreadReportedModelSelection } from "../../state/entities";
 import { UsageLimitRecoveryCard } from "./UsageLimitRecoveryCard";
 import { useFocusEffect, useIsFocused, useNavigation } from "@react-navigation/native";
@@ -395,6 +397,11 @@ const threadVisitTracker = createThreadVisitTracker({
   threadShellAtom: (ref) => wakeAwareVisitShell(threadKey(ref)),
   sessionGenerationAtom: environmentCatalog.sessionGenerationAtom,
   visit: threadEnvironment.visit,
+  onVisit: (ref, visitedAt) =>
+    dismissAndroidThreadNotification(
+      androidAgentAlertGroup(ref.environmentId, ref.threadId),
+      visitedAt,
+    ),
 });
 
 // Past the composer's 180 ms height animation.
@@ -697,6 +704,13 @@ function ThreadDetailBody(
       recovery.runId === props.selectedThread.latestRun?.runId &&
       snoozedUntil !== null &&
       Date.parse(snoozedUntil) === Date.parse(recovery.resetAt);
+    const visitThreadHere = (visitedAt: string) => {
+      dismissAndroidThreadNotification(
+        androidAgentAlertGroup(target.environmentId, target.input.threadId),
+        visitedAt,
+      );
+      return visitThread({ ...target, input: { ...target.input, visitedAt } });
+    };
     const result =
       action === "stop"
         ? await interruptThreadTurn(target)
@@ -716,10 +730,7 @@ function ThreadDetailBody(
             : await unsnoozeThread({ ...target, input: { ...target.input, reason: "user" } })
           : action === "unsettle"
             ? await unsettleThread({ ...target, input: { ...target.input, reason: "user" } })
-            : await visitThread({
-                ...target,
-                input: { ...target.input, visitedAt: wokeAt ?? lifecycleNow },
-              });
+            : await visitThreadHere(wokeAt ?? lifecycleNow);
     props.setStatusRequests((current) =>
       current[request.threadKey] !== request
         ? current

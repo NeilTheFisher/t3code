@@ -150,6 +150,38 @@ describe("FCM delivery", () => {
     },
   );
 
+  it.effect("sends a dismissal without a collapse key so a cached app still wakes", () => {
+    const requests: HttpClientRequest.HttpClientRequest[] = [];
+    return Effect.gen(function* () {
+      const client = yield* FcmClient.FcmClient;
+      yield* client.send({
+        ...input,
+        data: { t3_kind: "agent_dismiss", dismiss_group: "group", read_at: "now" },
+        collapseKey: null,
+      });
+      const body = requests[1]!.body;
+      if (body._tag !== "Uint8Array") throw new Error("Expected encoded FCM body");
+      expect(decodeJson(new TextDecoder().decode(body.body))).toEqual({
+        message: {
+          token: input.token,
+          data: { t3_kind: "agent_dismiss", dismiss_group: "group", read_at: "now" },
+          android: {
+            priority: "HIGH",
+            ttl: "300s",
+            restricted_package_name: input.packageName,
+          },
+        },
+      });
+    }).pipe(
+      Effect.provide(
+        layerTest(requests, [
+          Response.json({ access_token: "access-token" }),
+          Response.json({ name: "dismiss" }),
+        ]),
+      ),
+    );
+  });
+
   it.effect("invalidates authorization after 401 and recognizes unregistered device tokens", () => {
     const requests: HttpClientRequest.HttpClientRequest[] = [];
     return Effect.gen(function* () {

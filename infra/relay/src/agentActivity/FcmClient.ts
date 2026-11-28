@@ -58,6 +58,11 @@ export class FcmClient extends Context.Service<
       readonly packageName: string | null;
       readonly data: Readonly<Record<string, string>>;
       readonly alert: boolean;
+      /**
+       * Collapsible messages are deferred while the app is cached. A dismiss
+       * needs prompt delivery, so it passes null to stay non-collapsible.
+       */
+      readonly collapseKey?: string | null;
     }) => Effect.Effect<{ readonly unregistered: boolean }, FcmClientError>;
   }
 >()("t3code-relay/agentActivity/FcmClient") {}
@@ -122,6 +127,12 @@ const make = Effect.gen(function* () {
       if (Option.isNone(account))
         return yield* new FcmClientError({ operation: "configuration", status: null });
       const token = yield* accessToken.pipe(Effect.tapError(() => invalidateToken));
+      const collapseKey =
+        input.collapseKey === undefined
+          ? input.alert
+            ? null
+            : "t3-agent-activity"
+          : input.collapseKey;
       const response = yield* HttpClientRequest.post(
         `https://fcm.googleapis.com/v1/projects/${encodeURIComponent(account.value.project_id)}/messages:send`,
       ).pipe(
@@ -133,7 +144,7 @@ const make = Effect.gen(function* () {
             android: {
               priority: "HIGH",
               ttl: "300s",
-              ...(!input.alert ? { collapse_key: "t3-agent-activity" } : {}),
+              ...(collapseKey === null ? {} : { collapse_key: collapseKey }),
               ...(input.packageName ? { restricted_package_name: input.packageName } : {}),
             },
           },

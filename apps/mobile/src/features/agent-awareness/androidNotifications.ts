@@ -6,6 +6,7 @@ interface AndroidAgentNotifications {
   configure(deviceId: string, userId: string, scheme: string, ongoingEnabled: boolean): void;
   clear(): void;
   setThreadOnScreen?(path: string | null): void;
+  dismissThread?(group: string, readAt: string): void;
   subscribeToTopic?(topic: string): void;
   openLiveUpdateSettings?(): boolean;
   showShowcaseActivity?(scheme: string, data: Record<string, string>): void;
@@ -53,6 +54,14 @@ export function clearAndroidAgentNotifications(): void {
 
 export function setAndroidThreadOnScreen(path: string | null): void {
   native?.setThreadOnScreen?.(path);
+}
+
+/**
+ * Clears this thread's card after it was read, and records the read so a late
+ * terminal alert for the same thread is dropped.
+ */
+export function dismissAndroidThreadNotification(group: string, readAt: string): void {
+  native?.dismissThread?.(group, readAt);
 }
 
 export function supportsAndroidLiveUpdateSettings(): boolean {

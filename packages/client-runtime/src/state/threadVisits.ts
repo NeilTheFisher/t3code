@@ -45,6 +45,11 @@ export interface ThreadVisitTrackerOptions {
    */
   readonly markLocalVisit?: (ref: ScopedThreadRef, visitedAt: string) => void;
   /**
+   * Runs when the client records a visit, before the server acknowledges it,
+   * so a platform can mirror the read locally.
+   */
+  readonly onVisit?: (ref: ScopedThreadRef, visitedAt: string) => void;
+  /**
    * Whether the user can see the thread right now. While false, nothing is
    * recorded; the open and the watermark catch up when it turns true.
    */
@@ -100,6 +105,7 @@ export function createThreadVisitTracker(options: ThreadVisitTrackerOptions) {
         lastDispatchedUpdatedAt = visitedAt;
         lastDispatchAt = Date.now();
         lastDispatchGeneration = registry.get(sessionGenerationAtom);
+        options.onVisit?.(ref, visitedAt);
         void runAtomCommand(
           registry,
           options.visit,

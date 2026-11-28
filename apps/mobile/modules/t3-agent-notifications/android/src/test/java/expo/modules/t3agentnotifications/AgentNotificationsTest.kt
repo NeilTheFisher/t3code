@@ -7,6 +7,7 @@ import android.app.NotificationChannel
 import android.app.Notification
 import android.app.NotificationManager
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
@@ -24,6 +25,10 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 
 abstract class AgentNotificationsFixture {
   protected lateinit var context: Application
@@ -817,5 +822,163 @@ class AgentNotificationsCompletionTest : AgentNotificationsFixture() {
     shadowOf(manager).setNotificationsEnabled(false)
     AgentNotifications.receive(context, update("revoked-permission", true))
     assertEquals(1, manager.activeNotifications.size)
+  }
+}
+
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [24, 26, 33, 36], manifest = Config.NONE)
+class AgentNotificationsDismissTest : AgentNotificationsFixture() {
+  private fun iso(millis: Long): String {
+    val format = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
+    format.timeZone = TimeZone.getTimeZone("UTC")
+    return format.format(Date(millis))
+  }
+
+  private fun terminal(
+    alertAt: Long,
+    id: String = "terminal-$alertAt",
+    group: String = "environment/thread",
+    body: String = "Done: Test project"
+  ) = update(id, false) + mapOf(
+    "alert_group" to group,
+    "alert_phase" to "completed",
+    "alert_at" to iso(alertAt),
+    "alert_body" to body,
+    "alert_path" to "/threads/$group",
+  )
+
+  private fun pending(alertAt: Long) = update("pending-$alertAt", false) + mapOf(
+    "alert_group" to "environment/thread",
+    "alert_phase" to "waiting_for_approval",
+    "alert_at" to iso(alertAt),
+    "alert_body" to "Approval: Test project",
+  )
+
+  @Test
+  fun aThreadsAlertsReplaceOneCardInPlace() {
+    val now = System.currentTimeMillis()
+    AgentNotifications.receive(context, terminal(now, id = "first"))
+    val first = manager.activeNotifications.single()
+    AgentNotifications.receive(context, terminal(now, id = "second", body = "Failed: Test project"))
+
+    val second = manager.activeNotifications.single()
+    assertEquals(0, second.id)
+    assertEquals(first.id, second.id)
+    assertEquals(first.tag, second.tag)
+    assertEquals(
+      "Failed: Test project",
+      second.notification.extras.getCharSequence(Notification.EXTRA_TEXT).toString()
+    )
+  }
+
+  @Test
+  fun readingADismissedThreadDropsOnlyItsCard() {
+    val now = System.currentTimeMillis()
+    AgentNotifications.receive(context, terminal(now, id = "one", group = "environment/one"))
+    AgentNotifications.receive(context, terminal(now, id = "two", group = "environment/two"))
+
+    AgentNotifications.dismissThread(context, "environment/one", iso(now))
+
+    assertEquals(
+      setOf("environment/two"),
+      manager.activeNotifications.map { it.notification.group }.toSet()
+    )
+  }
+
+  @Test
+  fun readingDropsALateTerminalAlertForThatThread() {
+    val now = System.currentTimeMillis()
+    AgentNotifications.dismissThread(context, "environment/thread", iso(now))
+
+    AgentNotifications.receive(context, terminal(now - 1000))
+
+    assertTrue(manager.activeNotifications.isEmpty())
+  }
+
+  @Test
+  fun aTerminalAlertAfterTheReadStillPosts() {
+    val now = System.currentTimeMillis()
+    AgentNotifications.dismissThread(context, "environment/thread", iso(now - 60_000))
+
+    AgentNotifications.receive(context, terminal(now - 30_000))
+
+    assertEquals(1, manager.activeNotifications.size)
+  }
+
+  @Test
+  fun answeringAReadThreadStillAlertsItsCompletion() {
+    val now = System.currentTimeMillis()
+    AgentNotifications.receive(context, pending(now - 60_000))
+    AgentNotifications.dismissThread(context, "environment/thread", iso(now - 30_000))
+    AgentNotifications.receive(context, terminal(now))
+
+    assertEquals(
+      "Done: Test project",
+      manager.activeNotifications.single().notification.extras
+        .getCharSequence(Notification.EXTRA_TEXT).toString()
+    )
+  }
+
+  @Test
+  fun aPendingCardSurvivesReading() {
+    val now = System.currentTimeMillis()
+    AgentNotifications.receive(context, pending(now))
+
+    AgentNotifications.dismissThread(context, "environment/thread", iso(now))
+
+    assertEquals(1, manager.activeNotifications.size)
+  }
+
+  @Test
+  fun aNewPendingPhaseRearmsAlertsForTheThread() {
+    val now = System.currentTimeMillis()
+    AgentNotifications.dismissThread(context, "environment/thread", iso(now))
+    AgentNotifications.receive(context, pending(now - 1000))
+    AgentNotifications.receive(context, terminal(now - 500, id = "after-pending"))
+
+    assertEquals(
+      "Done: Test project",
+      manager.activeNotifications.single().notification.extras
+        .getCharSequence(Notification.EXTRA_TEXT).toString()
+    )
+  }
+
+  @Test
+  fun readMarkersKeepOnlyTheNewestGroups() {
+    val now = System.currentTimeMillis()
+    for (index in 0..204) {
+      AgentNotifications.dismissThread(context, "environment/thread-$index", iso(now))
+    }
+    val prefs = context.getSharedPreferences("t3-agent-notifications", Context.MODE_PRIVATE)
+    assertEquals(200, prefs.getString("readGroupsOrdered", "")!!.split('\n').size)
+
+    AgentNotifications.receive(
+      context,
+      terminal(now - 1000, group = "environment/thread-0")
+    )
+    assertEquals(1, manager.activeNotifications.size)
+    AgentNotifications.receive(
+      context,
+      terminal(now - 1000, group = "environment/thread-204")
+    )
+    assertEquals(1, manager.activeNotifications.size)
+  }
+
+  @Test
+  fun readingOneThreadKeepsGroupedBatchAlertsAndTheirSummary() {
+    val batch = update("batch", false).filterKeys { !it.startsWith("alert_") }
+    AgentNotifications.receive(
+      context,
+      batch + mapOf("alert_id" to "batch-a", "alert_title" to "Project A")
+    )
+    AgentNotifications.receive(
+      context,
+      batch + mapOf("alert_id" to "batch-b", "alert_title" to "Project B")
+    )
+    assertEquals(3, manager.activeNotifications.size)
+
+    AgentNotifications.dismissThread(context, "environment/thread", iso(System.currentTimeMillis()))
+
+    assertEquals(3, manager.activeNotifications.size)
   }
 }

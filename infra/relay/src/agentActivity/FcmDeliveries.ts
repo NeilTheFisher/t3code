@@ -5,6 +5,7 @@ import {
   RelayAgentAwarenessPreferences,
   type RelayDeliveryResult,
 } from "@t3tools/contracts/relay";
+import { androidAgentAlertGroup } from "@t3tools/shared/androidAgentAlert";
 import * as Digest from "effect/crypto/Digest";
 import type * as PlatformError from "effect/PlatformError";
 import * as Context from "effect/Context";
@@ -67,7 +68,11 @@ export function androidAlertForState(
   const notification = notificationForActivity({ ...state, status: statusForPhase(state.phase) });
   return {
     alert_id: JSON.stringify([state.environmentId, state.threadId, state.phase, state.updatedAt]),
-    alert_group: JSON.stringify([state.environmentId, state.threadId]),
+    alert_group: androidAgentAlertGroup(state.environmentId, state.threadId),
+    // The device drops a late alert at or before its read watermark, and keeps
+    // a waiting card until it is answered.
+    alert_at: state.updatedAt,
+    alert_phase: state.phase,
     alert_title: notification.title,
     alert_body: notification.body,
     alert_path: notification.deepLink,
@@ -93,7 +98,9 @@ export function androidAlertForAggregate(input: {
     const notification = notificationForActivity(first);
     return {
       alert_id: JSON.stringify([first.environmentId, first.threadId, first.phase, first.updatedAt]),
-      alert_group: JSON.stringify([first.environmentId, first.threadId]),
+      alert_group: androidAgentAlertGroup(first.environmentId, first.threadId),
+      alert_at: first.updatedAt,
+      alert_phase: first.phase,
       alert_title: notification.title,
       alert_body: notification.body,
       alert_path: notification.deepLink,

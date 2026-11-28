@@ -35,6 +35,12 @@ class T3AgentNotificationsModule : Module() {
       AgentNotifications.setThreadOnScreen(path)
     }
 
+    Function("dismissThread") { group: String, readAt: String ->
+      appContext.reactContext?.let {
+        AgentNotifications.dismissThread(it, group, readAt)
+      }
+    }
+
     Function("subscribeToTopic") { topic: String ->
       FirebaseMessaging.getInstance().subscribeToTopic(topic).addOnCompleteListener {}
     }

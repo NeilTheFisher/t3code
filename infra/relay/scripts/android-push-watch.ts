@@ -11,9 +11,11 @@ import {
 } from "@t3tools/contracts";
 import type { RelayAgentActivityState } from "@t3tools/contracts/relay";
 import { projectThreadAwarenessV2 } from "@t3tools/shared/agentAwareness";
+import { androidAgentAlertGroup } from "@t3tools/shared/androidAgentAlert";
 import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";
 import * as Clock from "effect/Clock";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
@@ -35,6 +37,10 @@ import * as FcmAssertionSigner from "../src/agentActivity/FcmAssertionSigner.ts"
 import * as FcmClient from "../src/agentActivity/FcmClient.ts";
 import * as FcmDeliveries from "../src/agentActivity/FcmDeliveries.ts";
 import { makeAggregateState } from "../src/agentActivity/agentActivityAggregate.ts";
+import {
+  completionReadPast,
+  visitAdvanceDismissal,
+} from "../src/agentActivity/androidPushDecisions.ts";
 
 // Either one device's FCM token, or a topic every installed app subscribes to.
 // The topic form needs no per-device registration on the host.
@@ -68,6 +74,8 @@ const readFile = (path: string) =>
     catch: (cause) => new WatchReadFileError({ path, cause }),
   });
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+const isoOrNull = (value: DateTime.Utc | null | undefined): string | null =>
+  value == null ? null : DateTime.formatIso(value);
 class WatchUnregisteredDeviceError extends Schema.TaggedError<WatchUnregisteredDeviceError>()(
   "WatchUnregisteredDeviceError",
   {},
@@ -155,6 +163,8 @@ const main = Effect.gen(function* () {
     const projects = new Map<string, OrchestrationProjectShell>();
     const threads = new Map<string, OrchestrationV2ThreadShell>();
     let states = new Map<string, RelayAgentActivityState>();
+    // Seeded from each thread's current visit watermark; only a later value is a read.
+    const lastVisited = new Map<string, string | null>();
     let previouslyActive = false;
     yield* Effect.logInfo("Watching this paired environment for Android push verification.");
     yield* rpc[ORCHESTRATION_V2_WS_METHODS.subscribeShell]({}).pipe(
@@ -182,6 +192,7 @@ const main = Effect.gen(function* () {
               threads.delete(item.threadId);
               break;
           }
+          if (item.kind === "thread.removed") lastVisited.delete(item.threadId);
           const next = new Map<string, RelayAgentActivityState>();
           for (const thread of threads.values()) {
             const project = projects.get(thread.projectId);
@@ -193,13 +204,78 @@ const main = Effect.gen(function* () {
             });
             if (state) next.set(thread.id, state);
           }
-          const state = item.kind === "thread.updated" ? next.get(item.thread.id) : undefined;
+          const updatedThread = item.kind === "thread.updated" ? item.thread : null;
+          const state = updatedThread ? next.get(updatedThread.id) : undefined;
           const previous = state ? states.get(state.threadId) : undefined;
           const now = yield* Clock.currentTimeMillis;
-          const alert =
+          const candidate =
             state && state.phase !== previous?.phase && item.kind !== "snapshot"
               ? FcmDeliveries.androidAlertForState(state, preferences, now)
               : null;
+          const lastVisitedAt = updatedThread ? isoOrNull(updatedThread.lastVisitedAt) : null;
+          // A completion the thread was already read past must not alert, even
+          // when FCM delivers it after the read landed.
+          const readPast =
+            updatedThread !== null &&
+            state !== undefined &&
+            completionReadPast({
+              phase: state.phase,
+              stateUpdatedAt: state.updatedAt,
+              latestRunCompletedAt: isoOrNull(updatedThread.latestRunCompletedAt),
+              lastVisitedAt,
+            });
+          const alert = candidate !== null && !readPast ? candidate : null;
+          // A resume snapshot can omit threads, so watermarks from earlier
+          // updates stay: losing them would hide reads done while reconnecting.
+          const dismissals: Array<{
+            threadId: OrchestrationV2ThreadShell["id"];
+            readAt: string;
+          }> = [];
+          const trackVisit = (thread: OrchestrationV2ThreadShell) => {
+            const visitedAt = isoOrNull(thread.lastVisitedAt);
+            const dismissal = visitAdvanceDismissal({
+              phase: next.get(thread.id)?.phase ?? null,
+              previousVisitedAt: lastVisited.has(thread.id)
+                ? lastVisited.get(thread.id)
+                : undefined,
+              nextVisitedAt: visitedAt,
+            });
+            lastVisited.set(thread.id, visitedAt);
+            if (dismissal !== null) {
+              dismissals.push({ threadId: thread.id, readAt: dismissal.readAt });
+            }
+          };
+          if (updatedThread !== null) trackVisit(updatedThread);
+          if (item.kind === "snapshot") {
+            for (const thread of threads.values()) trackVisit(thread);
+          }
+          const skippedReadAt = candidate !== null && readPast ? lastVisitedAt : null;
+          if (skippedReadAt !== null && updatedThread !== null) {
+            dismissals.push({ threadId: updatedThread.id, readAt: skippedReadAt });
+          }
+          const recipient =
+            "deviceId" in device
+              ? androidRecipientData(device.userId, device.deviceId, null)
+              : { broadcast: "1" };
+          const target = "topic" in device ? { topic: device.topic } : { token: device.token };
+          const sendOptions = { ...target, packageName: device.packageName, alert: false };
+          for (const dismissal of dismissals) {
+            const result = yield* sender.send({
+              ...sendOptions,
+              collapseKey: null,
+              data: fitFcmData({
+                t3_kind: "agent_dismiss",
+                ...recipient,
+                dismiss_group: androidAgentAlertGroup(
+                  config.environment.environmentId,
+                  dismissal.threadId,
+                ),
+                read_at: dismissal.readAt,
+              }),
+            });
+            if (result.unregistered) return yield* new WatchUnregisteredDeviceError({});
+            yield* Effect.logInfo(`Android alert card dismissed: ${dismissal.threadId}`);
+          }
           const aggregate = makeAggregateState({
             activeStates: [...next.values()],
             terminalState: null,
@@ -210,14 +286,11 @@ const main = Effect.gen(function* () {
           states = next;
           if ((!active && !previouslyActive && !alert) || (same && !alert)) return;
           const result = yield* sender.send({
-            ...("topic" in device ? { topic: device.topic } : { token: device.token }),
-            packageName: device.packageName,
+            ...sendOptions,
             alert: alert !== null,
             data: fitFcmData({
               t3_kind: "agent_activity",
-              ...("deviceId" in device
-                ? androidRecipientData(device.userId, device.deviceId, null)
-                : { broadcast: "1" }),
+              ...recipient,
               updated_at: String(now),
               ...androidActivityData(aggregate),
               ...alert,

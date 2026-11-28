@@ -17,14 +17,23 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ProcessLifecycleOwner
 import com.google.firebase.messaging.RemoteMessage
 import expo.modules.notifications.service.ExpoFirebaseMessagingService
+import org.json.JSONArray
 import java.security.MessageDigest
+import java.text.SimpleDateFormat
+import java.util.Locale
+import java.util.TimeZone
 
 class AgentMessagingService : ExpoFirebaseMessagingService() {
   override fun onMessageReceived(remoteMessage: RemoteMessage) {
-    if (remoteMessage.data["t3_kind"] == "agent_activity") {
-      AgentNotifications.receive(this, remoteMessage.data)
-    } else {
-      super.onMessageReceived(remoteMessage)
+    when (remoteMessage.data["t3_kind"]) {
+      "agent_activity" -> AgentNotifications.receive(this, remoteMessage.data)
+      // Sent when any client reads the thread, so its card leaves this phone too.
+      "agent_dismiss" -> AgentNotifications.dismissThread(
+        this,
+        remoteMessage.data["dismiss_group"],
+        remoteMessage.data["read_at"]
+      )
+      else -> super.onMessageReceived(remoteMessage)
     }
   }
 }
@@ -53,6 +62,10 @@ object AgentNotifications {
   private const val MAX_MESSAGE_AGE_MS = 10 * 60 * 1000L
   private const val RUNNING_LIFETIME_MS = 2 * 60 * 60 * 1000L
   private const val MAX_LIFETIME_MS = 24 * 60 * 60 * 1000L
+  private const val MAX_READ_GROUPS = 200
+  private const val READ_GROUPS = "readGroupsOrdered"
+  private const val READ_AT_PREFIX = "readAt:"
+  private const val ALERT_PHASE_PREFIX = "alertPhase:"
 
   @Synchronized
   fun configure(
@@ -107,6 +120,26 @@ object AgentNotifications {
       Context.MODE_PRIVATE
     ).edit().putBoolean("dismissed", true).apply()
     cancelActivity(context)
+  }
+
+  /**
+   * Removes one thread's card after it was read on this phone or another client.
+   * The read watermark it records drops a terminal alert that FCM delivers late.
+   */
+  @Synchronized
+  fun dismissThread(context: Context, group: String?, readAt: String?) {
+    if (group.isNullOrBlank()) return
+    val prefs = context.getSharedPreferences(STORE, Context.MODE_PRIVATE)
+    // A card that still waits for an answer stays until the user answers it.
+    if (prefs.getString(alertPhaseKey(group), null).isPendingPhase()) return
+    val manager = manager(context)
+    manager.activeNotifications.filter {
+      it.tag == threadAlertTag(group) && it.notification.group == group
+    }
+      .forEach { manager.cancel(it.tag, it.id) }
+    manager.cancel("$ALERT_TAG-summary:$group", 0)
+    val readAtMs = epochMillis(readAt) ?: return
+    rememberReadAt(prefs, group, readAtMs)
   }
 
   @Synchronized
@@ -166,7 +199,16 @@ object AgentNotifications {
       )
       val visibleThread = threadOnScreen
       val onScreen = resumed && visibleThread != null && data["alert_path"] == visibleThread
-      if (!onScreen) {
+      val group = data["alert_group"]?.takeIf { it.isNotBlank() }
+      val phase = data["alert_phase"]
+      if (group != null) rememberAlertPhase(prefs, group, phase)
+      // Reading is recorded per thread, so a late alert cannot un-dismiss it.
+      val readPast = group != null && phase.isPendingPhase().not() &&
+        alertTimestampMs(data)?.let { alertAt ->
+          val readAt = prefs.getLong(readAtKey(group), 0)
+          readAt > 0 && alertAt <= readAt
+        } == true
+      if (!onScreen && !readPast) {
         postAlert(context, scheme, data, alertId)
       }
       prefs.edit().remove("seenAlerts").putString(
@@ -174,7 +216,7 @@ object AgentNotifications {
         (seen.takeLast(63) + alertId).joinToString("\n")
       ).apply()
       // Android drops posts to a blocked channel, so that alert shows nothing.
-      return !onScreen && (
+      return !onScreen && !readPast && (
         Build.VERSION.SDK_INT < 26 ||
           manager(context).getNotificationChannel(ALERT_CHANNEL)?.importance !=
           NotificationManager.IMPORTANCE_NONE
@@ -195,7 +237,7 @@ object AgentNotifications {
     val threadGroup = data["alert_group"]?.takeIf { it.isNotBlank() }
     // alert_id is unique per turn; keying on the thread makes its next alert replace this one.
     // The tag carries the whole group, since distinct groups can share a String hash.
-    val tag = threadGroup?.let { "$ALERT_THREAD_TAG$it" } ?: ALERT_TAG
+    val tag = threadGroup?.let { threadAlertTag(it) } ?: ALERT_TAG
     val id = if (threadGroup != null) 0 else alertId.hashCode()
     val group = threadGroup ?: ALERT_TAG
     val notification = base(context, ALERT_CHANNEL)
@@ -236,6 +278,54 @@ object AgentNotifications {
       .setContentIntent(contentIntent(context, scheme, data["alert_path"], 0))
       .build()
     manager(context).notify("$ALERT_TAG-summary:$group", 0, summary)
+  }
+
+  private fun threadAlertTag(group: String) = "$ALERT_THREAD_TAG$group"
+
+  private fun readAtKey(group: String) = "$READ_AT_PREFIX$group"
+
+  private fun alertPhaseKey(group: String) = "$ALERT_PHASE_PREFIX$group"
+
+  private fun String?.isPendingPhase() =
+    this == "waiting_for_approval" || this == "waiting_for_input"
+
+  // A live wait is protected from dismissal, and answering it re-arms the
+  // thread: a pending phase clears the read watermark an earlier read left.
+  private fun rememberAlertPhase(prefs: SharedPreferences, group: String, phase: String?) {
+    val edit = prefs.edit()
+    if (phase.isPendingPhase()) {
+      edit.putString(alertPhaseKey(group), phase).remove(readAtKey(group))
+    } else {
+      edit.remove(alertPhaseKey(group))
+    }
+    edit.apply()
+  }
+
+  private fun rememberReadAt(prefs: SharedPreferences, group: String, readAt: Long) {
+    val ordered = prefs.getString(READ_GROUPS, null)?.split('\n')?.filter { it.isNotEmpty() }
+      .orEmpty()
+    val next = (ordered - group) + group
+    val kept = next.takeLast(MAX_READ_GROUPS)
+    val edit = prefs.edit().putString(READ_GROUPS, kept.joinToString("\n"))
+    for (old in next.take(next.size - kept.size)) edit.remove(readAtKey(old))
+    edit.putLong(readAtKey(group), readAt).apply()
+  }
+
+  // `alert_at` is ISO or epoch millis; older payloads only carry it inside `alert_id`.
+  private fun alertTimestampMs(data: Map<String, String>): Long? =
+    epochMillis(data["alert_at"]) ?: runCatching {
+      val parts = JSONArray(data["alert_id"])
+      epochMillis(if (parts.length() >= 4) parts.optString(3) else null)
+    }.getOrNull()
+
+  private fun epochMillis(value: String?): Long? {
+    if (value.isNullOrBlank()) return null
+    value.toLongOrNull()?.let { return it }
+    return runCatching {
+      val format = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
+      format.timeZone = TimeZone.getTimeZone("UTC")
+      format.parse(value)?.time
+    }.getOrNull()
   }
 
   /**
